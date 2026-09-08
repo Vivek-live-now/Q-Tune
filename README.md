@@ -4,13 +4,13 @@ A portable, standalone music player built on the ESP32-S3 SuperMini board, inher
 
 ## Overview
 
-Q-Tune provides reliable, low-latency audio playback from an SPI microSD card through an I²S DAC/amplifier (MAX98357A) driving a speaker, paired with an interactive 1.3" SPI OLED display, 3 debounced control buttons, battery voltage monitoring, and WS2812 RGB status LED.
+Q-Tune provides reliable, low-latency audio playback from an SPI microSD card through an I²S DAC/amplifier (MAX98357A) driving a speaker, paired with an interactive 1.3" SPI OLED display, 3 debounced control buttons, battery voltage monitoring, WS2812 RGB status LED, and INMP441 MEMS microphone audio spectrum visualizers.
 
 ---
 
 ## Hardware Architecture & Pin Allocation Matrix
 
-The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unneeded watch peripherals (IR TX/RX, Buzzer) to audio and SD card interfaces.
+The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unneeded watch peripherals (IR TX/RX, Buzzer) to audio, microphone, and SD card interfaces.
 
 ### 1. Shared SPI Bus (OLED Display + microSD Card)
 | Peripheral | Signal | GPIO | Notes |
@@ -23,12 +23,13 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 | OLED | RST | 8 | Preserved from Q-Watch |
 | microSD | CS | 41 | Allocated from Q-Watch Reserve pin |
 
-### 2. I²S Audio Output (MAX98357A Amplifier)
-| Signal | GPIO | Notes |
-| :--- | :--- | :--- |
-| BCLK (Continuous Serial Clock) | 17 | Reclaimed from Q-Watch IR RX |
-| LRCLK / WS (Word Select) | 18 | Reclaimed from Q-Watch IR TX |
-| DOUT (Serial Data Output) | 42 | Allocated from Q-Watch Reserve pin |
+### 2. I²S Audio Output (MAX98357A) & INMP441 MEMS Microphone
+| Peripheral | Signal | GPIO | Notes |
+| :--- | :--- | :--- | :--- |
+| Audio Output / Mic | BCLK (Continuous SCK) | 17 | Reclaimed from Q-Watch IR RX |
+| Audio Output / Mic | LRCLK / WS (Word Select) | 18 | Reclaimed from Q-Watch IR TX |
+| MAX98357A DAC | DOUT (Serial Data Output) | 42 | Allocated from Q-Watch Reserve pin |
+| INMP441 Mic | DIN (Serial Data Input) | 44 | Reclaimed UART0 RX / Expansion |
 
 #### MAX98357A SD_MODE & MCLK Configuration
 - **MCLK**: Not required by MAX98357A (uses internal PLL).
@@ -54,7 +55,7 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 | Onboard RGB LED | 48 | Built-in WS2812 RGB LED |
 
 ### 6. Reserved & Avoided Pins
-- **Hardware UART0 Debugging:** GPIO 43 (TX), GPIO 44 (RX).
+- **Hardware UART0 Debugging:** GPIO 43 (TX).
 - **System / Boot Strapping Pins (STRICTLY AVOIDED):** GPIO 0, 3, 45, 46.
 
 ---
@@ -69,7 +70,7 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 ## File System & Audio Format Requirements
 
 - **Directory:** `/music/`
-- **Supported Format:** Uncompressed PCM 16-bit WAV files at 44.1 kHz (Mono or Stereo).
+- **Supported Formats:** Extensible `AudioDecoder` framework for WAV, MP3, and FLAC files.
 - **Sample Track Path:** `/music/song.wav`
 
 ---
@@ -86,6 +87,7 @@ On startup, Q-Tune launches an interactive hardware diagnostic menu allowing ver
 7. **Battery ADC** - Live voltage & percentage display
 8. **RGB LED Test** - WS2812 color cycle
 9. **I2S Audio Test** - Synthesized 1kHz test tone through MAX98357A
+10. **INMP441 Mic Visualizer** - Audio spectrum and MilkDrop-style visualizer presets
 
 ---
 
@@ -96,5 +98,5 @@ On startup, Q-Tune launches an interactive hardware diagnostic menu allowing ver
    ```bash
    pio run --target upload
    ```
-3. Format a microSD card (FAT32), create a `/music/` folder, and copy 16-bit 44.1kHz WAV files into it.
+3. Format a microSD card (FAT32), create a `/music/` folder, and copy 16-bit 44.1kHz WAV, MP3, or FLAC files into it.
 4. Insert the card into Q-Tune and power on.
