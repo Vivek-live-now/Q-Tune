@@ -10,7 +10,8 @@ static const char* testNames[] = {
     "7. Battery ADC",
     "8. RGB LED Test",
     "9. I2S Audio Test",
-    "10. INMP441 Mic Test"
+    "10. INMP441 Mic Test",
+    "11. FiiO KA11 USB DAC"
 };
 
 Diagnostics::Diagnostics() : selectedIndex(0) {}
@@ -73,6 +74,7 @@ void Diagnostics::executeTest(int index) {
         case 7: testRGBLED(); break;
         case 8: testI2SAudio(); break;
         case 9: testINMP441Mic(); break;
+        case 10: testFiiOKA11USB(); break;
     }
 }
 
@@ -279,6 +281,20 @@ void Diagnostics::testINMP441Mic() {
             p = (VisualizerPreset)((p + 1) % 4);
         }
         delay(30);
+    }
+}
+
+void Diagnostics::testFiiOKA11USB() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.drawStr(0, 10, "FiiO KA11 USB DAC:");
+    u8g2.drawStr(0, 25, "D-: GPIO 19");
+    u8g2.drawStr(0, 38, "D+: GPIO 20");
+    u8g2.drawStr(0, 51, "USB Host (CS43131)");
+    u8g2.drawStr(0, 63, "Press SEL to exit");
+    display.sendBuffer();
+    while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
+        delay(10);
     }
 }
 

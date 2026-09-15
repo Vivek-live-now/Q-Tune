@@ -7,6 +7,11 @@
 #include <vector>
 #include "hw_config.h"
 
+enum AudioOutputMode {
+    OUTPUT_MODE_SPEAKER_I2S, // MAX98357A Onboard Speaker
+    OUTPUT_MODE_FIIO_KA11_USB // FiiO KA11 High-Res USB DAC
+};
+
 struct WAVHeader {
     char riff[4];
     uint32_t chunkSize;
@@ -37,6 +42,8 @@ public:
     bool isPaused() const;
     uint32_t getPositionMs() const;
     uint32_t getDurationMs() const;
+    void setOutputMode(AudioOutputMode mode);
+    AudioOutputMode getOutputMode() const;
 
 private:
     bool initialized;
@@ -46,6 +53,7 @@ private:
     WAVHeader currentWavHeader;
     uint32_t bytesPlayed;
     uint32_t totalDataBytes;
+    AudioOutputMode outputMode;
 
     bool parseWAVHeader(File &file, WAVHeader &header);
     void setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample);

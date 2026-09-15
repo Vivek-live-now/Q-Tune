@@ -2,7 +2,7 @@
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false),
-    bytesPlayed(0), totalDataBytes(0) {}
+    bytesPlayed(0), totalDataBytes(0), outputMode(OUTPUT_MODE_SPEAKER_I2S) {}
 
 bool AudioPlayer::begin() {
     i2s_config_t i2s_config = {
@@ -35,6 +35,14 @@ bool AudioPlayer::begin() {
 
     initialized = true;
     return true;
+}
+
+void AudioPlayer::setOutputMode(AudioOutputMode mode) {
+    outputMode = mode;
+}
+
+AudioOutputMode AudioPlayer::getOutputMode() const {
+    return outputMode;
 }
 
 void AudioPlayer::setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample) {
