@@ -1,0 +1,53 @@
+name: Q-Tune CI
+
+on:
+  push:
+    branches:
+      - main
+      - '**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Q-Tune & Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Q-Tune Verification Test Suite
+        run: python3 tests/test_suite.py
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.cache/pip
+          key: ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build Q-Tune Firmware
+        run: pio run -e esp32s3_supermini
+
+      - name: Upload Firmware Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: qtune-firmware-esp32s3
+          path: |
+            .pio/build/esp32s3_supermini/firmware.bin
+            .pio/build/esp32s3_supermini/bootloader.bin
+            .pio/build/esp32s3_supermini/partitions.bin

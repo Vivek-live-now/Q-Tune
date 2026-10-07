@@ -1,4 +1,5 @@
 #include "ui_player.h"
+#include "led_manager.h"
 
 UIPlayer::UIPlayer() : currentTrackIndex(0), inListMode(true) {}
 
