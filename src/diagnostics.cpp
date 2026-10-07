@@ -150,26 +150,31 @@ void Diagnostics::testButtons() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     u8g2.drawStr(0, 10, "Test Buttons:");
-    u8g2.drawStr(0, 25, "Press UP/DN/SEL");
-    u8g2.drawStr(0, 55, "Hold SEL 2s to exit");
+    u8g2.drawStr(0, 25, "Press UP/DN/OK/CANCEL");
+    u8g2.drawStr(0, 55, "Press CANCEL/Hold OK");
     display.sendBuffer();
 
     unsigned long selPressStart = 0;
     while (true) {
         ButtonEvent evt = buttonManager.update();
         if (evt == BTN_EVENT_UP_PRESS) {
-            u8g2.drawStr(0, 40, "Last: UP Pressed   ");
+            u8g2.drawStr(0, 40, "Last: UP Pressed    ");
             display.sendBuffer();
         } else if (evt == BTN_EVENT_DN_PRESS) {
-            u8g2.drawStr(0, 40, "Last: DOWN Pressed ");
+            u8g2.drawStr(0, 40, "Last: DOWN Pressed  ");
             display.sendBuffer();
-        } else if (evt == BTN_EVENT_SEL_PRESS) {
-            u8g2.drawStr(0, 40, "Last: SELECT Pressed");
+        } else if (evt == BTN_EVENT_OK_PRESS) {
+            u8g2.drawStr(0, 40, "Last: OK/SEL Pressed");
             display.sendBuffer();
             selPressStart = millis();
+        } else if (evt == BTN_EVENT_CANCEL_PRESS) {
+            u8g2.drawStr(0, 40, "Last: CANCEL Pressed");
+            display.sendBuffer();
+            delay(300);
+            break;
         }
 
-        if (digitalRead(BTN_SEL) == LOW && selPressStart > 0) {
+        if (digitalRead(BTN_OK) == LOW && selPressStart > 0) {
             if (millis() - selPressStart > 2000) break;
         } else {
             selPressStart = 0;

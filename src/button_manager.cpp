@@ -2,13 +2,15 @@
 
 ButtonManager::ButtonManager() :
     btnUp{BTN_UP, HIGH, HIGH, 0},
-    btnSel{BTN_SEL, HIGH, HIGH, 0},
-    btnDn{BTN_DN, HIGH, HIGH, 0} {}
+    btnOk{BTN_OK, HIGH, HIGH, 0},
+    btnDn{BTN_DN, HIGH, HIGH, 0},
+    btnCancel{BTN_CANCEL, HIGH, HIGH, 0} {}
 
 void ButtonManager::begin() {
     pinMode(BTN_UP, INPUT_PULLUP);
-    pinMode(BTN_SEL, INPUT_PULLUP);
+    pinMode(BTN_OK, INPUT_PULLUP);
     pinMode(BTN_DN, INPUT_PULLUP);
+    pinMode(BTN_CANCEL, INPUT_PULLUP);
 }
 
 bool ButtonManager::checkButton(Button &btn) {
@@ -31,8 +33,9 @@ bool ButtonManager::checkButton(Button &btn) {
 
 ButtonEvent ButtonManager::update() {
     if (checkButton(btnUp)) return BTN_EVENT_UP_PRESS;
-    if (checkButton(btnSel)) return BTN_EVENT_SEL_PRESS;
+    if (checkButton(btnOk)) return BTN_EVENT_OK_PRESS;
     if (checkButton(btnDn)) return BTN_EVENT_DN_PRESS;
+    if (checkButton(btnCancel)) return BTN_EVENT_CANCEL_PRESS;
     return BTN_EVENT_NONE;
 }
 

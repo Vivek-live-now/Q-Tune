@@ -11,39 +11,48 @@
 // Note: OLED and SD card share physical SPI clock and MOSI line.
 // MISO is required for SD card reads (reclaimed from Q-Watch Buzzer GPIO 6).
 // ----------------------------------------------------------------------------
-#define SPI_MOSI    5   // Shared SPI Master-Out Slave-In (DIN)
-#define SPI_SCK     7   // Shared SPI Clock (CLK)
+#define SPI_MOSI    5   // Shared SPI Master-Out Slave-In (DIN) [OLED_MOSI]
+#define SPI_SCK     7   // Shared SPI Clock (CLK) [OLED_CLK]
 #define SPI_MISO    6   // Shared SPI Master-In Slave-Out (SD Card DATA_OUT)
 
-#define OLED_CS     4   // OLED Chip Select
-#define OLED_DC     2   // OLED Data/Command Control
-#define OLED_RST    8   // OLED Hardware Reset
+#define OLED_CS     4   // OLED Chip Select [LOCKED to Q-Watch]
+#define OLED_DC     2   // OLED Data/Command Control [LOCKED to Q-Watch]
+#define OLED_RST    41  // OLED Hardware Reset [ADAPTED FROM Q-WATCH: GPIO 41]
 
-#define SD_CS       41  // microSD Card Chip Select (Allocated from Q-Watch Reserve)
+// SD Card Chip Select reassigned to GPIO 8 (outer header, freed by OLED_RST moving to 41)
+#define SD_CS       8   // microSD Card Chip Select
 
 // ----------------------------------------------------------------------------
 // 2. I2S Audio Interface Configuration (MAX98357A I2S DAC / Amp)
-// Reclaimed IR TX/RX pins (17, 18) and Q-Watch Reserve pin (42).
+// Reclaimed IR TX/RX pins (17, 18).
+// DOUT moved to GPIO 10 (outer header pin, clean digital output).
 // MAX98357A SD_MODE is tied high/configured in hardware (e.g., 100k pull-up to
 // VDD for (L+R)/2 mono mix), saving a GPIO pin.
 // ----------------------------------------------------------------------------
-#define I2S_BCLK    17  // Bit Clock (Continuous Serial Clock - SCK)
-#define I2S_LRCK    18  // Left/Right Clock (Word Select - WS)
-#define I2S_DOUT    42  // Serial Data Output (SDIN / DIN)
+#define I2S_BCLK    17  // Bit Clock (Continuous Serial Clock - SCK) [reclaims Q-Watch IR_RX]
+#define I2S_LRCK    18  // Left/Right Clock (Word Select - WS) [reclaims Q-Watch IR_TX]
+#define I2S_DOUT    10  // Serial Data Output (SDIN / DIN) [Clean outer header GPIO 10]
 #define I2S_NUM     I2S_NUM_0
+
+// Optional INMP441 MEMS Microphone Input
+#define I2S_MIC_DIN 44  // Microphone Serial Data In (Clean Reserve UART0 RX)
 
 // ----------------------------------------------------------------------------
 // 3. Shared I2C Bus Configuration [External Peripherals / Expansion]
 // ----------------------------------------------------------------------------
-#define I2C_SDA     15  // Shared I2C Data Line
-#define I2C_SCL     16  // Shared I2C Clock Line
+#define I2C_SDA     15  // Shared I2C Data Line [MATCHES Q-WATCH]
+#define I2C_SCL     16  // Shared I2C Clock Line [MATCHES Q-WATCH]
 
 // ----------------------------------------------------------------------------
-// 4. Navigation Buttons [Internal Pull-Up Active LOW]
+// 4. Navigation Buttons [Internal Pull-Up Active LOW - ADAPTED FROM Q-WATCH]
 // ----------------------------------------------------------------------------
-#define BTN_UP      39  // Up / Previous Track
-#define BTN_SEL     21  // Select / Play / Pause (RTC Wake Capable)
-#define BTN_DN      40  // Down / Next Track
+#define BTN_UP      39  // K1 Directional UP [MATCHES Q-WATCH]
+#define BTN_OK      40  // K1 Directional SELECT / OK [MATCHES Q-WATCH]
+#define BTN_DN      42  // K1 Directional DOWN [MATCHES Q-WATCH]
+#define BTN_CANCEL  21  // Tactile CANCEL / BACK button (RTC_GPIO16 - Deep Sleep Wake) [MATCHES Q-WATCH]
+
+// Backwards-compatibility alias for 3-button code
+#define BTN_SEL     BTN_OK
 
 // ----------------------------------------------------------------------------
 // 5. Power & Diagnostics

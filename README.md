@@ -15,21 +15,21 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 ### 1. Shared SPI Bus (OLED Display + microSD Card)
 | Peripheral | Signal | GPIO | Notes |
 | :--- | :--- | :--- | :--- |
-| OLED / SD | MOSI (DIN) | 5 | Preserved from Q-Watch |
-| OLED / SD | SCK (CLK) | 7 | Preserved from Q-Watch |
-| SD Card | MISO (DATA_OUT) | 6 | Reclaimed from Q-Watch Buzzer |
-| OLED | CS | 4 | Preserved from Q-Watch |
-| OLED | DC | 2 | Preserved from Q-Watch |
-| OLED | RST | 8 | Preserved from Q-Watch |
-| microSD | CS | 41 | Allocated from Q-Watch Reserve pin |
+| OLED / SD | MOSI (DIN) | 5 | Preserved from Q-Watch (Header Pin) |
+| OLED / SD | SCK (CLK) | 7 | Preserved from Q-Watch (Header Pin) |
+| SD Card | MISO (DATA_OUT) | 6 | Reclaimed from Q-Watch Buzzer (Header Pin) |
+| OLED | CS | 4 | Preserved from Q-Watch (Header Pin) |
+| OLED | DC | 2 | Preserved from Q-Watch (Header Pin) |
+| OLED | RST | 41 | Adapted from Q-Watch (Standard digital output) |
+| microSD | CS | 8 | Clean outer header pin (freed by OLED_RST moving to 41) |
 
 ### 2. I²S Audio Output (MAX98357A) & INMP441 MEMS Microphone
 | Peripheral | Signal | GPIO | Notes |
 | :--- | :--- | :--- | :--- |
-| Audio Output / Mic | BCLK (Continuous SCK) | 17 | Reclaimed from Q-Watch IR RX |
-| Audio Output / Mic | LRCLK / WS (Word Select) | 18 | Reclaimed from Q-Watch IR TX |
-| MAX98357A DAC | DOUT (Serial Data Output) | 42 | Allocated from Q-Watch Reserve pin |
-| INMP441 Mic | DIN (Serial Data Input) | 44 | Reclaimed UART0 RX / Expansion |
+| Audio Output / Mic | BCLK (Continuous SCK) | 17 | Reclaimed from Q-Watch IR RX (Underside Pad) |
+| Audio Output / Mic | LRCLK / WS (Word Select) | 18 | Reclaimed from Q-Watch IR TX (Underside Pad) |
+| MAX98357A DAC | DOUT (Serial Data Output) | 10 | Clean outer header pin (replaces old GPIO 42 conflict) |
+| INMP441 Mic | DIN (Serial Data Input) | 44 | Reclaimed UART0 RX / Clean Reserve |
 
 #### MAX98357A SD_MODE & MCLK Configuration
 - **MCLK**: Not required by MAX98357A (uses internal PLL).
@@ -38,15 +38,16 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 ### 3. Shared I²C Bus (Expansion Peripherals)
 | Signal | GPIO | Notes |
 | :--- | :--- | :--- |
-| SDA | 15 | Preserved from Q-Watch |
-| SCL | 16 | Preserved from Q-Watch |
+| SDA | 15 | Preserved from Q-Watch (Underside Pad) |
+| SCL | 16 | Preserved from Q-Watch (Underside Pad) |
 
-### 4. Navigation Inputs
+### 4. Navigation Inputs (Adapted from Q-Watch 4-Button Architecture)
 | Button | GPIO | Logic | Notes |
 | :--- | :--- | :--- | :--- |
-| Button Up | 39 | INPUT_PULLUP (Active LOW) | Reclaims JTAG MTCK |
-| Button Select | 21 | INPUT_PULLUP (Active LOW) | RTC Wake Capable |
-| Button Down | 40 | INPUT_PULLUP (Active LOW) | |
+| Button Up | 39 | INPUT_PULLUP (Active LOW) | K1 Directional UP (Preserved from Q-Watch) |
+| Button OK / Select | 40 | INPUT_PULLUP (Active LOW) | K1 Directional OK / SELECT (Adapted from Q-Watch) |
+| Button Down | 42 | INPUT_PULLUP (Active LOW) | K1 Directional DOWN (Adapted from Q-Watch) |
+| Button Cancel / Back | 21 | INPUT_PULLUP (Active LOW) | Tactile CANCEL / RTC Deep Sleep Wake (Adapted from Q-Watch) |
 
 ### 5. Power & Diagnostics
 | Function | GPIO | Hardware Circuit |

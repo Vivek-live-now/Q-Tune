@@ -50,6 +50,11 @@ void UIPlayer::update() {
                 audioPlayer.playFile(trackList[currentTrackIndex]);
             }
         } else if (evt == BTN_EVENT_UP_PRESS) {
+            if (!trackList.empty()) {
+                currentTrackIndex = (currentTrackIndex - 1 + trackList.size()) % trackList.size();
+                audioPlayer.playFile(trackList[currentTrackIndex]);
+            }
+        } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             inListMode = true;
         }
 

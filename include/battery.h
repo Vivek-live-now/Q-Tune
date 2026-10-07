@@ -10,6 +10,12 @@ public:
     void begin();
     float getVoltage();
     int getPercentage();
+    float getCoreTemperature();
+
+private:
+    float cached_voltage;
+    uint32_t last_read_time;
+    static const float CALIBRATION_MULTIPLIER;
 };
 
 extern Battery battery;
