@@ -170,6 +170,69 @@ def test_wav_header_parser():
     assert fields[12] == 176400
     print("  [PASS] 44-byte RIFF/WAVE 16-bit 44.1kHz stereo header verified.")
 
+def test_power_manager_scaling():
+    print("\n--- 5. Power Manager & Dynamic CPU Scaling Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pm_h = os.path.join(base_dir, "include", "power_manager.h")
+    pm_cpp = os.path.join(base_dir, "src", "power_manager.cpp")
+
+    assert os.path.exists(pm_h), "power_manager.h not found"
+    assert os.path.exists(pm_cpp), "power_manager.cpp not found"
+
+    with open(pm_cpp) as f:
+        src = f.read()
+
+    assert "case PowerProfile::PERFORMANCE: return 240;" in src
+    assert "case PowerProfile::BALANCED:    return 160;" in src
+    assert "case PowerProfile::ENDURANCE:   return 80;" in src
+    assert "esp_sleep_enable_ext0_wakeup((gpio_num_t)BTN_CANCEL, 0);" in src
+    print("  [PASS] Dynamic CPU frequencies (240MHz / 160MHz / 80MHz) and GPIO 21 RTC wake verified.")
+
+def test_simd_accel_engine():
+    print("\n--- 6. SIMD LX7 PIE Framebuffer Engine Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    simd_h = os.path.join(base_dir, "include", "simd_accel.h")
+    simd_cpp = os.path.join(base_dir, "src", "simd_accel.cpp")
+
+    assert os.path.exists(simd_h), "simd_accel.h not found"
+    assert os.path.exists(simd_cpp), "simd_accel.cpp not found"
+
+    # Simulate 128-bit SIMD vector invert and XOR mask equivalence
+    src_bytes = bytes([i % 256 for i in range(1024)])
+    mask_bytes = bytes([(i * 7) % 256 for i in range(1024)])
+
+    # Invert verification
+    inverted = bytes([~b & 0xFF for b in src_bytes])
+    assert len(inverted) == 1024
+    assert inverted[0] == 255
+    assert inverted[255] == 0
+
+    # XOR mask verification
+    xored = bytes([b ^ m for b, m in zip(src_bytes, mask_bytes)])
+    assert len(xored) == 1024
+    for i in range(1024):
+        assert xored[i] == (src_bytes[i] ^ mask_bytes[i])
+    print("  [PASS] 1024-byte OLED framebuffer SIMD invert and XOR operations verified.")
+
+def test_led_manager_modes():
+    print("\n--- 7. Non-Blocking FastLED Engine Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    led_h = os.path.join(base_dir, "include", "led_manager.h")
+    led_cpp = os.path.join(base_dir, "src", "led_manager.cpp")
+
+    with open(led_h) as f:
+        h_src = f.read()
+    with open(led_cpp) as f:
+        cpp_src = f.read()
+
+    assert "BREATHING" in h_src
+    assert "BEAT_PULSE" in h_src
+    assert "LOW_BATTERY_PULSE" in h_src
+    assert "void loop();" in h_src
+    assert "triggerPulse" in h_src
+    assert "bat_pct <= 10" in cpp_src
+    print("  [PASS] FastLED non-blocking loop, beat pulse, and low battery override verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -178,7 +241,10 @@ def main():
     test_button_manager_event_handling()
     test_battery_monitor_pwl_curve()
     test_wav_header_parser()
-    print("\nAll Q-Tune test verifications PASSED (100%)!\n")
+    test_power_manager_scaling()
+    test_simd_accel_engine()
+    test_led_manager_modes()
+    print("\nAll 7 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

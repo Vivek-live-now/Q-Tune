@@ -9,6 +9,7 @@
 #include "i2c_scanner.h"
 #include "diagnostics.h"
 #include "ui_player.h"
+#include "power_manager.h"
 
 enum AppMode {
     MODE_DIAGNOSTICS,
@@ -20,6 +21,7 @@ AppMode currentMode = MODE_DIAGNOSTICS;
 void setup() {
     Serial.begin(115200);
 
+    powerManager.begin();
     display.begin();
     buttonManager.begin();
     battery.begin();
@@ -33,6 +35,8 @@ void setup() {
 }
 
 void loop() {
+    ledManager.loop();
+
     if (currentMode == MODE_DIAGNOSTICS) {
         diagnostics.runMenu();
     } else {

@@ -30,6 +30,7 @@ void UIPlayer::update() {
             if (!trackList.empty()) {
                 inListMode = false;
                 audioPlayer.playFile(trackList[currentTrackIndex]);
+                ledManager.setMode(LedMode::BREATHING);
             } else {
                 refreshTrackList();
             }
@@ -39,23 +40,29 @@ void UIPlayer::update() {
         if (evt == BTN_EVENT_SEL_PRESS) {
             if (audioPlayer.isPlaying()) {
                 audioPlayer.pause();
+                ledManager.setColor(CRGB::Orange);
             } else if (audioPlayer.isPaused()) {
                 audioPlayer.resume();
+                ledManager.setMode(LedMode::BREATHING);
             } else {
                 audioPlayer.playFile(trackList[currentTrackIndex]);
+                ledManager.setMode(LedMode::BREATHING);
             }
         } else if (evt == BTN_EVENT_DN_PRESS) {
             if (!trackList.empty()) {
                 currentTrackIndex = (currentTrackIndex + 1) % trackList.size();
                 audioPlayer.playFile(trackList[currentTrackIndex]);
+                ledManager.triggerPulse(CRGB::Cyan, 1, 100);
             }
         } else if (evt == BTN_EVENT_UP_PRESS) {
             if (!trackList.empty()) {
                 currentTrackIndex = (currentTrackIndex - 1 + trackList.size()) % trackList.size();
                 audioPlayer.playFile(trackList[currentTrackIndex]);
+                ledManager.triggerPulse(CRGB::Cyan, 1, 100);
             }
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             inListMode = true;
+            ledManager.off();
         }
 
         audioPlayer.update();
