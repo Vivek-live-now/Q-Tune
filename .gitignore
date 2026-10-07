@@ -2,3 +2,6 @@
 .vscode/
 *.bin
 *.elf
+build_binaries/
+__pycache__/
+*.pyc
