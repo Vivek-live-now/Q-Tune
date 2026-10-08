@@ -26,6 +26,7 @@ bool AudioPlayer::begin() {
         .data_in_num = I2S_PIN_NO_CHANGE
     };
 
+    i2s_driver_uninstall(I2S_NUM);
     if (i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL) != ESP_OK) {
         return false;
     }

@@ -270,8 +270,13 @@ void Diagnostics::testI2SAudio() {
 void Diagnostics::testINMP441Mic() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
-    u8g2.drawStr(0, 10, "INMP441 Visualizer:");
-    u8g2.drawStr(0, 55, "SEL: Exit  DN: Preset");
+    u8g2.drawStr(0, 10, "Starting INMP441...");
+    u8g2.drawStr(0, 30, "DIN:44  SCK:17  WS:18");
+    u8g2.drawStr(0, 50, "Tie L/R to GND or 3V3");
+    display.sendBuffer();
+    delay(400);
+
+    spectrumAnalyzer.start();
 
     VisualizerPreset p = PRESET_BAR_SPECTRUM;
     while (true) {
@@ -283,8 +288,10 @@ void Diagnostics::testINMP441Mic() {
         if (evt == BTN_EVENT_DN_PRESS) {
             p = (VisualizerPreset)((p + 1) % 4);
         }
-        delay(30);
+        delay(15);
     }
+
+    spectrumAnalyzer.stop();
 }
 
 Diagnostics diagnostics;

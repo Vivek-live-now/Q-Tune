@@ -17,15 +17,23 @@ class SpectrumAnalyzer {
 public:
     SpectrumAnalyzer();
     bool begin();
+    bool start();
+    void stop();
+    bool isRunning() const { return active; }
     void sampleMicrophone();
     void render(VisualizerPreset preset);
     void nextPreset();
+    float getPeakLevel() const { return peakLevel; }
+    float getRMSLevel() const { return rmsLevel; }
 
 private:
     static const size_t SAMPLE_SIZE = 128;
     int32_t micBuffer[SAMPLE_SIZE];
     uint8_t bands[16];
     VisualizerPreset currentPreset;
+    bool active;
+    float peakLevel;
+    float rmsLevel;
 
     void processFFT();
     void drawBars();

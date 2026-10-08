@@ -31,6 +31,16 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 | MAX98357A DAC | DOUT (Serial Data Output) | 10 | Clean outer header pin (replaces old GPIO 42 conflict) |
 | INMP441 Mic | DIN (Serial Data Input) | 44 | Reclaimed UART0 RX / Clean Reserve |
 
+#### INMP441 Microphone Pin Connections
+| INMP441 Pin | ESP32-S3 SuperMini Pin | Description & Critical Notes |
+| :--- | :--- | :--- |
+| **VDD** | 3.3V | **3.3V Power Only** (Do NOT connect to 5V; absolute maximum is 3.6V). |
+| **GND** | GND | Ground reference. |
+| **SD** | GPIO 44 (RX header) | Serial Data Out from mic to ESP32 DIN. Do not connect external UART FTDI adapter to this pin. |
+| **SCK** | GPIO 17 | Continuous Bit Clock (shared with MAX98357A BCLK). |
+| **WS** | GPIO 18 | Word Select / LRCLK (shared with MAX98357A LRCK). |
+| **L/R** | GND (or 3.3V) | **Mandatory connection**: Tie to GND for Left channel or 3.3V for Right channel. Never leave floating. |
+
 #### MAX98357A SD_MODE & MCLK Configuration
 - **MCLK**: Not required by MAX98357A (uses internal PLL).
 - **SD_MODE**: Connected in hardware with a 100kΩ pull-up resistor to VDD. This configures the DAC to compute a **(Left + Right) / 2 mono mix**, making it ideal for driving a single speaker from stereo or mono source files without consuming an extra GPIO pin.

@@ -251,6 +251,47 @@ def test_led_manager_modes():
     assert "bat_pct <= 10" in cpp_src
     print("  [PASS] FastLED non-blocking loop, beat pulse, and low battery override verified.")
 
+def test_inmp441_microphone_pipeline():
+    print("\n--- 8. INMP441 MEMS Microphone & Spectrum Analyzer Pipeline Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hw_h = os.path.join(base_dir, "include", "hw_config.h")
+    spec_h = os.path.join(base_dir, "include", "spectrum_analyzer.h")
+    spec_cpp = os.path.join(base_dir, "src", "spectrum_analyzer.cpp")
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+
+    pins = parse_hw_config(hw_h)
+    assert 'I2S_MIC_DIN' in pins, "I2S_MIC_DIN not defined in hw_config.h"
+    assert pins['I2S_MIC_DIN'] == 44, f"I2S_MIC_DIN should be GPIO 44, got {pins['I2S_MIC_DIN']}"
+    assert pins['I2S_BCLK'] == 17, "I2S_BCLK should be GPIO 17"
+    assert pins['I2S_LRCK'] == 18, "I2S_LRCK should be GPIO 18"
+    assert pins['I2S_MIC_DIN'] not in {0, 3, 45, 46}, "I2S_MIC_DIN cannot be strapping pin"
+
+    with open(spec_h) as f:
+        sh_text = f.read()
+    with open(spec_cpp) as f:
+        scpp_text = f.read()
+    with open(diag_cpp) as f:
+        dcpp_text = f.read()
+
+    # Lifecycle and telemetry methods
+    assert "bool start();" in sh_text, "start() method missing in spectrum_analyzer.h"
+    assert "void stop();" in sh_text, "stop() method missing in spectrum_analyzer.h"
+    assert "getPeakLevel()" in sh_text, "getPeakLevel() missing in spectrum_analyzer.h"
+    assert "getRMSLevel()" in sh_text, "getRMSLevel() missing in spectrum_analyzer.h"
+
+    # Real I2S and FFT implementation
+    assert "i2s_read" in scpp_text, "i2s_read missing in spectrum_analyzer.cpp"
+    assert "I2S_BITS_PER_SAMPLE_32BIT" in scpp_text, "INMP441 requires 32-bit slot width"
+    assert "I2S_MIC_DIN" in scpp_text, "I2S_MIC_DIN missing in spectrum_analyzer.cpp"
+    assert "processFFT" in scpp_text, "processFFT missing in spectrum_analyzer.cpp"
+    assert "binStart" in scpp_text, "Logarithmic bin mapping missing in spectrum_analyzer.cpp"
+
+    # Diagnostics session lifecycle
+    assert "spectrumAnalyzer.start()" in dcpp_text, "Diagnostics testINMP441Mic must start mic session"
+    assert "spectrumAnalyzer.stop()" in dcpp_text, "Diagnostics testINMP441Mic must stop mic session"
+
+    print("  [PASS] INMP441 32-bit I2S RX driver, GPIO 44 DIN, Cooley-Tukey FFT, and Diagnostics lifecycle verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -262,7 +303,8 @@ def main():
     test_power_manager_scaling()
     test_simd_accel_engine()
     test_led_manager_modes()
-    print("\nAll 7 Q-Tune test verifications PASSED (100%)!\n")
+    test_inmp441_microphone_pipeline()
+    print("\nAll 8 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

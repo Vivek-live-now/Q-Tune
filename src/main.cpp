@@ -10,6 +10,7 @@
 #include "diagnostics.h"
 #include "ui_player.h"
 #include "power_manager.h"
+#include "spectrum_analyzer.h"
 
 enum AppMode {
     MODE_DIAGNOSTICS,
@@ -29,6 +30,7 @@ void setup() {
     i2cScanner.begin();
     sdManager.begin();
     audioPlayer.begin();
+    spectrumAnalyzer.begin();
 
     diagnostics.begin();
     uiPlayer.begin();
