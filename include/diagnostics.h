@@ -8,7 +8,6 @@
 #include "audio_player.h"
 #include "battery.h"
 #include "led_manager.h"
-#include "i2c_scanner.h"
 #include "spectrum_analyzer.h"
 
 class Diagnostics {
@@ -28,7 +27,7 @@ private:
     void testSDFilesystem();
     void testWAVDiscovery();
     void testButtons();
-    void testI2CScan();
+    void testPinMap();
     void testBattery();
     void testRGBLED();
     void testI2SAudio();

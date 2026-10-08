@@ -34,14 +34,13 @@
 #define I2S_DOUT    10  // Serial Data Output (SDIN / DIN) [Clean outer header GPIO 10]
 #define I2S_NUM     I2S_NUM_0
 
-// Optional INMP441 MEMS Microphone Input
-#define I2S_MIC_DIN 44  // Microphone Serial Data In (Clean Reserve UART0 RX)
+// INMP441 MEMS Microphone Input (Allotted from freed I2C port)
+#define I2S_MIC_DIN 15  // Microphone Serial Data In (Reassigned to GPIO 15, freeing UART0 RX 44)
 
 // ----------------------------------------------------------------------------
-// 3. Shared I2C Bus Configuration [External Peripherals / Expansion]
+// 3. Expansion / Reserve Pins (I2C Bus Freed)
 // ----------------------------------------------------------------------------
-#define I2C_SDA     15  // Shared I2C Data Line [MATCHES Q-WATCH]
-#define I2C_SCL     16  // Shared I2C Clock Line [MATCHES Q-WATCH]
+#define GPIO_RESERVE_16 16 // Clean digital expansion / reserve (Freed former I2C_SCL)
 
 // ----------------------------------------------------------------------------
 // 4. Navigation Buttons [Internal Pull-Up Active LOW - ADAPTED FROM Q-WATCH]
@@ -66,8 +65,8 @@
 // ----------------------------------------------------------------------------
 // 6. Serial & Reserved / Avoided Pins
 // ----------------------------------------------------------------------------
-#define UART0_TX    43  // Reserved for Hardware Serial Debugging
-#define UART0_RX    44  // Reserved for Hardware Serial Debugging
+#define UART0_TX    43  // Dedicated Hardware Serial Debugging / Flashing
+#define UART0_RX    44  // Dedicated Hardware Serial Debugging / Flashing (Completely Freed)
 
 // Strictly Avoided Strapping/System Pins:
 // GPIO 0, 3, 45, 46 (Boot / Strapping - DO NOT USE)

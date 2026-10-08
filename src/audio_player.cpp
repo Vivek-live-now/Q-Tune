@@ -2,7 +2,7 @@
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false),
-    bytesPlayed(0), totalDataBytes(0) {}
+    bytesPlayed(0), totalDataBytes(0), dataOffset(44) {}
 
 bool AudioPlayer::begin() {
     i2s_config_t i2s_config = {
@@ -43,17 +43,69 @@ void AudioPlayer::setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bits
 }
 
 bool AudioPlayer::parseWAVHeader(File &file, WAVHeader &header) {
-    if (file.size() < sizeof(WAVHeader)) return false;
+    if (file.size() < 44) return false;
     file.seek(0);
-    if (file.read((uint8_t*)&header, sizeof(WAVHeader)) != sizeof(WAVHeader)) return false;
 
-    if (strncmp(header.riff, "RIFF", 4) != 0 || strncmp(header.wave, "WAVE", 4) != 0) {
+    char riff[4];
+    uint32_t fileSize = 0;
+    char wave[4];
+
+    if (file.read((uint8_t*)riff, 4) != 4 || strncmp(riff, "RIFF", 4) != 0) return false;
+    if (file.read((uint8_t*)&fileSize, 4) != 4) return false;
+    if (file.read((uint8_t*)wave, 4) != 4 || strncmp(wave, "WAVE", 4) != 0) return false;
+
+    memcpy(header.riff, riff, 4);
+    header.chunkSize = fileSize;
+    memcpy(header.wave, wave, 4);
+
+    bool foundFmt = false;
+    bool foundData = false;
+    dataOffset = 44;
+
+    // Scan chunks to support standard DAWs and metadata chunks (LIST, INFO, JUNK)
+    while (file.available() >= 8 && (!foundFmt || !foundData)) {
+        char chunkId[4];
+        uint32_t chunkSize = 0;
+        if (file.read((uint8_t*)chunkId, 4) != 4) break;
+        if (file.read((uint8_t*)&chunkSize, 4) != 4) break;
+
+        if (strncmp(chunkId, "fmt ", 4) == 0) {
+            uint32_t fmtPos = file.position();
+            if (chunkSize >= 16) {
+                file.read((uint8_t*)&header.audioFormat, 2);
+                file.read((uint8_t*)&header.numChannels, 2);
+                file.read((uint8_t*)&header.sampleRate, 4);
+                file.read((uint8_t*)&header.byteRate, 4);
+                file.read((uint8_t*)&header.blockAlign, 2);
+                file.read((uint8_t*)&header.bitsPerSample, 2);
+                memcpy(header.fmt, chunkId, 4);
+                header.subchunk1Size = chunkSize;
+                foundFmt = true;
+            }
+            file.seek(fmtPos + chunkSize);
+        } else if (strncmp(chunkId, "data", 4) == 0) {
+            memcpy(header.data, chunkId, 4);
+            header.dataSize = chunkSize;
+            dataOffset = file.position();
+            foundData = true;
+            break;
+        } else {
+            file.seek(file.position() + chunkSize);
+        }
+    }
+
+    if (!foundFmt || !foundData) {
+        file.seek(0);
+        if (file.read((uint8_t*)&header, sizeof(WAVHeader)) == sizeof(WAVHeader)) {
+            if (strncmp(header.riff, "RIFF", 4) == 0 && strncmp(header.wave, "WAVE", 4) == 0) {
+                dataOffset = 44;
+                return (header.audioFormat == 1);
+            }
+        }
         return false;
     }
-    if (header.audioFormat != 1) {
-        return false;
-    }
-    return true;
+
+    return (header.audioFormat == 1);
 }
 
 bool AudioPlayer::playFile(const String &path) {
@@ -72,6 +124,7 @@ bool AudioPlayer::playFile(const String &path) {
 
     totalDataBytes = currentWavHeader.dataSize;
     bytesPlayed = 0;
+    wavFile.seek(dataOffset);
     playing = true;
     paused = false;
     return true;
@@ -80,24 +133,54 @@ bool AudioPlayer::playFile(const String &path) {
 void AudioPlayer::update() {
     if (!playing || paused || !wavFile) return;
 
-    uint8_t buffer[1024];
-    int bytesToRead = sizeof(buffer);
-    if (bytesPlayed + bytesToRead > totalDataBytes) {
-        bytesToRead = totalDataBytes - bytesPlayed;
-    }
+    if (currentWavHeader.numChannels == 1) {
+        // Expand Mono PCM to Stereo frames for MAX98357A I2S
+        int16_t monoBuf[256];
+        int16_t stereoBuf[512];
+        int bytesToRead = sizeof(monoBuf);
+        if (bytesPlayed + bytesToRead > totalDataBytes) {
+            bytesToRead = totalDataBytes - bytesPlayed;
+        }
 
-    if (bytesToRead <= 0) {
-        stop();
-        return;
-    }
+        if (bytesToRead <= 0) {
+            stop();
+            return;
+        }
 
-    int bytesRead = wavFile.read(buffer, bytesToRead);
-    if (bytesRead > 0) {
-        size_t bytesWritten = 0;
-        i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
-        bytesPlayed += bytesWritten;
+        int bytesRead = wavFile.read((uint8_t*)monoBuf, bytesToRead);
+        if (bytesRead > 0) {
+            int samples = bytesRead / sizeof(int16_t);
+            for (int i = 0; i < samples; i++) {
+                stereoBuf[i * 2] = monoBuf[i];
+                stereoBuf[i * 2 + 1] = monoBuf[i];
+            }
+            size_t bytesWritten = 0;
+            i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
+            bytesPlayed += bytesRead;
+        } else {
+            stop();
+        }
     } else {
-        stop();
+        // Direct Stereo PCM streaming
+        uint8_t buffer[1024];
+        int bytesToRead = sizeof(buffer);
+        if (bytesPlayed + bytesToRead > totalDataBytes) {
+            bytesToRead = totalDataBytes - bytesPlayed;
+        }
+
+        if (bytesToRead <= 0) {
+            stop();
+            return;
+        }
+
+        int bytesRead = wavFile.read(buffer, bytesToRead);
+        if (bytesRead > 0) {
+            size_t bytesWritten = 0;
+            i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
+            bytesPlayed += bytesWritten;
+        } else {
+            stop();
+        }
     }
 }
 

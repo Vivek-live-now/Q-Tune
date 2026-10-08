@@ -46,6 +46,7 @@ private:
     WAVHeader currentWavHeader;
     uint32_t bytesPlayed;
     uint32_t totalDataBytes;
+    uint32_t dataOffset;
 
     bool parseWAVHeader(File &file, WAVHeader &header);
     void setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample);

@@ -29,14 +29,14 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 | Audio Output / Mic | BCLK (Continuous SCK) | 17 | Reclaimed from Q-Watch IR RX (Underside Pad) |
 | Audio Output / Mic | LRCLK / WS (Word Select) | 18 | Reclaimed from Q-Watch IR TX (Underside Pad) |
 | MAX98357A DAC | DOUT (Serial Data Output) | 10 | Clean outer header pin (replaces old GPIO 42 conflict) |
-| INMP441 Mic | DIN (Serial Data Input) | 44 | Reclaimed UART0 RX / Clean Reserve |
+| INMP441 Mic | DIN (Serial Data Input) | 15 | Reallocated from freed I2C port (replaces GPIO 44) |
 
 #### INMP441 Microphone Pin Connections
 | INMP441 Pin | ESP32-S3 SuperMini Pin | Description & Critical Notes |
 | :--- | :--- | :--- |
 | **VDD** | 3.3V | **3.3V Power Only** (Do NOT connect to 5V; absolute maximum is 3.6V). |
 | **GND** | GND | Ground reference. |
-| **SD** | GPIO 44 (RX header) | Serial Data Out from mic to ESP32 DIN. Do not connect external UART FTDI adapter to this pin. |
+| **SD** | GPIO 15 | Serial Data Out from mic to ESP32 DIN (allotted from freed I2C port). |
 | **SCK** | GPIO 17 | Continuous Bit Clock (shared with MAX98357A BCLK). |
 | **WS** | GPIO 18 | Word Select / LRCLK (shared with MAX98357A LRCK). |
 | **L/R** | GND (or 3.3V) | **Mandatory connection**: Tie to GND for Left channel or 3.3V for Right channel. Never leave floating. |
@@ -45,11 +45,10 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 - **MCLK**: Not required by MAX98357A (uses internal PLL).
 - **SD_MODE**: Connected in hardware with a 100kΩ pull-up resistor to VDD. This configures the DAC to compute a **(Left + Right) / 2 mono mix**, making it ideal for driving a single speaker from stereo or mono source files without consuming an extra GPIO pin.
 
-### 3. Shared I²C Bus (Expansion Peripherals)
-| Signal | GPIO | Notes |
-| :--- | :--- | :--- |
-| SDA | 15 | Preserved from Q-Watch (Underside Pad) |
-| SCL | 16 | Preserved from Q-Watch (Underside Pad) |
+### 3. Freed I2C Bus & Digital Expansion
+- **GPIO 15:** Reallocated as `I2S_MIC_DIN` for the INMP441 microphone.
+- **GPIO 16:** Clean digital expansion / reserve pin.
+- **Status:** I2C port freed completely.
 
 ### 4. Navigation Inputs (Adapted from Q-Watch 4-Button Architecture)
 | Button | GPIO | Logic | Notes |
@@ -66,7 +65,7 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 | Onboard RGB LED | 48 | Built-in WS2812 RGB LED |
 
 ### 6. Reserved & Avoided Pins
-- **Hardware UART0 Debugging:** GPIO 43 (TX).
+- **Hardware UART0 Debugging / Flashing:** GPIO 43 (TX), GPIO 44 (RX) — **Completely freed** from all peripherals for clean native serial debugging.
 - **System / Boot Strapping Pins (STRICTLY AVOIDED):** GPIO 0, 3, 45, 46.
 
 ---
@@ -94,7 +93,7 @@ On startup, Q-Tune launches an interactive hardware diagnostic menu allowing ver
 3. **SD Filesystem** - Total & used capacity report
 4. **WAV Discovery** - `/music/` folder listing
 5. **Button Inputs** - Debounced button state check
-6. **I2C Bus Scan** - Connected slave address scan
+6. **Pin Matrix Map** - Live hardware GPIO allocation and verification display
 7. **Battery ADC** - Live voltage & percentage display
 8. **RGB LED Test** - WS2812 color cycle
 9. **I2S Audio Test** - Synthesized 1kHz test tone through MAX98357A

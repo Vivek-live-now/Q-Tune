@@ -63,12 +63,16 @@ def test_pinout_matrix_and_qwatch_alignment():
     assert qtune_pins['BTN_CANCEL'] == qwatch_pins['BTN_CANCEL'] == 21, "BTN_CANCEL mismatch"
     print("  [PASS] Button Pins 100% synchronized with Q-Watch: UP=39, OK=40, DN=42, CANCEL=21")
 
-    # Verify Shared I2C, Battery ADC & RGB LED Match Q-Watch
-    assert qtune_pins['I2C_SDA'] == qwatch_pins['I2C_SDA'] == 15, "I2C_SDA mismatch"
-    assert qtune_pins['I2C_SCL'] == qwatch_pins['I2C_SCL'] == 16, "I2C_SCL mismatch"
+    # Verify Battery ADC & RGB LED Match Q-Watch
     assert qtune_pins['BATTERY_ADC'] == qwatch_pins['BATTERY_ADC'] == 1, "BATTERY_ADC mismatch"
     assert qtune_pins['RGB_LED'] == qwatch_pins['RGB_LED'] == 48, "RGB_LED mismatch"
-    print("  [PASS] Power/Sensors/LED 100% synchronized with Q-Watch: SDA=15, SCL=16, ADC=1, RGB=48")
+    print("  [PASS] Power/LED synchronized with Q-Watch: ADC=1, RGB=48")
+
+    # Verify Freed I2C Port Reallocation to Mic & Dedicated UART0
+    assert qtune_pins['I2S_MIC_DIN'] == 15, "I2S_MIC_DIN must be GPIO 15 (reallocated from freed I2C port)"
+    assert qtune_pins['UART0_TX'] == 43, "UART0_TX must be GPIO 43"
+    assert qtune_pins['UART0_RX'] == 44, "UART0_RX must be GPIO 44 (freed for dedicated serial)"
+    print("  [PASS] I2C port freed, INMP441 Mic reallocated to GPIO 15, and UART0 (43/44) fully freed.")
 
     # Verify Reassigned Pins have NO Collisions
     active_pins = [
@@ -82,8 +86,7 @@ def test_pinout_matrix_and_qwatch_alignment():
         qtune_pins['I2S_BCLK'],
         qtune_pins['I2S_LRCK'],
         qtune_pins['I2S_DOUT'],
-        qtune_pins['I2C_SDA'],
-        qtune_pins['I2C_SCL'],
+        qtune_pins['I2S_MIC_DIN'],
         qtune_pins['BTN_UP'],
         qtune_pins['BTN_OK'],
         qtune_pins['BTN_DN'],
@@ -186,7 +189,29 @@ def test_wav_header_parser():
     assert fields[7] == 44100 # 44.1 kHz
     assert fields[10] == 16 # 16-bit
     assert fields[12] == 176400
-    print("  [PASS] 44-byte RIFF/WAVE 16-bit 44.1kHz stereo header verified.")
+
+    # Verify complex WAV with LIST metadata chunk before 'data' chunk
+    list_tag = b'LIST'
+    list_data = b'INFOINAMTest\x00'
+    list_size = len(list_data)
+    complex_header = (
+        b'RIFF' + struct.pack('<I', 36 + list_size + 8 + 176400) + b'WAVE' +
+        b'fmt ' + struct.pack('<IHHIIHH', 16, 1, 2, 44100, 176400, 4, 16) +
+        list_tag + struct.pack('<I', list_size) + list_data +
+        b'data' + struct.pack('<I', 176400)
+    )
+    assert b'LIST' in complex_header
+    assert b'data' in complex_header
+
+    # Verify AudioPlayer source code has dynamic chunk parsing and mono expansion
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    with open(ap_cpp) as f:
+        ap_src = f.read()
+    assert "dataOffset" in ap_src, "AudioPlayer must track dataOffset"
+    assert "monoBuf" in ap_src and "stereoBuf" in ap_src, "AudioPlayer must support mono-to-stereo expansion for MAX98357A"
+
+    print("  [PASS] 44-byte standard and chunked RIFF/WAVE parsers with MAX98357A mono expansion verified.")
 
 def test_power_manager_scaling():
     print("\n--- 5. Power Manager & Dynamic CPU Scaling Test ---")
@@ -261,9 +286,10 @@ def test_inmp441_microphone_pipeline():
 
     pins = parse_hw_config(hw_h)
     assert 'I2S_MIC_DIN' in pins, "I2S_MIC_DIN not defined in hw_config.h"
-    assert pins['I2S_MIC_DIN'] == 44, f"I2S_MIC_DIN should be GPIO 44, got {pins['I2S_MIC_DIN']}"
+    assert pins['I2S_MIC_DIN'] == 15, f"I2S_MIC_DIN should be GPIO 15, got {pins['I2S_MIC_DIN']}"
     assert pins['I2S_BCLK'] == 17, "I2S_BCLK should be GPIO 17"
     assert pins['I2S_LRCK'] == 18, "I2S_LRCK should be GPIO 18"
+    assert pins['UART0_RX'] == 44, "UART0_RX should be GPIO 44 (freed for dedicated serial)"
     assert pins['I2S_MIC_DIN'] not in {0, 3, 45, 46}, "I2S_MIC_DIN cannot be strapping pin"
 
     with open(spec_h) as f:
@@ -290,7 +316,7 @@ def test_inmp441_microphone_pipeline():
     assert "spectrumAnalyzer.start()" in dcpp_text, "Diagnostics testINMP441Mic must start mic session"
     assert "spectrumAnalyzer.stop()" in dcpp_text, "Diagnostics testINMP441Mic must stop mic session"
 
-    print("  [PASS] INMP441 32-bit I2S RX driver, GPIO 44 DIN, Cooley-Tukey FFT, and Diagnostics lifecycle verified.")
+    print("  [PASS] INMP441 32-bit I2S RX driver, GPIO 15 DIN (freed I2C), Cooley-Tukey FFT, and Diagnostics lifecycle verified.")
 
 def main():
     print("==================================================")

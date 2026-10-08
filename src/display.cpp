@@ -3,6 +3,11 @@
 Display::Display() : u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RST) {}
 
 bool Display::begin() {
+    pinMode(OLED_CS, OUTPUT);
+    digitalWrite(OLED_CS, HIGH);
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+
     SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, OLED_CS);
     u8g2.begin();
     u8g2.setBusClock(8000000UL);

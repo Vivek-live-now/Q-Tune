@@ -6,7 +6,6 @@
 #include "audio_player.h"
 #include "battery.h"
 #include "led_manager.h"
-#include "i2c_scanner.h"
 #include "diagnostics.h"
 #include "ui_player.h"
 #include "power_manager.h"
@@ -27,7 +26,6 @@ void setup() {
     buttonManager.begin();
     battery.begin();
     ledManager.begin();
-    i2cScanner.begin();
     sdManager.begin();
     audioPlayer.begin();
     spectrumAnalyzer.begin();

@@ -6,7 +6,7 @@ static const char* testNames[] = {
     "3. SD Filesystem",
     "4. WAV Discovery",
     "5. Button Inputs",
-    "6. I2C Bus Scan",
+    "6. Pin Matrix Map",
     "7. Battery ADC",
     "8. RGB LED Test",
     "9. I2S Audio Test",
@@ -68,7 +68,7 @@ void Diagnostics::executeTest(int index) {
         case 2: testSDFilesystem(); break;
         case 3: testWAVDiscovery(); break;
         case 4: testButtons(); break;
-        case 5: testI2CScan(); break;
+        case 5: testPinMap(); break;
         case 6: testBattery(); break;
         case 7: testRGBLED(); break;
         case 8: testI2SAudio(); break;
@@ -183,24 +183,16 @@ void Diagnostics::testButtons() {
     }
 }
 
-void Diagnostics::testI2CScan() {
+void Diagnostics::testPinMap() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
-    u8g2.drawStr(0, 10, "I2C Bus Scan:");
-    std::vector<uint8_t> devs = i2cScanner.scan();
-    if (devs.empty()) {
-        u8g2.drawStr(0, 30, "No I2C devices found");
-    } else {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "Found %d devices:", (int)devs.size());
-        u8g2.drawStr(0, 25, buf);
-        String addrStr = "0x";
-        for (uint8_t d : devs) {
-            addrStr += String(d, HEX) + " ";
-        }
-        u8g2.drawStr(0, 40, addrStr.c_str());
-    }
-    u8g2.drawStr(0, 60, "Press SEL to exit");
+    u8g2.setFont(u8g2_font_6x10_tr);
+    u8g2.drawStr(0, 10, "GPIO Pin Matrix:");
+    u8g2.drawStr(0, 21, "MIC: DIN 15 (Freed I2C)");
+    u8g2.drawStr(0, 31, "DAC: DOUT 10, B17, W18");
+    u8g2.drawStr(0, 41, "SD: CS 8 | SPI 5,6,7");
+    u8g2.drawStr(0, 51, "UART0: 43/44 (Freed)");
+    u8g2.drawStr(0, 62, "SEL: Exit");
     display.sendBuffer();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
         delay(10);
@@ -271,7 +263,7 @@ void Diagnostics::testINMP441Mic() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     u8g2.drawStr(0, 10, "Starting INMP441...");
-    u8g2.drawStr(0, 30, "DIN:44  SCK:17  WS:18");
+    u8g2.drawStr(0, 30, "DIN:15  SCK:17  WS:18");
     u8g2.drawStr(0, 50, "Tie L/R to GND or 3V3");
     display.sendBuffer();
     delay(400);
