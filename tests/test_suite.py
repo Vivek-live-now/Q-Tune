@@ -116,6 +116,9 @@ def test_button_manager_event_handling():
 
     assert "BTN_EVENT_CANCEL_PRESS" in h_text, "Missing BTN_EVENT_CANCEL_PRESS"
     assert "BTN_EVENT_OK_PRESS" in h_text, "Missing BTN_EVENT_OK_PRESS"
+    assert "BTN_EVENT_SEL_PRESS" in h_text, "Missing BTN_EVENT_SEL_PRESS"
+    assert "BTN_EVENT_OK_HOLD" in h_text, "Missing BTN_EVENT_OK_HOLD"
+    assert "BTN_EVENT_SEL_HOLD" in h_text, "Missing BTN_EVENT_SEL_HOLD"
     assert "btnCancel" in h_text, "Missing btnCancel member in ButtonManager"
     assert "pinMode(BTN_CANCEL, INPUT_PULLUP);" in cpp_text, "Missing pinMode for BTN_CANCEL"
     assert "checkButton(btnCancel)" in cpp_text, "Missing checkButton for btnCancel"
