@@ -24,9 +24,9 @@ enum class LedMode {
 };
 
 enum class LedSensitivity {
-    LOW = 1,
-    NORMAL = 2,
-    HIGH = 3
+    SENS_LOW = 1,
+    SENS_NORMAL = 2,
+    SENS_HIGH = 3
 };
 
 class LEDManager {

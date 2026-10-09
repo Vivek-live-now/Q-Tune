@@ -44,7 +44,7 @@ LEDManager::LEDManager() :
     current_color(CRGB::Cyan),
     color_index(0),
     current_brightness(60),
-    current_sensitivity(LedSensitivity::NORMAL),
+    current_sensitivity(LedSensitivity::SENS_NORMAL),
     last_update(0),
     anim_phase(0.0f),
     pulse_count(0),
@@ -175,21 +175,21 @@ void LEDManager::cycleBrightness() {
 }
 
 void LEDManager::cycleSensitivity() {
-    if (current_sensitivity == LedSensitivity::LOW) {
-        current_sensitivity = LedSensitivity::NORMAL;
-    } else if (current_sensitivity == LedSensitivity::NORMAL) {
-        current_sensitivity = LedSensitivity::HIGH;
+    if (current_sensitivity == LedSensitivity::SENS_LOW) {
+        current_sensitivity = LedSensitivity::SENS_NORMAL;
+    } else if (current_sensitivity == LedSensitivity::SENS_NORMAL) {
+        current_sensitivity = LedSensitivity::SENS_HIGH;
     } else {
-        current_sensitivity = LedSensitivity::LOW;
+        current_sensitivity = LedSensitivity::SENS_LOW;
     }
 }
 
 const char* LEDManager::getSensitivityName() const {
     switch (current_sensitivity) {
-        case LedSensitivity::LOW:    return "LOW";
-        case LedSensitivity::NORMAL: return "NORM";
-        case LedSensitivity::HIGH:   return "HIGH";
-        default:                     return "NORM";
+        case LedSensitivity::SENS_LOW:    return "LOW";
+        case LedSensitivity::SENS_NORMAL: return "NORM";
+        case LedSensitivity::SENS_HIGH:   return "HIGH";
+        default:                          return "NORM";
     }
 }
 
@@ -228,8 +228,8 @@ void LEDManager::updateReactiveModes(float dt) {
     float peak = spectrumAnalyzer.getPeakLevel();
     bool isPlaying = audioPlayer.isPlaying();
 
-    float sens = (current_sensitivity == LedSensitivity::LOW) ? 0.70f :
-                 ((current_sensitivity == LedSensitivity::HIGH) ? 1.45f : 1.0f);
+    float sens = (current_sensitivity == LedSensitivity::SENS_LOW) ? 0.70f :
+                 ((current_sensitivity == LedSensitivity::SENS_HIGH) ? 1.45f : 1.0f);
 
     // Resting ambient breath when audio stream is stopped, paused, or silent
     if (!isPlaying || (rms < 1.2f && peak < 3.0f)) {
