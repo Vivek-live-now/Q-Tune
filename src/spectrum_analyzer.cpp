@@ -8,11 +8,15 @@
 SpectrumAnalyzer::SpectrumAnalyzer() :
     ringHead(0),
     lastSampleFeedMs(0),
+    lastAnalysisMs(0),
     currentPreset(PRESET_BAR_SPECTRUM),
     active(false),
     micHardwareInitialized(false),
     peakLevel(0.0f),
-    rmsLevel(0.0f) {
+    rmsLevel(0.0f),
+    bassLevel(0.0f),
+    bassFilterState1(0.0f),
+    bassFilterState2(0.0f) {
     memset(bands, 0, sizeof(bands));
     memset(peakHold, 0, sizeof(peakHold));
     memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
@@ -25,8 +29,12 @@ bool SpectrumAnalyzer::begin() {
     micHardwareInitialized = false;
     peakLevel = 0.0f;
     rmsLevel = 0.0f;
+    bassLevel = 0.0f;
+    bassFilterState1 = 0.0f;
+    bassFilterState2 = 0.0f;
     ringHead = 0;
     lastSampleFeedMs = 0;
+    lastAnalysisMs = 0;
     memset(bands, 0, sizeof(bands));
     memset(peakHold, 0, sizeof(peakHold));
     memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
@@ -79,6 +87,9 @@ void SpectrumAnalyzer::clearSamples() {
     memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
     peakLevel = 0.0f;
     rmsLevel = 0.0f;
+    bassLevel = 0.0f;
+    bassFilterState1 = 0.0f;
+    bassFilterState2 = 0.0f;
     ringHead = 0;
 }
 
@@ -94,11 +105,20 @@ void SpectrumAnalyzer::sampleAudioStream() {
         }
         peakLevel = peakLevel * 0.70f;
         rmsLevel = rmsLevel * 0.70f;
+        bassLevel = bassLevel * 0.70f;
+        bassFilterState1 = 0.0f;
+        bassFilterState2 = 0.0f;
         for (size_t i = 0; i < SAMPLE_SIZE; i++) {
             micBuffer[i] = 0;
         }
         return;
     }
+
+    // Rate-limit analysis to ~66 FPS (at least 15 ms between passes)
+    if (now - lastAnalysisMs < 15) {
+        return;
+    }
+    lastAnalysisMs = now;
 
     // Capture latest SAMPLE_SIZE samples from lock-free circular ring buffer
     size_t head = ringHead;
@@ -118,15 +138,27 @@ void SpectrumAnalyzer::sampleAudioStream() {
     float sumSq = 0.0f;
     int16_t peak = 0;
 
+    // 2-pole IIR low-pass filter at ~160 Hz for dedicated true bass/kick transient detection
+    // alpha = 2 * pi * 160 / 44100 ~= 0.0228f
+    const float alpha = 0.0228f;
+    float bassSumSq = 0.0f;
+
     for (size_t i = 0; i < SAMPLE_SIZE; i++) {
         micBuffer[i] -= dc;
         int16_t a = abs(micBuffer[i]);
         if (a > peak) peak = a;
         sumSq += (float)a * a;
+
+        // Cascade two single-pole low pass filters for >40x rejection of mids/highs
+        float raw = (float)micBuffer[i];
+        bassFilterState1 += alpha * (raw - bassFilterState1);
+        bassFilterState2 += alpha * (bassFilterState1 - bassFilterState2);
+        bassSumSq += bassFilterState2 * bassFilterState2;
     }
 
     peakLevel = (float)peak;
     rmsLevel = sqrtf(sumSq / SAMPLE_SIZE);
+    bassLevel = sqrtf(bassSumSq / SAMPLE_SIZE);
 
     processFFT();
 }
@@ -211,6 +243,7 @@ void SpectrumAnalyzer::sampleMicrophone() {
 
     peakLevel = (float)peak;
     rmsLevel = sqrtf(sumSq / SAMPLE_SIZE);
+    bassLevel = rmsLevel * 0.7f;
 
     processFFT();
 }

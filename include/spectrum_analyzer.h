@@ -43,6 +43,7 @@ public:
 
     float getPeakLevel() const { return peakLevel; }
     float getRMSLevel() const { return rmsLevel; }
+    float getBassLevel() const { return bassLevel; }
     const uint8_t* getBands() const { return bands; }
 
 private:
@@ -53,6 +54,7 @@ private:
     int16_t ringBuffer[RING_BUFFER_SIZE]; // Lock-free circular sample tap from AudioPlayer
     volatile size_t ringHead;
     unsigned long lastSampleFeedMs;
+    unsigned long lastAnalysisMs;
 
     uint8_t bands[16];
     uint8_t peakHold[16];
@@ -63,6 +65,9 @@ private:
     bool micHardwareInitialized;
     float peakLevel;
     float rmsLevel;
+    float bassLevel;
+    float bassFilterState1;
+    float bassFilterState2;
 
     void processFFT();
     void drawBars();

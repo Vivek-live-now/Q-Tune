@@ -219,7 +219,9 @@ void LEDManager::onPlaybackResume() {
 }
 
 void LEDManager::onPlaybackPause() {
-    setColor(CRGB::Orange);
+    setMode(LedMode::BREATHING);
+    leds[0] = CRGB::Orange;
+    FastLED.show();
 }
 
 void LEDManager::onPlaybackStop() {
@@ -244,7 +246,7 @@ void LEDManager::updateReactiveModes(float dt) {
                 // Rhythmic beat demo pulse (1.25 Hz pulse)
                 float pulse = 0.5f + 0.5f * sinf(anim_phase * 2.5f);
                 pulse = pulse * pulse * pulse; // sharp kick attack curve
-                uint8_t val = (uint8_t)(35 + pulse * 220);
+                uint8_t val = (uint8_t)(25 + pulse * 230);
                 CRGB c = current_color;
                 c.nscale8(val);
                 leds[0] = c;
@@ -254,7 +256,7 @@ void LEDManager::updateReactiveModes(float dt) {
                 // Smooth demo sweep across VU color gradient (Cyan -> Green -> Yellow -> Red)
                 float sweep = 0.5f + 0.5f * sinf(anim_phase * 1.5f);
                 uint8_t vuHue = (uint8_t)(140.0f - sweep * 140.0f);
-                uint8_t val = (uint8_t)(60 + sweep * 195);
+                uint8_t val = (uint8_t)(40 + sweep * 215);
                 leds[0] = CHSV(vuHue, 255, val);
                 break;
             }
@@ -289,7 +291,7 @@ void LEDManager::updateReactiveModes(float dt) {
                 }
                 reactive_flash -= dt * 4.2f;
                 if (reactive_flash < 0.0f) reactive_flash = 0.0f;
-                uint8_t val = (uint8_t)(30 + reactive_flash * 225);
+                uint8_t val = (uint8_t)(20 + reactive_flash * 235);
                 leds[0] = CHSV((uint8_t)reactive_hue, 255, val);
                 break;
             }
@@ -300,54 +302,67 @@ void LEDManager::updateReactiveModes(float dt) {
     }
 
     // =========================================================================
-    // REAL-TIME AUDIO REACTIVE ENGINE (With Dynamic AGC Normalization)
+    // REAL-TIME AUDIO REACTIVE ENGINE (With Dynamic Transient Beat Tracking)
     // =========================================================================
 
-    // 1. Composite Bass Energy (low frequency FFT bands + raw audio envelope)
-    float bassRaw = (bands[0] * 2.2f + bands[1] * 1.6f + bands[2] * 1.1f + rms * 0.9f + peak * 0.3f);
-    if (bassRaw > bass_max) {
-        bass_max = bassRaw; // instant attack
+    // 1. Dedicated Sub-Bass / Kick Energy & Dynamic Baseline Tracking
+    // Combine 160Hz IIR low-passed bass with low-frequency FFT bins
+    float bassInst = spectrumAnalyzer.getBassLevel() * 1.6f + bands[0] * 1.5f + bands[1] * 0.8f;
+
+    // Smooth baseline tracks ongoing background acoustic energy (tau ~ 0.35s)
+    bass_avg += (bassInst - bass_avg) * (dt * 2.8f);
+
+    // Dynamic transient difference above baseline:
+    float diff = bassInst - bass_avg;
+    if (diff < 0.0f) diff = 0.0f;
+
+    // Adaptive AGC headroom tracker for transient punch
+    if (diff > bass_max) {
+        bass_max = diff; // instant attack
     } else {
-        bass_max -= dt * (bass_max * 0.22f); // adaptive decay
+        bass_max -= dt * (bass_max * 0.35f); // dynamic decay
     }
-    if (bass_max < 8.0f) bass_max = 8.0f;
-    float bassNorm = constrain((bassRaw / bass_max) * sens, 0.0f, 1.0f);
+    if (bass_max < 6.0f) bass_max = 6.0f;
+
+    // Beat punch normalized from 0.0 (between beats) to 1.0 (on peak beat hits)
+    float punchNorm = constrain((diff / bass_max) * sens, 0.0f, 1.0f);
 
     // 2. RMS Energy / Volume (Overall track loudness)
-    float energyRaw = (rms * 1.8f + peak * 0.4f);
+    float energyRaw = (rms * 1.6f + peak * 0.4f + bassInst * 0.4f);
     if (energyRaw > rms_max) {
         rms_max = energyRaw;
     } else {
-        rms_max -= dt * (rms_max * 0.20f);
+        rms_max -= dt * (rms_max * 0.25f);
     }
     if (rms_max < 6.0f) rms_max = 6.0f;
     float energyNorm = constrain((energyRaw / rms_max) * sens, 0.0f, 1.0f);
 
     // 3. Harmonic Spectrum Centroid (Bass vs Mids vs Highs)
-    float b_val = (bands[0] + bands[1] + bands[2] + bands[3]) + 0.1f;
-    float m_val = (bands[4] + bands[5] + bands[6] + bands[7]) + 0.1f;
-    float h_val = (bands[8] + bands[9] + bands[10] + bands[11] + bands[12]) + 0.1f;
+    float b_val = (bassInst * 1.5f + bands[0] + bands[1]) + 0.1f;
+    float m_val = (bands[3] + bands[4] + bands[5] + bands[6] + bands[7]) + 0.1f;
+    float h_val = (bands[8] + bands[9] + bands[10] + bands[11] + bands[12] + bands[13]) + 0.1f;
     float totalHarmonics = b_val + m_val + h_val;
     if (totalHarmonics > total_max) {
         total_max = totalHarmonics;
     } else {
-        total_max -= dt * (total_max * 0.20f);
+        total_max -= dt * (total_max * 0.25f);
     }
     if (total_max < 8.0f) total_max = 8.0f;
     float harmonicNorm = constrain((totalHarmonics / total_max) * sens, 0.0f, 1.0f);
 
     switch (current_mode) {
         case LedMode::REACT_BASS_PULSE: {
-            // Fast attack on bass hit, punchy exponential decay (~250ms)
-            if (bassNorm > reactive_energy) {
-                reactive_energy = bassNorm;
+            // Instant attack on beat transient, punchy exponential decay (~220ms)
+            if (punchNorm >= reactive_energy) {
+                reactive_energy = punchNorm;
             } else {
-                reactive_energy -= dt * 3.6f;
+                reactive_energy -= dt * 4.5f;
                 if (reactive_energy < 0.0f) reactive_energy = 0.0f;
             }
 
-            // Pulse intensity: dynamic range between 25 and 255
-            uint8_t val = (uint8_t)(25 + reactive_energy * 230);
+            // Perceptual quadratic curve: near dark between beats (value 8), explosive peak (255) on beat
+            float curved = reactive_energy * reactive_energy;
+            uint8_t val = (uint8_t)(8 + curved * 247.0f);
             CRGB c = current_color;
             c.nscale8(val);
             leds[0] = c;
@@ -356,10 +371,10 @@ void LEDManager::updateReactiveModes(float dt) {
 
         case LedMode::REACT_ENERGY_VU: {
             // Real-time VU meter with smooth needle tracking
-            if (energyNorm > reactive_energy) {
+            if (energyNorm >= reactive_energy) {
                 reactive_energy = energyNorm;
             } else {
-                reactive_energy -= dt * 3.0f;
+                reactive_energy -= dt * 3.2f;
                 if (reactive_energy < 0.0f) reactive_energy = 0.0f;
             }
 
@@ -379,7 +394,7 @@ void LEDManager::updateReactiveModes(float dt) {
                 vuHue = (uint8_t)(32.0f - f * 32.0f);
             }
 
-            uint8_t val = (uint8_t)(40 + reactive_energy * 215);
+            uint8_t val = (uint8_t)(25 + reactive_energy * 230.0f);
             leds[0] = CHSV(vuHue, 255, val);
             break;
         }
@@ -389,64 +404,61 @@ void LEDManager::updateReactiveModes(float dt) {
             // Bass dominant -> Red (0) / Orange (15)
             // Mids dominant -> Green (96) / Gold (60)
             // Highs dominant -> Cyan (140) / Blue (175)
-            float targetHue = (b_val * 10.0f + m_val * 96.0f + h_val * 175.0f) / totalHarmonics;
-            reactive_hue += (targetHue - reactive_hue) * (dt * 10.0f);
+            float targetHue = (b_val * 0.0f + m_val * 96.0f + h_val * 175.0f) / totalHarmonics;
+            reactive_hue += (targetHue - reactive_hue) * (dt * 12.0f);
 
-            if (harmonicNorm > reactive_energy) {
+            if (harmonicNorm >= reactive_energy) {
                 reactive_energy = harmonicNorm;
             } else {
-                reactive_energy -= dt * 3.2f;
+                reactive_energy -= dt * 3.6f;
                 if (reactive_energy < 0.0f) reactive_energy = 0.0f;
             }
 
-            uint8_t val = (uint8_t)(45 + reactive_energy * 210);
+            uint8_t val = (uint8_t)(30 + reactive_energy * 225.0f);
             leds[0] = CHSV((uint8_t)reactive_hue, 245, val);
             break;
         }
 
         case LedMode::REACT_RAINBOW_FLOW: {
             // Rainbow wheel rotation accelerates dynamically with music energy
-            float spinSpeed = 35.0f + (energyNorm * 185.0f);
+            float spinSpeed = 35.0f + (energyNorm * 215.0f);
             anim_phase += dt * spinSpeed;
 
-            if (bassNorm > reactive_energy) {
-                reactive_energy = bassNorm;
+            if (punchNorm >= reactive_energy) {
+                reactive_energy = punchNorm;
             } else {
-                reactive_energy -= dt * 3.5f;
+                reactive_energy -= dt * 4.0f;
                 if (reactive_energy < 0.0f) reactive_energy = 0.0f;
             }
 
-            uint8_t val = (uint8_t)(50 + reactive_energy * 205);
+            uint8_t val = (uint8_t)(30 + reactive_energy * 225.0f);
             leds[0] = CHSV((uint8_t)anim_phase, 255, val);
             break;
         }
 
         case LedMode::REACT_FIRE: {
-            // Warm campfire flame that surges into intense gold/white flares on audio peaks
+            // Warm campfire flame that flares into intense gold/white on audio transients
             uint8_t microFlicker = (uint8_t)(rand() % 28);
-            uint8_t fireHue = (uint8_t)constrain(8 + (int)(energyNorm * 26.0f), 0, 35);
-            uint8_t fireVal = (uint8_t)constrain(60 + (int)(energyNorm * 180.0f) + microFlicker, 0, 255);
+            uint8_t fireHue = (uint8_t)constrain(8 + (int)(punchNorm * 26.0f), 0, 35);
+            uint8_t fireVal = (uint8_t)constrain(40 + (int)(punchNorm * 190.0f) + microFlicker, 0, 255);
             leds[0] = CHSV(fireHue, 245, fireVal);
             break;
         }
 
         case LedMode::REACT_DISCO_FLASH: {
-            // Dynamic transient beat detection (spikes in bass energy)
-            float delta = bassRaw - bass_avg;
-            bass_avg += (bassRaw - bass_avg) * (dt * 3.5f);
-
+            // Dynamic transient beat detection (spikes in bass energy above baseline)
             uint32_t now = millis();
-            if (delta > (bass_avg * 0.22f + 1.8f) && (now - last_beat_time > 140)) {
+            if (punchNorm > 0.40f && diff > (bass_avg * 0.20f + 2.0f) && (now - last_beat_time > 130)) {
                 last_beat_time = now;
                 reactive_flash = 1.0f;
-                reactive_hue += 77.0f;
+                reactive_hue += 77.0f; // Golden ratio color jump
                 if (reactive_hue >= 256.0f) reactive_hue -= 256.0f;
             }
 
-            reactive_flash -= dt * 4.5f;
+            reactive_flash -= dt * 5.0f;
             if (reactive_flash < 0.0f) reactive_flash = 0.0f;
 
-            uint8_t val = (uint8_t)(25 + reactive_flash * 230);
+            uint8_t val = (uint8_t)(10 + reactive_flash * 245.0f);
             leds[0] = CHSV((uint8_t)reactive_hue, 255, val);
             break;
         }
@@ -462,12 +474,13 @@ void LEDManager::loop() {
     float dt = (now - last_update) / 1000.0f;
     last_update = now;
 
-    // Low battery cue override (< 10%)
+    // Low battery cue override (< 10%) - ONLY if physical battery is connected (>0.5V)
+    float bat_v = battery.getVoltage();
     int bat_pct = battery.getPercentage();
-    if (bat_pct <= 10 && current_mode != LedMode::LOW_BATTERY_PULSE && current_mode != LedMode::PULSE) {
+    if (bat_v > 0.5f && bat_pct <= 10 && current_mode != LedMode::LOW_BATTERY_PULSE && current_mode != LedMode::PULSE) {
         setMode(LedMode::LOW_BATTERY_PULSE);
-    } else if (bat_pct > 10 && current_mode == LedMode::LOW_BATTERY_PULSE) {
-        setMode(previous_mode);
+    } else if ((bat_v <= 0.5f || bat_pct > 10) && current_mode == LedMode::LOW_BATTERY_PULSE) {
+        setMode(user_mode);
     }
 
     if (isReactiveMode(current_mode)) {
@@ -490,7 +503,7 @@ void LEDManager::loop() {
 
         case LedMode::BREATHING:
             anim_phase += dt * PI; // 0.5Hz breathing rhythm
-            leds[0] = current_color;
+            leds[0] = audioPlayer.isPaused() ? CRGB::Orange : current_color;
             leds[0].nscale8(128 + 127 * sinf(anim_phase));
             break;
 

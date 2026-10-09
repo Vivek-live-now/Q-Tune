@@ -301,6 +301,7 @@ def test_led_manager_modes():
     assert "onPlaybackPause" in h_src
     assert "onPlaybackStop" in h_src
     assert "updateReactiveModes" in cpp_src
+    assert "punchNorm" in cpp_src, "Dynamic transient beat tracking missing in led_manager.cpp"
     print("  [PASS] FastLED non-blocking loop, 6 music-reactive modes, UI controls, and battery override verified.")
 
 def test_inmp441_microphone_pipeline():
@@ -331,6 +332,7 @@ def test_inmp441_microphone_pipeline():
     assert "void stop();" in sh_text, "stop() method missing in spectrum_analyzer.h"
     assert "getPeakLevel()" in sh_text, "getPeakLevel() missing in spectrum_analyzer.h"
     assert "getRMSLevel()" in sh_text, "getRMSLevel() missing in spectrum_analyzer.h"
+    assert "getBassLevel()" in sh_text, "getBassLevel() missing in spectrum_analyzer.h"
 
     # Real I2S and FFT implementation
     assert "i2s_read" in scpp_text, "i2s_read missing in spectrum_analyzer.cpp"
