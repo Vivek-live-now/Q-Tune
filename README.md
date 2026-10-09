@@ -1,10 +1,10 @@
-# 007 Q-Tune
+# Q-Tunes
 
 A portable, standalone music player built on the ESP32-S3 SuperMini board, inheriting proven pinout, power, and board layout assumptions from the Q-Watch architecture.
 
 ## Overview
 
-Q-Tune provides reliable, low-latency audio playback from an SPI microSD card through an I²S DAC/amplifier (MAX98357A) driving a speaker, paired with an interactive 1.3" SPI OLED display, 3 debounced control buttons, battery voltage monitoring, WS2812 RGB status LED, and INMP441 MEMS microphone audio spectrum visualizers.
+Q-Tunes provides reliable, low-latency audio playback (lossless WAV and FLAC) from an SPI microSD card through an I²S DAC/amplifier (MAX98357A) driving a speaker, paired with an interactive 1.3" SPI OLED display, debounced control buttons, battery voltage monitoring, WS2812 RGB status LED, and real-time audio spectrum visualizers (live audio stream decoding and INMP441 MEMS microphone).
 
 ---
 
@@ -156,6 +156,32 @@ The diagnostics suite verifies all physical subsystems:
 9. **I2S Audio Test** - Synthesized 1kHz test tone through MAX98357A
 10. **INMP441 Mic Visualizer** - Audio spectrum and MilkDrop-style visualizer presets
 11. **Return to Menu** - Clean exit to the unified home shell
+
+---
+
+## microSD Anti-Corruption & Hardware Safety Mechanisms
+
+Portable audio players risk microSD filesystem corruption from sudden power cutoffs, brownouts, or hot card removal. Q-Tune implements a 5-layer safety architecture:
+
+1. **Graceful Power-Down & Sleep Unmount Protocol**:
+   - Calling `powerManager.safeShutdown()` halts active audio streams, closes file handles, takes the SPI bus mutex, and invokes `SD.end()`.
+   - Forces `SD_CS` (GPIO 8) to `HIGH` (deselected) and locks it during ESP32-S3 deep sleep using `gpio_hold_en((gpio_num_t)SD_CS)` and `gpio_deep_sleep_hold_en()`. This prevents floating lines from causing spurious SPI clocking or card controller wear-leveling corruption while sleeping.
+
+2. **Critical Low-Battery Auto-Shutdown Sentry**:
+   - High volume playback with the MAX98357A amplifier can trigger brownout voltage sag when the LiPo battery is nearly exhausted.
+   - Continuous battery sampling in the main loop detects critical thresholds (`<= 3.35V`). The sentry immediately terminates audio playback (shedding high-current load), flashes an OLED shutdown alert, unmounts the SD card cleanly, and enters deep sleep.
+
+3. **Software Safe Eject & Hot Remount**:
+   - In **System Info**, pressing **OK / Select** toggles **Safe Eject SD** / **Mount SD**.
+   - Safe Eject cleanly unmounts the card, pulls CS HIGH, and reports `SD: EJECTED (SAFE)` on screen before the card is physically removed.
+   - Re-inserting the card and pressing Select remounts the filesystem and rescans the playlist without requiring an ESP32 reboot.
+
+4. **Hot-Unplug & I/O Read Error Watchdog**:
+   - If the microSD card is removed during active playback or suffers read timeouts, the audio engine detects consecutive read failures (`consecutiveReadErrors >= 3`), immediately aborts playback, releases the SPI mutex, closes handles, and triggers `sdManager.notifyCardRemoved()`.
+
+5. **Mutual Bus Exclusion & Read-Only Guarantees**:
+   - Both `OLED_CS` and `SD_CS` are mutually de-asserted (HIGH) before alternate bus transfers begin over the shared SPI bus (GPIO 5, 7).
+   - Audio operations strictly use `FILE_READ`, preventing uncommitted write cache corruption.
 
 ---
 

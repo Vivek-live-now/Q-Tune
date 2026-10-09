@@ -1,6 +1,7 @@
 #include "sd_manager.h"
+#include "audio_player.h"
 
-SDManager::SDManager() : mounted(false) {}
+SDManager::SDManager() : mounted(false), safeToRemove(true) {}
 
 bool SDManager::begin() {
     if (spiBusMutex != NULL) {
@@ -22,17 +23,59 @@ bool SDManager::begin() {
     if (!SD.begin(SD_CS, SPI, 10000000)) {
         if (!SD.begin(SD_CS, SPI, 4000000)) {
             mounted = false;
+            safeToRemove = true;
             if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             return false;
         }
     }
     mounted = true;
+    safeToRemove = false;
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return true;
 }
 
+bool SDManager::unmount() {
+    if (!mounted && safeToRemove) return true;
+
+    // Gracefully stop audio playback to close active file handles and release streams
+    audioPlayer.stop();
+
+    if (spiBusMutex != NULL) {
+        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    }
+
+    SD.end();
+    mounted = false;
+    safeToRemove = true;
+
+    // Force SD_CS HIGH (deselected/idle state) to protect card flash during standby
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+
+    if (spiBusMutex != NULL) {
+        xSemaphoreGive(spiBusMutex);
+    }
+    return true;
+}
+
+bool SDManager::remount() {
+    unmount();
+    return begin();
+}
+
 bool SDManager::isMounted() const {
     return mounted;
+}
+
+bool SDManager::isSafeToRemove() const {
+    return safeToRemove;
+}
+
+void SDManager::notifyCardRemoved() {
+    mounted = false;
+    safeToRemove = true;
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
 }
 
 std::vector<String> SDManager::listMusicFiles() {

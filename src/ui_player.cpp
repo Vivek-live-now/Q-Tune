@@ -98,7 +98,11 @@ bool UIPlayer::update() {
             Display::navigateMenu(currentTrackIndex, trackScrollOffset, (int)trackList.size(), +1);
             ledManager.triggerPulse(CRGB::Blue, 1, 40);
         } else if (evt == BTN_EVENT_SEL_PRESS) {
-            if (!trackList.empty()) {
+            if (!sdManager.isMounted()) {
+                sdManager.remount();
+                refreshTrackList();
+                ledManager.triggerPulse(CRGB::Green, 1, 60);
+            } else if (!trackList.empty()) {
                 inListMode = false;
                 audioPlayer.playFile(trackList[currentTrackIndex]);
                 ledManager.setMode(LedMode::BREATHING);
@@ -149,11 +153,18 @@ bool UIPlayer::update() {
 
 void UIPlayer::renderTrackList() {
     display.clear();
-    if (trackList.empty()) {
-        display.drawTopStatusBar("Q-TUNE MUSIC", battery.getPercentage());
+    if (!sdManager.isMounted()) {
+        display.drawTopStatusBar("Q-TUNES MUSIC", battery.getPercentage());
         U8G2 &u8g2 = display.getU8g2();
         u8g2.setFont(u8g2_font_6x10_tr);
-        u8g2.drawStr(10, 26, "No WAV in /music");
+        u8g2.drawStr(10, 26, "SD Not Mounted");
+        u8g2.drawStr(10, 40, "SEL: Mount SD Card");
+        u8g2.drawStr(10, 54, "CANCEL: Main Menu");
+    } else if (trackList.empty()) {
+        display.drawTopStatusBar("Q-TUNES MUSIC", battery.getPercentage());
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(10, 26, "No Tracks in /music");
         u8g2.drawStr(10, 40, "SEL: Refresh");
         u8g2.drawStr(10, 54, "CANCEL: Main Menu");
     } else {
@@ -168,7 +179,7 @@ void UIPlayer::renderTrackList() {
         }
         char headerBuf[24];
         snprintf(headerBuf, sizeof(headerBuf), "%d/%d", currentTrackIndex + 1, (int)trackList.size());
-        display.drawStandardMenu("Q-TUNE MUSIC", itemPtrs.data(), (int)trackList.size(), currentTrackIndex, trackScrollOffset, (const String*)nullptr, headerBuf);
+        display.drawStandardMenu("Q-TUNES MUSIC", itemPtrs.data(), (int)trackList.size(), currentTrackIndex, trackScrollOffset, (const String*)nullptr, headerBuf);
     }
     display.sendBuffer();
 }
@@ -197,8 +208,11 @@ void UIPlayer::renderPlayer() {
 
     // Playback state
     String stateStr = "■ STOPPED";
-    if (audioPlayer.isPlaying()) stateStr = "▶ PLAYING (44.1k)";
-    else if (audioPlayer.isPaused()) stateStr = "❚❚ PAUSED";
+    if (audioPlayer.isPlaying()) {
+        stateStr = audioPlayer.isFLAC() ? "▶ PLAYING (FLAC)" : "▶ PLAYING (WAV)";
+    } else if (audioPlayer.isPaused()) {
+        stateStr = "❚❚ PAUSED";
+    }
     u8g2.drawStr(0, 35, stateStr.c_str());
 
     // Time elapsed / total

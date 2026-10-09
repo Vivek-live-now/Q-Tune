@@ -1,9 +1,11 @@
 #include "audio_player.h"
 #include "spectrum_analyzer.h"
+#include "sd_manager.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
     bytesPlayed(0), totalDataBytes(0), dataOffset(44), currentTrackPath(""),
+    currentAudioType(0), consecutiveReadErrors(0), currentSampleRate(44100), currentChannels(2), currentBitsPerSample(16),
     currentVolume(80), volumeScale(163),
     audioTaskHandle(NULL), taskRunning(false) {}
 
@@ -117,6 +119,7 @@ bool AudioPlayer::parseWAVHeader(File &file, WAVHeader &header) {
 bool AudioPlayer::playFile(const String &path) {
     stop();
     clearFinished();
+    consecutiveReadErrors = 0;
 
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     bool exists = SD.exists(path);
@@ -131,18 +134,45 @@ bool AudioPlayer::playFile(const String &path) {
         return false;
     }
 
+    AudioFormat fmt = DecoderFactory::detectFormat(path);
+    if (fmt == AUDIO_FORMAT_FLAC) {
+        if (!flacDecoder.open(wavFile)) {
+            wavFile.close();
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+            return false;
+        }
+        currentAudioType = 2; // FLAC
+        currentSampleRate = flacDecoder.getSampleRate();
+        currentChannels = flacDecoder.getChannels();
+        currentBitsPerSample = flacDecoder.getBitsPerSample();
+        totalDataBytes = flacDecoder.getTotalBytes();
+        bytesPlayed = 0;
+        dataOffset = 0;
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
+        currentTrackPath = path;
+        playing = true;
+        paused = false;
+        return true;
+    }
+
     if (!parseWAVHeader(wavFile, currentWavHeader)) {
         wavFile.close();
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
         return false;
     }
 
+    currentAudioType = 1; // WAV
+    currentSampleRate = currentWavHeader.sampleRate;
+    currentChannels = currentWavHeader.numChannels;
+    currentBitsPerSample = currentWavHeader.bitsPerSample;
     totalDataBytes = currentWavHeader.dataSize;
     bytesPlayed = 0;
     wavFile.seek(dataOffset);
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
-    setupI2S(currentWavHeader.sampleRate, currentWavHeader.numChannels, currentWavHeader.bitsPerSample);
+    setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
 
     currentTrackPath = path;
     playing = true;
@@ -152,6 +182,103 @@ bool AudioPlayer::playFile(const String &path) {
 
 void AudioPlayer::update() {
     if (!playing || paused || !wavFile) return;
+
+    if (currentAudioType == 2) {
+        // FLAC Audio Stream Decoding
+        if (currentChannels == 1) {
+            int16_t monoBuf[256];
+            int16_t stereoBuf[512];
+            int bytesToRead = sizeof(monoBuf);
+            if (bytesPlayed + bytesToRead > totalDataBytes) {
+                bytesToRead = totalDataBytes - bytesPlayed;
+            }
+            if (bytesToRead <= 0) {
+                stop();
+                trackFinished = true;
+                return;
+            }
+
+            int bytesRead = 0;
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+            bytesRead = flacDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+            if (bytesRead > 0) {
+                consecutiveReadErrors = 0;
+                int samples = bytesRead / sizeof(int16_t);
+                spectrumAnalyzer.feedSamples(monoBuf, samples, 1);
+                for (int i = 0; i < samples; i++) {
+                    int16_t sample = monoBuf[i];
+                    if (volumeScale < 256) {
+                        sample = (int16_t)(((int32_t)sample * volumeScale) >> 8);
+                    }
+                    stereoBuf[i * 2] = sample;
+                    stereoBuf[i * 2 + 1] = sample;
+                }
+                size_t bytesWritten = 0;
+                i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
+                bytesPlayed += bytesRead;
+            } else {
+                if (bytesPlayed + bytesToRead < totalDataBytes) {
+                    consecutiveReadErrors++;
+                    if (consecutiveReadErrors >= 3) {
+                        stop();
+                        sdManager.notifyCardRemoved();
+                        return;
+                    }
+                } else {
+                    stop();
+                    trackFinished = true;
+                }
+            }
+        } else {
+            uint8_t buffer[1024];
+            int bytesToRead = sizeof(buffer);
+            if (bytesPlayed + bytesToRead > totalDataBytes) {
+                bytesToRead = totalDataBytes - bytesPlayed;
+            }
+            if (bytesToRead <= 0) {
+                stop();
+                trackFinished = true;
+                return;
+            }
+
+            int bytesRead = 0;
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+            bytesRead = flacDecoder.readSamples(buffer, bytesToRead);
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+            if (bytesRead > 0) {
+                consecutiveReadErrors = 0;
+                int frameCount = bytesRead / (sizeof(int16_t) * 2);
+                spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
+
+                if (volumeScale < 256) {
+                    int16_t *samples = (int16_t*)buffer;
+                    int sampleCount = bytesRead / sizeof(int16_t);
+                    for (int i = 0; i < sampleCount; i++) {
+                        samples[i] = (int16_t)(((int32_t)samples[i] * volumeScale) >> 8);
+                    }
+                }
+                size_t bytesWritten = 0;
+                i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
+                bytesPlayed += bytesWritten;
+            } else {
+                if (bytesPlayed + bytesToRead < totalDataBytes) {
+                    consecutiveReadErrors++;
+                    if (consecutiveReadErrors >= 3) {
+                        stop();
+                        sdManager.notifyCardRemoved();
+                        return;
+                    }
+                } else {
+                    stop();
+                    trackFinished = true;
+                }
+            }
+        }
+        return;
+    }
 
     if (currentWavHeader.numChannels == 1) {
         // Expand Mono PCM to Stereo frames for MAX98357A I2S
@@ -176,6 +303,7 @@ void AudioPlayer::update() {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
+            consecutiveReadErrors = 0;
             int samples = bytesRead / sizeof(int16_t);
             spectrumAnalyzer.feedSamples(monoBuf, samples, 1);
             for (int i = 0; i < samples; i++) {
@@ -190,8 +318,17 @@ void AudioPlayer::update() {
             i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
             bytesPlayed += bytesRead;
         } else {
-            stop();
-            trackFinished = true;
+            if (bytesPlayed + bytesToRead < totalDataBytes) {
+                consecutiveReadErrors++;
+                if (consecutiveReadErrors >= 3) {
+                    stop();
+                    sdManager.notifyCardRemoved();
+                    return;
+                }
+            } else {
+                stop();
+                trackFinished = true;
+            }
         }
     } else {
         // Direct Stereo PCM streaming
@@ -215,6 +352,7 @@ void AudioPlayer::update() {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
+            consecutiveReadErrors = 0;
             int frameCount = bytesRead / (sizeof(int16_t) * 2);
             spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
 
@@ -229,8 +367,17 @@ void AudioPlayer::update() {
             i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
             bytesPlayed += bytesWritten;
         } else {
-            stop();
-            trackFinished = true;
+            if (bytesPlayed + bytesToRead < totalDataBytes) {
+                consecutiveReadErrors++;
+                if (consecutiveReadErrors >= 3) {
+                    stop();
+                    sdManager.notifyCardRemoved();
+                    return;
+                }
+            } else {
+                stop();
+                trackFinished = true;
+            }
         }
     }
 }
@@ -243,16 +390,27 @@ void AudioPlayer::resume() {
     if (playing) paused = false;
 }
 
-void AudioPlayer::stop() {
-    playing = false;
-    paused = false;
-    currentTrackPath = "";
+void AudioPlayer::closeFiles() {
+    if (currentAudioType == 2) {
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        flacDecoder.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    }
+    currentAudioType = 0;
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     if (wavFile) {
         wavFile.close();
     }
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+}
+
+void AudioPlayer::stop() {
+    playing = false;
+    paused = false;
+    currentTrackPath = "";
+    closeFiles();
     bytesPlayed = 0;
+    consecutiveReadErrors = 0;
     i2s_zero_dma_buffer(I2S_NUM);
     spectrumAnalyzer.clearSamples();
 }
@@ -266,13 +424,15 @@ bool AudioPlayer::isPaused() const {
 }
 
 uint32_t AudioPlayer::getPositionMs() const {
-    if (currentWavHeader.byteRate == 0) return 0;
-    return (bytesPlayed * 1000ULL) / currentWavHeader.byteRate;
+    uint32_t byteRate = currentSampleRate * currentChannels * (currentBitsPerSample / 8);
+    if (byteRate == 0) return 0;
+    return (bytesPlayed * 1000ULL) / byteRate;
 }
 
 uint32_t AudioPlayer::getDurationMs() const {
-    if (currentWavHeader.byteRate == 0) return 0;
-    return (totalDataBytes * 1000ULL) / currentWavHeader.byteRate;
+    uint32_t byteRate = currentSampleRate * currentChannels * (currentBitsPerSample / 8);
+    if (byteRate == 0) return 0;
+    return (totalDataBytes * 1000ULL) / byteRate;
 }
 
 void AudioPlayer::playTestTone(uint16_t frequencyHz, uint16_t durationMs) {
@@ -380,6 +540,10 @@ String AudioPlayer::getCurrentTrackName() const {
         return currentTrackPath.substring(lastSlash + 1);
     }
     return currentTrackPath;
+}
+
+bool AudioPlayer::isFLAC() const {
+    return (currentAudioType == 2);
 }
 
 AudioPlayer audioPlayer;

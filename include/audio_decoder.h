@@ -58,15 +58,24 @@ private:
 class FLACDecoder : public AudioDecoder {
 public:
     FLACDecoder();
+    ~FLACDecoder() override;
     bool open(File &file) override;
     int readSamples(uint8_t *buffer, size_t maxBytes) override;
     uint32_t getSampleRate() const override;
     uint16_t getChannels() const override;
     uint16_t getBitsPerSample() const override;
     uint32_t getTotalBytes() const override;
+    void close();
+    bool isOpen() const;
 
 private:
     File srcFile;
+    void* pFlacHandle;
+    uint32_t sampleRate;
+    uint16_t channels;
+    uint16_t bitsPerSample;
+    uint32_t totalBytes;
+    uint32_t bytesReadSoFar;
 };
 
 class DecoderFactory {

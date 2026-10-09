@@ -583,6 +583,105 @@ def test_qwatch_aligned_menu_system():
 
     print("  [PASS] Q-Watch 4-item scroll window, inverted highlight box, 123px scrollbar thumb, and cross-subsystem integration verified.")
 
+def test_flac_decoder_and_clean_naming():
+    print("\n--- 15. FLAC Decoder Engine & Clean Q-Tunes Architecture Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dr_flac_h = os.path.join(base_dir, "include", "dr_flac.h")
+    dec_h = os.path.join(base_dir, "include", "audio_decoder.h")
+    dec_cpp = os.path.join(base_dir, "src", "audio_decoder.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+    readme_md = os.path.join(base_dir, "README.md")
+
+    # 1. Verify dr_flac header presence
+    assert os.path.exists(dr_flac_h), "dr_flac.h missing from include directory"
+
+    with open(dec_h) as f:
+        dh_src = f.read()
+    with open(dec_cpp) as f:
+        dcpp_src = f.read()
+    with open(ap_h) as f:
+        aph_src = f.read()
+    with open(ap_cpp) as f:
+        apcpp_src = f.read()
+    with open(main_cpp) as f:
+        main_src = f.read()
+    with open(readme_md) as f:
+        readme_src = f.read()
+
+    # 2. Verify FLAC Decoder integration
+    assert "class FLACDecoder : public AudioDecoder" in dh_src
+    assert "drflac_open" in dcpp_src
+    assert "drflac_read_pcm_frames_s16" in dcpp_src
+    assert "flac_read_cb" in dcpp_src and "flac_seek_cb" in dcpp_src
+    assert "AUDIO_FORMAT_FLAC" in dh_src
+    assert "lower.endsWith(\".flac\")" in dcpp_src
+
+    # 3. Verify AudioPlayer integration for FLAC
+    assert "bool isFLAC() const;" in aph_src
+    assert "FLACDecoder flacDecoder;" in aph_src
+    assert "flacDecoder.open" in apcpp_src
+    assert "flacDecoder.readSamples" in apcpp_src
+
+    # 4. Verify Clean Q-Tunes branding (no 007 in menus or headers)
+    assert 'display.drawStandardMenu("Q-TUNES"' in main_src, "Main menu should display clean Q-TUNES"
+    assert "007" not in main_src, "main.cpp must not contain 007"
+    assert not readme_src.startswith("# 007"), "README.md should be titled Q-Tunes"
+
+    print("  [PASS] dr_flac stream decoder, custom I/O callbacks, format detection, and clean Q-Tunes branding verified.")
+
+def test_sd_safety_mechanisms():
+    print("\n--- 16. SD Card Anti-Corruption & Safety Mechanisms Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sd_h = os.path.join(base_dir, "include", "sd_manager.h")
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    pm_h = os.path.join(base_dir, "include", "power_manager.h")
+    pm_cpp = os.path.join(base_dir, "src", "power_manager.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+
+    with open(sd_h) as f: sdh_src = f.read()
+    with open(sd_cpp) as f: sdcpp_src = f.read()
+    with open(pm_h) as f: pmh_src = f.read()
+    with open(pm_cpp) as f: pmcpp_src = f.read()
+    with open(ap_h) as f: aph_src = f.read()
+    with open(ap_cpp) as f: apcpp_src = f.read()
+    with open(main_cpp) as f: main_src = f.read()
+    with open(ui_cpp) as f: ui_src = f.read()
+
+    # 1. SDManager Unmount & Standby Protocol
+    assert "bool unmount();" in sdh_src, "Missing unmount() declaration"
+    assert "bool remount();" in sdh_src, "Missing remount() declaration"
+    assert "bool isSafeToRemove() const;" in sdh_src, "Missing isSafeToRemove() declaration"
+    assert "void notifyCardRemoved();" in sdh_src, "Missing notifyCardRemoved() declaration"
+    assert "SD.end();" in sdcpp_src, "SD.end() not called during unmount"
+    assert "digitalWrite(SD_CS, HIGH);" in sdcpp_src, "SD_CS must be pulled HIGH on unmount"
+    assert "audioPlayer.stop();" in sdcpp_src, "unmount must halt active audio playback"
+
+    # 2. PowerManager Brownout Prevention & Graceful Shutdown
+    assert "CRITICAL_SHUTDOWN_VOLTAGE" in pmh_src, "Missing CRITICAL_SHUTDOWN_VOLTAGE threshold"
+    assert "safeShutdown" in pmh_src, "Missing safeShutdown declaration"
+    assert "checkBatterySafety" in pmh_src, "Missing checkBatterySafety declaration"
+    assert "sdManager.unmount();" in pmcpp_src, "safeShutdown must invoke sdManager.unmount()"
+    assert "gpio_hold_en((gpio_num_t)SD_CS);" in pmcpp_src, "Deep sleep must hold SD_CS HIGH"
+    assert "gpio_deep_sleep_hold_en();" in pmcpp_src, "Deep sleep must enable GPIO hold"
+
+    # 3. AudioPlayer I/O Watchdog & Safe File Handles
+    assert "consecutiveReadErrors" in aph_src, "AudioPlayer must track consecutive read errors"
+    assert "closeFiles();" in aph_src, "AudioPlayer must expose clean closeFiles() method"
+    assert "sdManager.notifyCardRemoved();" in apcpp_src, "AudioPlayer watchdog must notify on card removal"
+
+    # 4. Main App Shell & UI Integration
+    assert "powerManager.checkBatterySafety();" in main_src, "Main loop must monitor battery safety"
+    assert "powerManager.safeShutdown" in main_src, "Main menu CANCEL_HOLD must trigger safe shutdown"
+    assert "sdManager.unmount()" in main_src and "sdManager.remount()" in main_src, "System Info must support manual safe eject toggle"
+    assert "SD Not Mounted" in ui_src, "Player must handle unmounted SD card gracefully"
+
+    print("  [PASS] Clean unmount protocol, deep-sleep SD_CS hold, brownout auto-shutdown, hot-unplug watchdog, and safe eject UI verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -601,7 +700,10 @@ def main():
     test_app_shell_and_mode_switching()
     test_live_wav_decoding_visualizer_pipeline()
     test_qwatch_aligned_menu_system()
-    print("\nAll 14 Q-Tune test verifications PASSED (100%)!\n")
+    test_flac_decoder_and_clean_naming()
+    test_sd_safety_mechanisms()
+    print("\nAll 16 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
+
     main()

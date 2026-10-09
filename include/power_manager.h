@@ -12,6 +12,9 @@ enum class PowerProfile : uint8_t {
 
 class PowerManager {
 public:
+    static constexpr float CRITICAL_SHUTDOWN_VOLTAGE = 3.35f; // LiPo cutoff brownout threshold
+    static constexpr float LOW_BATTERY_WARNING_VOLTAGE = 3.50f;
+
     PowerManager();
     void begin();
 
@@ -26,8 +29,15 @@ public:
     void enterLightSleep(uint32_t ms = 0);
     void enterDeepSleep();
 
+    // SD Card Safety & Graceful Power-Down
+    void safeShutdown(const char* reason = "POWER OFF");
+    void checkBatterySafety();
+    bool isShutdownInitiated() const { return shutdownInitiated; }
+
 private:
     PowerProfile currentProfile;
+    bool shutdownInitiated;
+    uint8_t lowVoltageHitCount;
 };
 
 extern PowerManager powerManager;

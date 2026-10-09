@@ -44,7 +44,7 @@ void renderMainMenu() {
     vals[2] = "[10]";
     vals[3] = "[INFO]";
 
-    display.drawStandardMenu("007 Q-TUNE", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
+    display.drawStandardMenu("Q-TUNES", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
     display.sendBuffer();
 }
 
@@ -79,6 +79,9 @@ void updateMainMenu() {
                 currentMode = MODE_SYSTEM_INFO;
                 break;
         }
+    } else if (evt == BTN_EVENT_CANCEL_HOLD) {
+        ledManager.triggerPulse(CRGB::Red, 2, 100);
+        powerManager.safeShutdown("USER POWER OFF");
     }
 }
 
@@ -132,15 +135,22 @@ void updateSystemInfoMode() {
     snprintf(buf, sizeof(buf), "VOL:  %d%%", audioPlayer.getVolume());
     u8g2.drawStr(4, 47, buf);
 
-    snprintf(buf, sizeof(buf), "MODE: %s | SD: %s",
-             uiPlayer.getPlaybackModeString(),
-             sdManager.isMounted() ? "OK" : "NO");
+    const char* sdStatusStr = sdManager.isMounted() ? "MOUNTED (OK)" : (sdManager.isSafeToRemove() ? "EJECTED (SAFE)" : "UNMOUNTED");
+    snprintf(buf, sizeof(buf), "SD: %s", sdStatusStr);
     u8g2.drawStr(4, 59, buf);
 
     display.sendBuffer();
 
     ButtonEvent evt = buttonManager.update();
-    if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+    if (evt == BTN_EVENT_SEL_PRESS) {
+        if (sdManager.isMounted()) {
+            sdManager.unmount();
+            ledManager.triggerPulse(CRGB::Orange, 2, 80);
+        } else {
+            sdManager.remount();
+            ledManager.triggerPulse(CRGB::Green, 2, 80);
+        }
+    } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
         currentMode = MODE_MAIN_MENU;
     }
 }
@@ -166,6 +176,7 @@ void setup() {
 
 void loop() {
     ledManager.loop();
+    powerManager.checkBatterySafety();
 
     switch (currentMode) {
         case MODE_MAIN_MENU:

@@ -6,6 +6,7 @@
 #include <SD.h>
 #include <vector>
 #include "hw_config.h"
+#include "audio_decoder.h"
 
 struct WAVHeader {
     char riff[4];
@@ -56,6 +57,8 @@ public:
     // Track metadata
     String getCurrentTrackPath() const;
     String getCurrentTrackName() const;
+    bool isFLAC() const;
+    void closeFiles();
 
 private:
     bool initialized;
@@ -68,6 +71,14 @@ private:
     uint32_t totalDataBytes;
     uint32_t dataOffset;
     String currentTrackPath;
+
+    // Multi-format audio engine state (WAV & FLAC)
+    uint8_t currentAudioType; // 0: None, 1: WAV, 2: FLAC
+    uint8_t consecutiveReadErrors;
+    uint32_t currentSampleRate;
+    uint16_t currentChannels;
+    uint16_t currentBitsPerSample;
+    FLACDecoder flacDecoder;
 
     // Digital Volume Scaling (Quadratic perceptual curve)
     uint8_t currentVolume;

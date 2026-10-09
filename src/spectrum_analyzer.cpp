@@ -375,7 +375,7 @@ void SpectrumAnalyzer::drawBars() {
 
     String track = audioPlayer.getCurrentTrackName();
     if (track.length() == 0) {
-        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
     }
     if (track.length() > 13) {
         track = track.substring(0, 11) + "..";
@@ -422,7 +422,7 @@ void SpectrumAnalyzer::drawWaveform() {
 
     String track = audioPlayer.getCurrentTrackName();
     if (track.length() == 0) {
-        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
     }
     if (track.length() > 13) {
         track = track.substring(0, 11) + "..";
@@ -469,7 +469,7 @@ void SpectrumAnalyzer::drawPlasma() {
 
     String track = audioPlayer.getCurrentTrackName();
     if (track.length() == 0) {
-        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
     }
     if (track.length() > 12) {
         track = track.substring(0, 10) + "..";
@@ -501,7 +501,7 @@ void SpectrumAnalyzer::drawStarfield() {
 
     String track = audioPlayer.getCurrentTrackName();
     if (track.length() == 0) {
-        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
     }
     if (track.length() > 13) {
         track = track.substring(0, 11) + "..";
