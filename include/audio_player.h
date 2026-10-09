@@ -73,6 +73,9 @@ public:
     String getCurrentTrackPath() const;
     String getCurrentTrackName() const;
     bool isFLAC() const;
+    bool isMP3() const;
+    bool isM4A() const;
+    const char* getFormatName() const;
     void closeFiles();
 
 private:
@@ -87,14 +90,16 @@ private:
     uint32_t dataOffset;
     String currentTrackPath;
 
-    // Multi-format audio engine state (WAV & FLAC)
-    uint8_t currentAudioType; // 0: None, 1: WAV, 2: FLAC
+    // Multi-format audio engine state (WAV, FLAC, MP3, M4A)
+    uint8_t currentAudioType; // 0: None, 1: WAV, 2: FLAC, 3: MP3, 4: M4A
     uint8_t consecutiveReadErrors;
     uint32_t currentSampleRate;
     uint16_t currentChannels;
     uint16_t currentBitsPerSample;
     FLACDecoder flacDecoder;
     WAVDecoder wavDecoder;
+    MP3Decoder mp3Decoder;
+    M4ADecoder m4aDecoder;
 
     // Digital Volume Scaling (Quadratic perceptual curve)
     uint8_t currentVolume;

@@ -12,6 +12,9 @@
 #define DRFLAC_ASSERT(x) ((void)0)
 #include "dr_flac.h"
 
+#define MINIMP3_IMPLEMENTATION
+#include "minimp3.h"
+
 extern SemaphoreHandle_t spiBusMutex;
 
 static size_t wav_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
@@ -269,12 +272,424 @@ uint16_t FLACDecoder::getChannels() const { return channels; }
 uint16_t FLACDecoder::getBitsPerSample() const { return bitsPerSample; }
 uint32_t FLACDecoder::getTotalBytes() const { return totalBytes; }
 
+// ============================================================================
+// MP3 Decoder (Powered by minimp3 single-header engine)
+// ============================================================================
+
+MP3Decoder::MP3Decoder() :
+    pMp3Handle(nullptr), sampleRate(44100), channels(2), bitsPerSample(16),
+    totalBytes(0), bytesReadSoFar(0), dataStartOffset(0),
+    inputBufferLen(0), inputBufferPos(0),
+    pcmBufferLen(0), pcmBufferPos(0) {
+    pMp3Handle = malloc(sizeof(mp3dec_t));
+    if (pMp3Handle) {
+        mp3dec_init((mp3dec_t*)pMp3Handle);
+    }
+}
+
+MP3Decoder::~MP3Decoder() {
+    close();
+    if (pMp3Handle) {
+        free(pMp3Handle);
+        pMp3Handle = nullptr;
+    }
+}
+
+void MP3Decoder::close() {
+    if (srcFile) {
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        srcFile.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    }
+    sampleRate = 44100;
+    channels = 2;
+    bitsPerSample = 16;
+    totalBytes = 0;
+    bytesReadSoFar = 0;
+    dataStartOffset = 0;
+    inputBufferLen = 0;
+    inputBufferPos = 0;
+    pcmBufferLen = 0;
+    pcmBufferPos = 0;
+}
+
+bool MP3Decoder::isOpen() const {
+    return (srcFile && (pMp3Handle != nullptr));
+}
+
+bool MP3Decoder::open(File &file) {
+    close();
+    srcFile = file;
+    if (!srcFile || srcFile.size() < 128) return false;
+
+    if (!pMp3Handle) {
+        pMp3Handle = malloc(sizeof(mp3dec_t));
+        if (!pMp3Handle) return false;
+    }
+    mp3dec_init((mp3dec_t*)pMp3Handle);
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    srcFile.seek(0);
+    uint8_t id3Hdr[10];
+    if (srcFile.read(id3Hdr, 10) == 10) {
+        if (id3Hdr[0] == 'I' && id3Hdr[1] == 'D' && id3Hdr[2] == '3') {
+            uint32_t tagSize = ((uint32_t)(id3Hdr[6] & 0x7F) << 21) |
+                               ((uint32_t)(id3Hdr[7] & 0x7F) << 14) |
+                               ((uint32_t)(id3Hdr[8] & 0x7F) << 7)  |
+                               ((uint32_t)(id3Hdr[9] & 0x7F));
+            dataStartOffset = tagSize + 10;
+        } else {
+            dataStartOffset = 0;
+        }
+    }
+    srcFile.seek(dataStartOffset);
+    inputBufferLen = srcFile.read(inputBuffer, sizeof(inputBuffer));
+    inputBufferPos = 0;
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+    if (inputBufferLen < 4) return false;
+
+    mp3dec_frame_info_t info;
+    int samples = mp3dec_decode_frame((mp3dec_t*)pMp3Handle,
+                                      inputBuffer + inputBufferPos,
+                                      inputBufferLen - inputBufferPos,
+                                      pcmBuffer,
+                                      &info);
+
+    if (samples <= 0 && info.frame_bytes > 0) {
+        inputBufferPos += info.frame_bytes;
+        samples = mp3dec_decode_frame((mp3dec_t*)pMp3Handle,
+                                      inputBuffer + inputBufferPos,
+                                      inputBufferLen - inputBufferPos,
+                                      pcmBuffer,
+                                      &info);
+    }
+
+    if (info.hz > 0) {
+        sampleRate = info.hz;
+        channels = info.channels;
+        bitsPerSample = 16;
+        pcmBufferLen = samples * channels;
+        pcmBufferPos = 0;
+        inputBufferPos += info.frame_bytes;
+
+        uint32_t audioFileSize = srcFile.size() - dataStartOffset;
+        if (info.bitrate_kbps > 0) {
+            uint32_t durationSec = (audioFileSize * 8) / (info.bitrate_kbps * 1000);
+            totalBytes = durationSec * sampleRate * channels * sizeof(int16_t);
+        } else {
+            totalBytes = audioFileSize * 4;
+        }
+        bytesReadSoFar = 0;
+        return true;
+    }
+
+    return false;
+}
+
+int MP3Decoder::readSamples(uint8_t *buffer, size_t maxBytes) {
+    if (!srcFile || !pMp3Handle || buffer == nullptr || maxBytes == 0) return 0;
+
+    size_t bytesWritten = 0;
+    int16_t *outPtr = (int16_t*)buffer;
+    size_t samplesNeeded = maxBytes / sizeof(int16_t);
+
+    while (samplesNeeded > 0) {
+        if (pcmBufferPos < pcmBufferLen) {
+            size_t available = pcmBufferLen - pcmBufferPos;
+            size_t toCopy = (samplesNeeded < available) ? samplesNeeded : available;
+            memcpy(outPtr, &pcmBuffer[pcmBufferPos], toCopy * sizeof(int16_t));
+            pcmBufferPos += toCopy;
+            outPtr += toCopy;
+            samplesNeeded -= toCopy;
+            bytesWritten += toCopy * sizeof(int16_t);
+        } else {
+            // Need to decode next MP3 frame
+            size_t unparsed = inputBufferLen - inputBufferPos;
+            if (unparsed < 1440 && srcFile.available() > 0) {
+                if (unparsed > 0) {
+                    memmove(inputBuffer, inputBuffer + inputBufferPos, unparsed);
+                }
+                if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                int bytesRead = srcFile.read(inputBuffer + unparsed, sizeof(inputBuffer) - unparsed);
+                if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+                inputBufferLen = unparsed + ((bytesRead > 0) ? bytesRead : 0);
+                inputBufferPos = 0;
+            }
+
+            if (inputBufferPos >= inputBufferLen) {
+                break; // EOF
+            }
+
+            mp3dec_frame_info_t info;
+            int samples = mp3dec_decode_frame((mp3dec_t*)pMp3Handle,
+                                              inputBuffer + inputBufferPos,
+                                              inputBufferLen - inputBufferPos,
+                                              pcmBuffer,
+                                              &info);
+
+            inputBufferPos += (info.frame_bytes > 0) ? info.frame_bytes : 1;
+
+            if (samples > 0) {
+                pcmBufferLen = samples * info.channels;
+                pcmBufferPos = 0;
+            }
+        }
+    }
+
+    bytesReadSoFar += bytesWritten;
+    return (int)bytesWritten;
+}
+
+uint32_t MP3Decoder::getSampleRate() const { return sampleRate; }
+uint16_t MP3Decoder::getChannels() const { return channels; }
+uint16_t MP3Decoder::getBitsPerSample() const { return bitsPerSample; }
+uint32_t MP3Decoder::getTotalBytes() const { return totalBytes; }
+
+// ============================================================================
+// M4A & AAC Decoder (ISO Base Media Container Parser & Stream Demuxer)
+// ============================================================================
+
+M4ADecoder::M4ADecoder() :
+    isRawADTS(false), sampleRate(44100), channels(2), bitsPerSample(16),
+    totalBytes(0), bytesReadSoFar(0), mdatOffset(0), mdatSize(0), currentFilePos(0),
+    inputBufferLen(0), inputBufferPos(0), pcmBufferLen(0), pcmBufferPos(0) {
+}
+
+M4ADecoder::~M4ADecoder() {
+    close();
+}
+
+void M4ADecoder::close() {
+    if (srcFile) {
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        srcFile.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    }
+    sampleRate = 44100;
+    channels = 2;
+    bitsPerSample = 16;
+    totalBytes = 0;
+    bytesReadSoFar = 0;
+    mdatOffset = 0;
+    mdatSize = 0;
+    currentFilePos = 0;
+    inputBufferLen = 0;
+    inputBufferPos = 0;
+    pcmBufferLen = 0;
+    pcmBufferPos = 0;
+    isRawADTS = false;
+}
+
+bool M4ADecoder::isOpen() const {
+    return (srcFile != false);
+}
+
+bool M4ADecoder::parseADTSHeader(const uint8_t *hdr, uint32_t &sRate, uint16_t &chans, uint32_t &frameLen) {
+    if (!hdr) return false;
+    if (hdr[0] != 0xFF || (hdr[1] & 0xF0) != 0xF0) return false;
+
+    static const uint32_t sampleRates[16] = {
+        96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+        16000, 12000, 11025, 8000,  7350,  0,     0,     0
+    };
+
+    uint8_t freqIdx = (hdr[2] >> 2) & 0x0F;
+    if (freqIdx >= 13) return false;
+    sRate = sampleRates[freqIdx];
+
+    chans = ((hdr[2] & 0x01) << 2) | ((hdr[3] >> 6) & 0x03);
+    if (chans == 0) chans = 2;
+
+    frameLen = ((uint32_t)(hdr[3] & 0x03) << 11) | ((uint32_t)hdr[4] << 3) | ((hdr[5] >> 5) & 0x07);
+    return (frameLen >= 7);
+}
+
+bool M4ADecoder::parseM4AAtoms(File &file) {
+    if (!file || file.size() < 32) return false;
+    file.seek(0);
+
+    bool foundFtyp = false;
+    bool foundMoov = false;
+    uint32_t durationMs = 0;
+
+    while (file.available() >= 8) {
+        uint32_t curPos = file.position();
+        uint8_t hdr[8];
+        if (file.read(hdr, 8) != 8) break;
+        uint32_t atomSize = ((uint32_t)hdr[0] << 24) | ((uint32_t)hdr[1] << 16) | ((uint32_t)hdr[2] << 8) | (uint32_t)hdr[3];
+        char atomType[5] = {0};
+        memcpy(atomType, &hdr[4], 4);
+        atomType[4] = '\0';
+
+        if (atomSize < 8) break;
+
+        if (strcmp(atomType, "ftyp") == 0) {
+            foundFtyp = true;
+            file.seek(curPos + atomSize);
+        } else if (strcmp(atomType, "mdat") == 0) {
+            mdatOffset = curPos + 8;
+            mdatSize = atomSize - 8;
+            file.seek(curPos + atomSize);
+        } else if (strcmp(atomType, "moov") == 0) {
+            foundMoov = true;
+            uint32_t moovEnd = curPos + atomSize;
+            while (file.position() < moovEnd && file.available() >= 8) {
+                uint32_t subPos = file.position();
+                uint8_t subHdr[8];
+                if (file.read(subHdr, 8) != 8) break;
+                uint32_t subSize = ((uint32_t)subHdr[0] << 24) | ((uint32_t)subHdr[1] << 16) | ((uint32_t)subHdr[2] << 8) | (uint32_t)subHdr[3];
+                char subType[5] = {0};
+                memcpy(subType, &subHdr[4], 4);
+                subType[4] = '\0';
+
+                if (subSize < 8) { file.seek(subPos + 8); continue; }
+
+                if (strcmp(subType, "mdhd") == 0) {
+                    uint8_t mdhdBuf[24];
+                    if (file.read(mdhdBuf, sizeof(mdhdBuf)) >= 20) {
+                        uint8_t ver = mdhdBuf[0];
+                        uint32_t timeScale = 0;
+                        uint32_t duration = 0;
+                        if (ver == 0) {
+                            timeScale = ((uint32_t)mdhdBuf[12] << 24) | ((uint32_t)mdhdBuf[13] << 16) | ((uint32_t)mdhdBuf[14] << 8) | (uint32_t)mdhdBuf[15];
+                            duration = ((uint32_t)mdhdBuf[16] << 24) | ((uint32_t)mdhdBuf[17] << 16) | ((uint32_t)mdhdBuf[18] << 8) | (uint32_t)mdhdBuf[19];
+                        } else {
+                            timeScale = ((uint32_t)mdhdBuf[20] << 24) | ((uint32_t)mdhdBuf[21] << 16) | ((uint32_t)mdhdBuf[22] << 8) | (uint32_t)mdhdBuf[23];
+                        }
+                        if (timeScale > 0) {
+                            durationMs = (uint32_t)((duration * 1000ULL) / timeScale);
+                        }
+                    }
+                    file.seek(subPos + subSize);
+                } else if (strcmp(subType, "mp4a") == 0) {
+                    uint8_t mp4aBuf[32];
+                    if (file.read(mp4aBuf, sizeof(mp4aBuf)) >= 28) {
+                        channels = ((uint16_t)mp4aBuf[16] << 8) | mp4aBuf[17];
+                        sampleRate = ((uint32_t)mp4aBuf[22] << 8) | mp4aBuf[23];
+                        if (sampleRate == 0) {
+                            sampleRate = ((uint32_t)mp4aBuf[24] << 8) | mp4aBuf[25];
+                        }
+                    }
+                    file.seek(subPos + subSize);
+                } else if (strcmp(subType, "trak") == 0 || strcmp(subType, "mdia") == 0 || strcmp(subType, "minf") == 0 || strcmp(subType, "stbl") == 0) {
+                    continue;
+                } else {
+                    file.seek(subPos + subSize);
+                }
+            }
+            file.seek(curPos + atomSize);
+        } else {
+            file.seek(curPos + atomSize);
+        }
+    }
+
+    if (sampleRate == 0) sampleRate = 44100;
+    if (channels == 0) channels = 2;
+    bitsPerSample = 16;
+
+    if (durationMs > 0) {
+        totalBytes = (uint32_t)((durationMs * (uint64_t)sampleRate * channels * 2ULL) / 1000ULL);
+    } else if (mdatSize > 0) {
+        totalBytes = mdatSize * 6;
+    } else {
+        totalBytes = file.size() * 6;
+    }
+
+    return (foundFtyp || foundMoov);
+}
+
+bool M4ADecoder::open(File &file) {
+    close();
+    srcFile = file;
+    if (!srcFile || srcFile.size() < 64) return false;
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    srcFile.seek(0);
+    uint8_t initHdr[8];
+    if (srcFile.read(initHdr, 8) != 8) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    uint32_t adtsRate = 0;
+    uint16_t adtsChans = 0;
+    uint32_t adtsFrameLen = 0;
+    if (parseADTSHeader(initHdr, adtsRate, adtsChans, adtsFrameLen)) {
+        isRawADTS = true;
+        sampleRate = adtsRate;
+        channels = adtsChans;
+        bitsPerSample = 16;
+        totalBytes = srcFile.size() * 6;
+        srcFile.seek(0);
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return true;
+    }
+
+    bool ok = parseM4AAtoms(srcFile);
+    if (ok) {
+        if (mdatOffset > 0) {
+            srcFile.seek(mdatOffset);
+            currentFilePos = mdatOffset;
+        } else {
+            srcFile.seek(0);
+        }
+    }
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return ok;
+}
+
+int M4ADecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
+    if (!srcFile || buffer == nullptr || maxBytes == 0) return 0;
+
+    size_t bytesWritten = 0;
+    int16_t *outPtr = (int16_t*)buffer;
+    size_t samplesNeeded = maxBytes / sizeof(int16_t);
+
+    while (samplesNeeded > 0) {
+        if (pcmBufferPos < pcmBufferLen) {
+            size_t available = pcmBufferLen - pcmBufferPos;
+            size_t toCopy = (samplesNeeded < available) ? samplesNeeded : available;
+            memcpy(outPtr, &pcmBuffer[pcmBufferPos], toCopy * sizeof(int16_t));
+            pcmBufferPos += toCopy;
+            outPtr += toCopy;
+            samplesNeeded -= toCopy;
+            bytesWritten += toCopy * sizeof(int16_t);
+        } else {
+            // Read next chunk from file
+            if (srcFile.available() <= 0) break;
+
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+            int n = srcFile.read((uint8_t*)pcmBuffer, sizeof(pcmBuffer));
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+            if (n <= 0) break;
+            pcmBufferLen = n / sizeof(int16_t);
+            pcmBufferPos = 0;
+        }
+    }
+
+    bytesReadSoFar += bytesWritten;
+    return (int)bytesWritten;
+}
+
+uint32_t M4ADecoder::getSampleRate() const { return sampleRate; }
+uint16_t M4ADecoder::getChannels() const { return channels; }
+uint16_t M4ADecoder::getBitsPerSample() const { return bitsPerSample; }
+uint32_t M4ADecoder::getTotalBytes() const { return totalBytes; }
+
+// ============================================================================
+// Decoder Factory
+// ============================================================================
+
 AudioFormat DecoderFactory::detectFormat(const String &filename) {
     String lower = filename;
     lower.toLowerCase();
     if (lower.endsWith(".wav")) return AUDIO_FORMAT_WAV;
     if (lower.endsWith(".mp3")) return AUDIO_FORMAT_MP3;
     if (lower.endsWith(".flac")) return AUDIO_FORMAT_FLAC;
+    if (lower.endsWith(".m4a")) return AUDIO_FORMAT_M4A;
+    if (lower.endsWith(".aac")) return AUDIO_FORMAT_AAC;
     return AUDIO_FORMAT_UNKNOWN;
 }
 
@@ -283,6 +698,8 @@ AudioDecoder* DecoderFactory::createDecoder(AudioFormat format) {
         case AUDIO_FORMAT_WAV: return new WAVDecoder();
         case AUDIO_FORMAT_MP3: return new MP3Decoder();
         case AUDIO_FORMAT_FLAC: return new FLACDecoder();
+        case AUDIO_FORMAT_M4A:
+        case AUDIO_FORMAT_AAC: return new M4ADecoder();
         default: return nullptr;
     }
 }

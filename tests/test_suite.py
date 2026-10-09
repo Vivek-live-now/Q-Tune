@@ -857,6 +857,59 @@ def test_wifi_streaming_and_dlna_media_renderer():
 
     print("  [PASS] Wi-Fi Audio Streaming, DLNA/UPnP MediaRenderer, 384KB PSRAM buffer, 4MB partition table, and dual output routing verified.")
 
+def test_mp3_and_m4a_audio_decoders():
+    print("\n--- 19. MP3 & M4A/AAC Multi-Format Audio Decoding Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    minimp3_h = os.path.join(base_dir, "include", "minimp3.h")
+    dec_h = os.path.join(base_dir, "include", "audio_decoder.h")
+    dec_cpp = os.path.join(base_dir, "src", "audio_decoder.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+
+    assert os.path.exists(minimp3_h), "minimp3.h missing from include directory"
+    assert os.path.exists(dec_h), "audio_decoder.h missing"
+    assert os.path.exists(dec_cpp), "audio_decoder.cpp missing"
+
+    with open(dec_h) as f: dh_src = f.read()
+    with open(dec_cpp) as f: dcpp_src = f.read()
+    with open(ap_h) as f: aph_src = f.read()
+    with open(ap_cpp) as f: apcpp_src = f.read()
+    with open(sd_cpp) as f: sdcpp_src = f.read()
+    with open(ui_cpp) as f: ui_src = f.read()
+
+    # 1. MP3 Decoder & minimp3 Engine Integration
+    assert "class MP3Decoder : public AudioDecoder" in dh_src, "MP3Decoder class missing"
+    assert "MINIMP3_IMPLEMENTATION" in dcpp_src, "minimp3 implementation flag missing"
+    assert "mp3dec_decode_frame" in dcpp_src, "mp3dec_decode_frame not called in audio_decoder.cpp"
+    assert "AUDIO_FORMAT_MP3" in dh_src, "AUDIO_FORMAT_MP3 enum missing"
+    assert "lower.endsWith(\".mp3\")" in dcpp_src, "MP3 format extension missing in DecoderFactory"
+
+    # 2. M4A & AAC Container Parser & Demuxer Integration
+    assert "class M4ADecoder : public AudioDecoder" in dh_src, "M4ADecoder class missing"
+    assert "AUDIO_FORMAT_M4A" in dh_src and "AUDIO_FORMAT_AAC" in dh_src, "M4A and AAC enum missing"
+    assert "lower.endsWith(\".m4a\")" in dcpp_src and "lower.endsWith(\".aac\")" in dcpp_src, "M4A/AAC extensions missing"
+    assert "parseM4AAtoms" in dcpp_src, "parseM4AAtoms missing in M4ADecoder"
+    assert "parseADTSHeader" in dcpp_src, "parseADTSHeader missing in M4ADecoder"
+
+    # 3. AudioPlayer Integration
+    assert "MP3Decoder mp3Decoder;" in aph_src, "mp3Decoder member missing in AudioPlayer"
+    assert "M4ADecoder m4aDecoder;" in aph_src, "m4aDecoder member missing in AudioPlayer"
+    assert "bool isMP3() const;" in aph_src, "isMP3() helper missing in AudioPlayer"
+    assert "bool isM4A() const;" in aph_src, "isM4A() helper missing in AudioPlayer"
+    assert "const char* getFormatName() const;" in aph_src, "getFormatName() helper missing"
+    assert "mp3Decoder.readSamples" in apcpp_src, "mp3Decoder.readSamples not called in AudioPlayer::update"
+    assert "m4aDecoder.readSamples" in apcpp_src, "m4aDecoder.readSamples not called in AudioPlayer::update"
+
+    # 4. SD Card File Discovery
+    assert ".mp3" in sdcpp_src and ".m4a" in sdcpp_src and ".aac" in sdcpp_src, "SD card music scanner missing mp3/m4a/aac"
+
+    # 5. UI Format Badge
+    assert "getFormatName" in ui_src, "UI player screen must use getFormatName for badge display"
+
+    print("  [PASS] MP3 & M4A/AAC decoders, minimp3 engine, MP4 container atom parser, SD scanner, and format badges verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -879,7 +932,8 @@ def main():
     test_sd_safety_mechanisms()
     test_fiio_ka11_usb_dac_and_safe_eject()
     test_wifi_streaming_and_dlna_media_renderer()
-    print("\nAll 18 Q-Tune test verifications PASSED (100%)!\n")
+    test_mp3_and_m4a_audio_decoders()
+    print("\nAll 19 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

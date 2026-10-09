@@ -154,7 +154,7 @@ std::vector<String> SDManager::listMusicFiles() {
             String filename = String(file.name());
             String lower = filename;
             lower.toLowerCase();
-            if (lower.endsWith(".wav") || lower.endsWith(".mp3") || lower.endsWith(".flac")) {
+            if (lower.endsWith(".wav") || lower.endsWith(".mp3") || lower.endsWith(".flac") || lower.endsWith(".m4a") || lower.endsWith(".aac")) {
                 String fullPath = filename;
                 if (!fullPath.startsWith("/music/")) {
                     if (fullPath.startsWith("/")) {

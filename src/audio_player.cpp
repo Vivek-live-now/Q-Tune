@@ -162,6 +162,42 @@ bool AudioPlayer::playFile(const String &path) {
         playing = true;
         paused = false;
         return true;
+    } else if (fmt == AUDIO_FORMAT_MP3) {
+        if (!mp3Decoder.open(wavFile)) {
+            closeFiles();
+            return false;
+        }
+        currentAudioType = 3; // MP3
+        currentSampleRate = mp3Decoder.getSampleRate();
+        currentChannels = mp3Decoder.getChannels();
+        currentBitsPerSample = 16;
+        totalDataBytes = mp3Decoder.getTotalBytes();
+        bytesPlayed = 0;
+        dataOffset = 0;
+
+        setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
+        currentTrackPath = path;
+        playing = true;
+        paused = false;
+        return true;
+    } else if (fmt == AUDIO_FORMAT_M4A || fmt == AUDIO_FORMAT_AAC) {
+        if (!m4aDecoder.open(wavFile)) {
+            closeFiles();
+            return false;
+        }
+        currentAudioType = 4; // M4A / AAC
+        currentSampleRate = m4aDecoder.getSampleRate();
+        currentChannels = m4aDecoder.getChannels();
+        currentBitsPerSample = 16;
+        totalDataBytes = m4aDecoder.getTotalBytes();
+        bytesPlayed = 0;
+        dataOffset = 0;
+
+        setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
+        currentTrackPath = path;
+        playing = true;
+        paused = false;
+        return true;
     }
 
     // Try high-performance dr_wav stream decoder first (handles all bit depths, extensible RIFF, metadata/tags)
@@ -220,8 +256,8 @@ bool AudioPlayer::playFile(const String &path) {
 void AudioPlayer::update() {
     if (!playing || paused || !wavFile) return;
 
-    if (currentAudioType == 2) {
-        // FLAC Audio Stream Decoding
+    if (currentAudioType == 2 || currentAudioType == 3 || currentAudioType == 4) {
+        // Multi-format stream decoding (FLAC = 2, MP3 = 3, M4A = 4)
         if (currentChannels == 1) {
             int16_t monoBuf[256];
             int16_t stereoBuf[512];
@@ -235,7 +271,14 @@ void AudioPlayer::update() {
                 return;
             }
 
-            int bytesRead = flacDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
+            int bytesRead = 0;
+            if (currentAudioType == 2) {
+                bytesRead = flacDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
+            } else if (currentAudioType == 3) {
+                bytesRead = mp3Decoder.readSamples((uint8_t*)monoBuf, bytesToRead);
+            } else if (currentAudioType == 4) {
+                bytesRead = m4aDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
+            }
 
             if (bytesRead > 0) {
                 bytesRead &= ~1;
@@ -282,7 +325,14 @@ void AudioPlayer::update() {
                 return;
             }
 
-            int bytesRead = flacDecoder.readSamples(buffer, bytesToRead);
+            int bytesRead = 0;
+            if (currentAudioType == 2) {
+                bytesRead = flacDecoder.readSamples(buffer, bytesToRead);
+            } else if (currentAudioType == 3) {
+                bytesRead = mp3Decoder.readSamples(buffer, bytesToRead);
+            } else if (currentAudioType == 4) {
+                bytesRead = m4aDecoder.readSamples(buffer, bytesToRead);
+            }
 
             if (bytesRead > 0) {
                 bytesRead &= ~3;
@@ -456,6 +506,10 @@ void AudioPlayer::resume() {
 void AudioPlayer::closeFiles() {
     if (currentAudioType == 2) {
         flacDecoder.close();
+    } else if (currentAudioType == 3) {
+        mp3Decoder.close();
+    } else if (currentAudioType == 4) {
+        m4aDecoder.close();
     }
     wavDecoder.close();
     if (wavFile) {
@@ -486,14 +540,14 @@ bool AudioPlayer::isPaused() const {
 }
 
 uint32_t AudioPlayer::getPositionMs() const {
-    uint32_t bps = (currentAudioType == 2 || wavDecoder.isOpen()) ? 16 : currentBitsPerSample;
+    uint32_t bps = (currentAudioType == 2 || currentAudioType == 3 || currentAudioType == 4 || wavDecoder.isOpen()) ? 16 : currentBitsPerSample;
     uint32_t byteRate = currentSampleRate * currentChannels * (bps / 8);
     if (byteRate == 0) return 0;
     return (bytesPlayed * 1000ULL) / byteRate;
 }
 
 uint32_t AudioPlayer::getDurationMs() const {
-    uint32_t bps = (currentAudioType == 2 || wavDecoder.isOpen()) ? 16 : currentBitsPerSample;
+    uint32_t bps = (currentAudioType == 2 || currentAudioType == 3 || currentAudioType == 4 || wavDecoder.isOpen()) ? 16 : currentBitsPerSample;
     uint32_t byteRate = currentSampleRate * currentChannels * (bps / 8);
     if (byteRate == 0) return 0;
     return (totalDataBytes * 1000ULL) / byteRate;
@@ -677,4 +731,23 @@ bool AudioPlayer::isFLAC() const {
     return (currentAudioType == 2);
 }
 
+bool AudioPlayer::isMP3() const {
+    return (currentAudioType == 3);
+}
+
+bool AudioPlayer::isM4A() const {
+    return (currentAudioType == 4);
+}
+
+const char* AudioPlayer::getFormatName() const {
+    switch (currentAudioType) {
+        case 1: return "WAV";
+        case 2: return "FLAC";
+        case 3: return "MP3";
+        case 4: return "M4A";
+        default: return "PCM";
+    }
+}
+
 AudioPlayer audioPlayer;
+

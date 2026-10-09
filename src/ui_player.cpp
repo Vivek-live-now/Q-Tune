@@ -210,7 +210,7 @@ void UIPlayer::renderPlayer() {
     // Playback state
     String stateStr = "■ STOPPED";
     if (audioPlayer.isPlaying()) {
-        stateStr = audioPlayer.isFLAC() ? "▶ PLAYING (FLAC)" : "▶ PLAYING (WAV)";
+        stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
     } else if (audioPlayer.isPaused()) {
         stateStr = "❚❚ PAUSED";
     }
