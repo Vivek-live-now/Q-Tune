@@ -27,7 +27,11 @@ bool ButtonManager::checkButton(Button &btn) {
                 btn.pressStartTime = millis();
                 btn.holdTriggered = false;
                 btn.lastRepeatTime = millis();
-                return true;
+            } else {
+                // Fire short press on release only if hold was not triggered
+                if (!btn.holdTriggered) {
+                    return true;
+                }
             }
         }
     }

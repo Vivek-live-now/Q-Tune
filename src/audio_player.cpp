@@ -457,16 +457,16 @@ void AudioPlayer::resume() {
 }
 
 void AudioPlayer::closeFiles() {
-    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     if (currentAudioType == 2) {
         flacDecoder.close();
     }
     wavDecoder.close();
     if (wavFile) {
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         wavFile.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     }
     currentAudioType = 0;
-    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 }
 
 void AudioPlayer::stop() {

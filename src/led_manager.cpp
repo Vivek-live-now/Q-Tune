@@ -104,7 +104,7 @@ void LEDManager::saveSettings() {
 
 void LEDManager::begin() {
     loadSettings();
-    FastLED.addLeds<WS2812, RGB_LED, GRB>(leds, 1);
+    FastLED.addLeds<WS2812, RGB_LED, RGB>(leds, 1);
     FastLED.setBrightness(current_brightness);
     triggerPulse(CRGB::Blue, 2, 200); // 2 short blue pulses on boot
 }
@@ -186,7 +186,7 @@ const char* LEDManager::getShortModeName() const {
     LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE || current_mode == LedMode::OFF) ? user_mode : current_mode;
     switch (m) {
         case LedMode::REACT_BASS_PULSE:       return "BASS";
-        case LedMode::REACT_VOCAL_LIGHTNING:  return "LGHT";
+        case LedMode::REACT_VOCAL_LIGHTNING:  return "VOCL";
         case LedMode::REACT_ENERGY_VU:        return "VU";
         case LedMode::REACT_SPECTRUM_HUE:     return "SPEC";
         case LedMode::REACT_RAINBOW_FLOW:     return "FLOW";
@@ -211,7 +211,7 @@ void LEDManager::setColor(CRGB color) {
 void LEDManager::cycleColor() {
     color_index = (color_index + 1) % PALETTE_COUNT;
     current_color = COLOR_PALETTE[color_index].color;
-    if (user_mode == LedMode::SOLID || user_mode == LedMode::BREATHING || user_mode == LedMode::REACT_BASS_PULSE) {
+    if (user_mode == LedMode::SOLID || user_mode == LedMode::BREATHING || user_mode == LedMode::REACT_BASS_PULSE || user_mode == LedMode::REACT_VOCAL_LIGHTNING) {
         leds[0] = current_color;
         FastLED.show();
     }
@@ -363,28 +363,12 @@ void LEDManager::updateReactiveModes(float dt) {
                 break;
             }
             case LedMode::REACT_VOCAL_LIGHTNING: {
-                uint32_t now = millis();
-                if (now - last_lightning_time > 400) {
-                    last_lightning_time = now;
-                    lightning_intensity = 1.0f;
-                    lightning_burst_count = (rand() % 3) + 1;
-                }
-                if (lightning_burst_count > 0 && (now - last_lightning_time < 90)) {
-                    if (rand() % 2 == 0) {
-                        lightning_intensity = 0.85f + (float)(rand() % 15) / 100.0f;
-                    }
-                } else {
-                    lightning_intensity -= dt * 9.0f;
-                    if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
-                }
-                if (lightning_intensity > 0.05f) {
-                    uint8_t whiteVal = (uint8_t)(lightning_intensity * 255.0f);
-                    uint8_t blueTint = (uint8_t)(lightning_intensity * 210.0f);
-                    uint8_t cyanTint = (uint8_t)(lightning_intensity * 240.0f);
-                    leds[0] = CRGB(blueTint, cyanTint, whiteVal);
-                } else {
-                    leds[0] = CHSV(136, 230, 12);
-                }
+                // Smooth demo breathing vocal glow in user selected color
+                float sweep = 0.5f + 0.5f * sinf(anim_phase * 2.8f);
+                uint8_t val = (uint8_t)(15 + sweep * 240);
+                CRGB c = current_color;
+                c.nscale8(val);
+                leds[0] = c;
                 break;
             }
             case LedMode::REACT_ENERGY_VU: {
@@ -519,35 +503,23 @@ void LEDManager::updateReactiveModes(float dt) {
         }
 
         case LedMode::REACT_VOCAL_LIGHTNING: {
-            uint32_t now = millis();
-            // Trigger lightning flash on vocal transients
-            if (vocalPunch > 0.38f && vocalDiff > (vocal_avg * 0.20f + 3.0f) && (now - last_lightning_time > 110)) {
-                last_lightning_time = now;
-                lightning_intensity = 1.0f;
-                lightning_burst_count = (rand() % 3) + 1; // 1-3 crackle bursts
-            }
-
-            // Rapid crackling exponential decay
-            if (lightning_burst_count > 0 && (now - last_lightning_time < 80)) {
-                if (rand() % 2 == 0) {
-                    lightning_intensity = 0.82f + (float)(rand() % 18) / 100.0f;
-                }
+            // Smooth vocal envelope follower (fast attack, natural silky decay - no blinking)
+            if (vocalPunch > lightning_intensity) {
+                // Smooth attack tracking vocal surges
+                lightning_intensity += (vocalPunch - lightning_intensity) * (dt * 14.0f);
             } else {
-                lightning_intensity -= dt * 8.5f;
+                // Natural smooth decay (~320ms release) when vocals taper off
+                lightning_intensity -= dt * 3.2f;
                 if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
             }
 
-            if (lightning_intensity > 0.05f) {
-                // Intense electric cyan-white lightning strike
-                uint8_t whiteVal = (uint8_t)(lightning_intensity * 255.0f);
-                uint8_t blueTint = (uint8_t)(lightning_intensity * 210.0f);
-                uint8_t cyanTint = (uint8_t)(lightning_intensity * 240.0f);
-                leds[0] = CRGB(blueTint, cyanTint, whiteVal);
-            } else {
-                // Resting electric azure aura reacting gently to ongoing vocal presence
-                uint8_t restVal = (uint8_t)(6 + vocalPunch * 32.0f);
-                leds[0] = CHSV(136, 230, restVal);
-            }
+            // Quadratic response curve: gentle resting aura (value 10) to full vocal brilliance (255)
+            float vocalCurve = lightning_intensity * lightning_intensity * 0.75f + lightning_intensity * 0.25f;
+            uint8_t vocalBright = (uint8_t)constrain(10 + (int)(vocalCurve * 245.0f), 0, 255);
+
+            CRGB c = current_color;
+            c.nscale8(vocalBright);
+            leds[0] = c;
             break;
         }
 

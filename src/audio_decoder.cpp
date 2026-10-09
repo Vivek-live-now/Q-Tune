@@ -18,9 +18,10 @@ static size_t wav_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead)
     File* file = (File*)pUserData;
     if (!file || !(*file)) return 0;
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-    size_t n = file->read((uint8_t*)pBufferOut, bytesToRead);
+    int n = file->read((uint8_t*)pBufferOut, bytesToRead);
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
-    return n;
+    if (n <= 0) return 0;
+    return (size_t)n;
 }
 
 static drwav_bool32 wav_seek_cb(void* pUserData, int offset, drwav_seek_origin origin) {
@@ -151,9 +152,10 @@ static size_t flac_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead
     File* file = (File*)pUserData;
     if (!file || !(*file)) return 0;
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-    size_t n = file->read((uint8_t*)pBufferOut, bytesToRead);
+    int n = file->read((uint8_t*)pBufferOut, bytesToRead);
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
-    return n;
+    if (n <= 0) return 0;
+    return (size_t)n;
 }
 
 static drflac_bool32 flac_seek_cb(void* pUserData, int offset, drflac_seek_origin origin) {

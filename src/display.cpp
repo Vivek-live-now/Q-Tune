@@ -30,7 +30,9 @@ void Display::sendBuffer() {
     if (spiBusMutex != NULL) {
         xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     }
+    digitalWrite(SD_CS, HIGH);
     u8g2.sendBuffer();
+    digitalWrite(OLED_CS, HIGH);
     if (spiBusMutex != NULL) {
         xSemaphoreGive(spiBusMutex);
     }
