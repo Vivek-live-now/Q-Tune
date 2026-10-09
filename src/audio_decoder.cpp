@@ -75,13 +75,23 @@ static size_t flac_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead
 static drflac_bool32 flac_seek_cb(void* pUserData, int offset, drflac_seek_origin origin) {
     File* file = (File*)pUserData;
     if (!file || !(*file)) return DRFLAC_FALSE;
-    if (origin == drflac_seek_origin_start) {
+    if (origin == DRFLAC_SEEK_SET) {
         return file->seek((uint32_t)offset) ? DRFLAC_TRUE : DRFLAC_FALSE;
-    } else if (origin == drflac_seek_origin_current) {
+    } else if (origin == DRFLAC_SEEK_CUR) {
         uint32_t cur = file->position();
         return file->seek((uint32_t)(cur + offset)) ? DRFLAC_TRUE : DRFLAC_FALSE;
+    } else if (origin == DRFLAC_SEEK_END) {
+        uint32_t sz = file->size();
+        return file->seek((uint32_t)(sz + offset)) ? DRFLAC_TRUE : DRFLAC_FALSE;
     }
     return DRFLAC_FALSE;
+}
+
+static drflac_bool32 flac_tell_cb(void* pUserData, drflac_int64* pCursor) {
+    File* file = (File*)pUserData;
+    if (!file || !(*file) || !pCursor) return DRFLAC_FALSE;
+    *pCursor = (drflac_int64)file->position();
+    return DRFLAC_TRUE;
 }
 
 FLACDecoder::FLACDecoder() :
@@ -122,7 +132,7 @@ bool FLACDecoder::open(File &file) {
     }
     srcFile.seek(0);
 
-    drflac* pFlac = drflac_open(flac_read_cb, flac_seek_cb, &srcFile, NULL);
+    drflac* pFlac = drflac_open(flac_read_cb, flac_seek_cb, flac_tell_cb, &srcFile, NULL);
     if (!pFlac) return false;
 
     pFlacHandle = (void*)pFlac;

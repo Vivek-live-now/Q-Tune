@@ -614,7 +614,8 @@ def test_flac_decoder_and_clean_naming():
     assert "class FLACDecoder : public AudioDecoder" in dh_src
     assert "drflac_open" in dcpp_src
     assert "drflac_read_pcm_frames_s16" in dcpp_src
-    assert "flac_read_cb" in dcpp_src and "flac_seek_cb" in dcpp_src
+    assert "flac_read_cb" in dcpp_src and "flac_seek_cb" in dcpp_src and "flac_tell_cb" in dcpp_src
+    assert "DRFLAC_SEEK_SET" in dcpp_src and "DRFLAC_SEEK_CUR" in dcpp_src
     assert "AUDIO_FORMAT_FLAC" in dh_src
     assert "lower.endsWith(\".flac\")" in dcpp_src
 
