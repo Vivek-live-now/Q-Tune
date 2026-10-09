@@ -211,7 +211,15 @@ def test_wav_header_parser():
     assert "dataOffset" in ap_src, "AudioPlayer must track dataOffset"
     assert "monoBuf" in ap_src and "stereoBuf" in ap_src, "AudioPlayer must support mono-to-stereo expansion for MAX98357A"
 
-    print("  [PASS] 44-byte standard and chunked RIFF/WAVE parsers with MAX98357A mono expansion verified.")
+    # Verify dr_wav decoder engine integration and frame alignment
+    dr_wav_h = os.path.join(base_dir, "include", "dr_wav.h")
+    assert os.path.exists(dr_wav_h), "dr_wav.h missing from include directory"
+    assert "wavDecoder.open" in ap_src, "AudioPlayer must use wavDecoder.open"
+    assert "wavDecoder.readSamples" in ap_src, "AudioPlayer must use wavDecoder.readSamples"
+    assert "bytesToRead &= ~3" in ap_src, "Stereo WAV playback must enforce 4-byte frame alignment"
+    assert "bytesToRead &= ~1" in ap_src, "Mono WAV playback must enforce 2-byte sample alignment"
+
+    print("  [PASS] 44-byte standard and chunked RIFF/WAVE parsers, dr_wav engine, and frame alignment verified.")
 
 def test_power_manager_scaling():
     print("\n--- 5. Power Manager & Dynamic CPU Scaling Test ---")

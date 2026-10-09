@@ -90,15 +90,21 @@ bool AudioPlayer::parseWAVHeader(File &file, WAVHeader &header) {
                 header.subchunk1Size = chunkSize;
                 foundFmt = true;
             }
-            file.seek(fmtPos + chunkSize);
+            uint32_t pad = (chunkSize & 1);
+            file.seek(fmtPos + chunkSize + pad);
         } else if (strncmp(chunkId, "data", 4) == 0) {
             memcpy(header.data, chunkId, 4);
             header.dataSize = chunkSize;
             dataOffset = file.position();
+            uint32_t remainingInFile = (file.size() > dataOffset) ? (file.size() - dataOffset) : 0;
+            if (header.dataSize > remainingInFile) {
+                header.dataSize = remainingInFile;
+            }
             foundData = true;
             break;
         } else {
-            file.seek(file.position() + chunkSize);
+            uint32_t pad = (chunkSize & 1);
+            file.seek(file.position() + chunkSize + pad);
         }
     }
 
@@ -157,6 +163,24 @@ bool AudioPlayer::playFile(const String &path) {
         return true;
     }
 
+    // Try high-performance dr_wav stream decoder first (handles all bit depths, extensible RIFF, metadata/tags)
+    if (wavDecoder.open(wavFile)) {
+        currentAudioType = 1; // WAV
+        currentSampleRate = wavDecoder.getSampleRate();
+        currentChannels = wavDecoder.getChannels();
+        currentBitsPerSample = wavDecoder.getBitsPerSample();
+        totalDataBytes = wavDecoder.getTotalBytes();
+        bytesPlayed = 0;
+        dataOffset = 0;
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
+        currentTrackPath = path;
+        playing = true;
+        paused = false;
+        return true;
+    }
+
     if (!parseWAVHeader(wavFile, currentWavHeader)) {
         wavFile.close();
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -167,7 +191,17 @@ bool AudioPlayer::playFile(const String &path) {
     currentSampleRate = currentWavHeader.sampleRate;
     currentChannels = currentWavHeader.numChannels;
     currentBitsPerSample = currentWavHeader.bitsPerSample;
-    totalDataBytes = currentWavHeader.dataSize;
+    uint32_t fileSize = wavFile.size();
+    if (dataOffset < fileSize) {
+        uint32_t maxAvail = fileSize - dataOffset;
+        totalDataBytes = min(currentWavHeader.dataSize, maxAvail);
+    } else {
+        totalDataBytes = currentWavHeader.dataSize;
+    }
+    size_t frameAlign = currentChannels * (currentBitsPerSample / 8);
+    if (frameAlign > 0) {
+        totalDataBytes -= (totalDataBytes % frameAlign);
+    }
     bytesPlayed = 0;
     wavFile.seek(dataOffset);
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -280,7 +314,7 @@ void AudioPlayer::update() {
         return;
     }
 
-    if (currentWavHeader.numChannels == 1) {
+    if (currentChannels == 1) {
         // Expand Mono PCM to Stereo frames for MAX98357A I2S
         int16_t monoBuf[256];
         int16_t stereoBuf[512];
@@ -288,6 +322,9 @@ void AudioPlayer::update() {
         if (bytesPlayed + bytesToRead > totalDataBytes) {
             bytesToRead = totalDataBytes - bytesPlayed;
         }
+
+        // Frame alignment: ensure bytesToRead is aligned to sample boundary (2 bytes)
+        bytesToRead &= ~1;
 
         if (bytesToRead <= 0) {
             stop();
@@ -297,8 +334,11 @@ void AudioPlayer::update() {
 
         int bytesRead = 0;
         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-        if (wavFile) {
+        if (wavDecoder.isOpen()) {
+            bytesRead = wavDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
+        } else if (wavFile) {
             bytesRead = wavFile.read((uint8_t*)monoBuf, bytesToRead);
+            bytesRead &= ~1; // Keep 16-bit word alignment
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
@@ -338,6 +378,9 @@ void AudioPlayer::update() {
             bytesToRead = totalDataBytes - bytesPlayed;
         }
 
+        // Frame alignment: ensure bytesToRead is aligned to stereo frame boundary (4 bytes)
+        bytesToRead &= ~3;
+
         if (bytesToRead <= 0) {
             stop();
             trackFinished = true;
@@ -346,8 +389,11 @@ void AudioPlayer::update() {
 
         int bytesRead = 0;
         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-        if (wavFile) {
+        if (wavDecoder.isOpen()) {
+            bytesRead = wavDecoder.readSamples(buffer, bytesToRead);
+        } else if (wavFile) {
             bytesRead = wavFile.read(buffer, bytesToRead);
+            bytesRead &= ~3; // Keep 4-byte stereo frame alignment
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
@@ -391,16 +437,15 @@ void AudioPlayer::resume() {
 }
 
 void AudioPlayer::closeFiles() {
-    if (currentAudioType == 2) {
-        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-        flacDecoder.close();
-        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
-    }
-    currentAudioType = 0;
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    if (currentAudioType == 2) {
+        flacDecoder.close();
+    }
+    wavDecoder.close();
     if (wavFile) {
         wavFile.close();
     }
+    currentAudioType = 0;
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 }
 

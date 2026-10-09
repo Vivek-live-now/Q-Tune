@@ -79,6 +79,7 @@ private:
     uint16_t currentChannels;
     uint16_t currentBitsPerSample;
     FLACDecoder flacDecoder;
+    WAVDecoder wavDecoder;
 
     // Digital Volume Scaling (Quadratic perceptual curve)
     uint8_t currentVolume;

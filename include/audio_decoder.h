@@ -25,19 +25,23 @@ public:
 class WAVDecoder : public AudioDecoder {
 public:
     WAVDecoder();
+    ~WAVDecoder() override;
     bool open(File &file) override;
     int readSamples(uint8_t *buffer, size_t maxBytes) override;
     uint32_t getSampleRate() const override;
     uint16_t getChannels() const override;
     uint16_t getBitsPerSample() const override;
     uint32_t getTotalBytes() const override;
+    void close();
+    bool isOpen() const;
 
 private:
     File srcFile;
+    void* pWavHandle;
     uint32_t sampleRate;
     uint16_t channels;
     uint16_t bitsPerSample;
-    uint32_t dataBytes;
+    uint32_t totalBytes;
     uint32_t bytesReadSoFar;
 };
 

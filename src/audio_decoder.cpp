@@ -1,62 +1,109 @@
 #include "audio_decoder.h"
 
+#define DR_WAV_IMPLEMENTATION
+#define DR_WAV_NO_STDIO
+#include "dr_wav.h"
+
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_STDIO
 #define DR_FLAC_NO_OGG
 #include "dr_flac.h"
 
-struct WAVHeaderRaw {
-    char riff[4];
-    uint32_t chunkSize;
-    char wave[4];
-    char fmt[4];
-    uint32_t subchunk1Size;
-    uint16_t audioFormat;
-    uint16_t numChannels;
-    uint32_t sampleRate;
-    uint32_t byteRate;
-    uint16_t blockAlign;
-    uint16_t bitsPerSample;
-    char data[4];
-    uint32_t dataSize;
-};
+static size_t wav_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
+    File* file = (File*)pUserData;
+    if (!file || !(*file)) return 0;
+    return file->read((uint8_t*)pBufferOut, bytesToRead);
+}
 
-WAVDecoder::WAVDecoder() : sampleRate(44100), channels(2), bitsPerSample(16), dataBytes(0), bytesReadSoFar(0) {}
+static drwav_bool32 wav_seek_cb(void* pUserData, int offset, drwav_seek_origin origin) {
+    File* file = (File*)pUserData;
+    if (!file || !(*file)) return DRWAV_FALSE;
+    if (origin == DRWAV_SEEK_SET) {
+        return file->seek((uint32_t)offset) ? DRWAV_TRUE : DRWAV_FALSE;
+    } else if (origin == DRWAV_SEEK_CUR) {
+        uint32_t cur = file->position();
+        return file->seek((uint32_t)(cur + offset)) ? DRWAV_TRUE : DRWAV_FALSE;
+    } else if (origin == DRWAV_SEEK_END) {
+        uint32_t sz = file->size();
+        return file->seek((uint32_t)(sz + offset)) ? DRWAV_TRUE : DRWAV_FALSE;
+    }
+    return DRWAV_FALSE;
+}
+
+static drwav_bool32 wav_tell_cb(void* pUserData, drwav_int64* pCursor) {
+    File* file = (File*)pUserData;
+    if (!file || !(*file) || !pCursor) return DRWAV_FALSE;
+    *pCursor = (drwav_int64)file->position();
+    return DRWAV_TRUE;
+}
+
+WAVDecoder::WAVDecoder() :
+    pWavHandle(nullptr), sampleRate(44100), channels(2), bitsPerSample(16),
+    totalBytes(0), bytesReadSoFar(0) {}
+
+WAVDecoder::~WAVDecoder() {
+    close();
+}
+
+void WAVDecoder::close() {
+    if (pWavHandle) {
+        drwav_uninit((drwav*)pWavHandle);
+        free(pWavHandle);
+        pWavHandle = nullptr;
+    }
+    sampleRate = 44100;
+    channels = 2;
+    bitsPerSample = 16;
+    totalBytes = 0;
+    bytesReadSoFar = 0;
+}
+
+bool WAVDecoder::isOpen() const {
+    return (pWavHandle != nullptr);
+}
 
 bool WAVDecoder::open(File &file) {
+    close();
     srcFile = file;
-    if (!srcFile || srcFile.size() < sizeof(WAVHeaderRaw)) return false;
+    if (!srcFile || srcFile.size() < 44) return false;
 
-    WAVHeaderRaw header;
+    drwav* pWav = (drwav*)malloc(sizeof(drwav));
+    if (!pWav) return false;
+
     srcFile.seek(0);
-    if (srcFile.read((uint8_t*)&header, sizeof(WAVHeaderRaw)) != sizeof(WAVHeaderRaw)) return false;
-
-    if (strncmp(header.riff, "RIFF", 4) != 0 || strncmp(header.wave, "WAVE", 4) != 0) {
+    if (!drwav_init(pWav, wav_read_cb, wav_seek_cb, wav_tell_cb, &srcFile, NULL)) {
+        free(pWav);
         return false;
     }
-    sampleRate = header.sampleRate;
-    channels = header.numChannels;
-    bitsPerSample = header.bitsPerSample;
-    dataBytes = header.dataSize;
+
+    pWavHandle = (void*)pWav;
+    sampleRate = pWav->sampleRate;
+    channels = pWav->channels;
+    bitsPerSample = 16; // drwav_read_pcm_frames_s16 normalizes all bit depths to 16-bit
+    totalBytes = (uint32_t)(pWav->totalPCMFrameCount * channels * sizeof(int16_t));
     bytesReadSoFar = 0;
     return true;
 }
 
 int WAVDecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
-    if (!srcFile) return 0;
-    size_t remaining = dataBytes - bytesReadSoFar;
-    size_t toRead = min(maxBytes, remaining);
-    if (toRead == 0) return 0;
+    if (!pWavHandle || !srcFile) return 0;
+    drwav* pWav = (drwav*)pWavHandle;
 
-    int readCount = srcFile.read(buffer, toRead);
-    if (readCount > 0) bytesReadSoFar += readCount;
-    return readCount;
+    size_t frameSize = sizeof(int16_t) * channels;
+    if (frameSize == 0) return 0;
+    drwav_uint64 framesToRead = maxBytes / frameSize;
+    if (framesToRead == 0) return 0;
+
+    drwav_uint64 framesRead = drwav_read_pcm_frames_s16(pWav, framesToRead, (drwav_int16*)buffer);
+    size_t bytesRead = (size_t)(framesRead * frameSize);
+    bytesReadSoFar += bytesRead;
+    return (int)bytesRead;
 }
 
 uint32_t WAVDecoder::getSampleRate() const { return sampleRate; }
 uint16_t WAVDecoder::getChannels() const { return channels; }
 uint16_t WAVDecoder::getBitsPerSample() const { return bitsPerSample; }
-uint32_t WAVDecoder::getTotalBytes() const { return dataBytes; }
+uint32_t WAVDecoder::getTotalBytes() const { return totalBytes; }
 
 MP3Decoder::MP3Decoder() {}
 bool MP3Decoder::open(File &file) { srcFile = file; return false; }
