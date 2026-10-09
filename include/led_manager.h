@@ -85,12 +85,16 @@ private:
     int pulse_speed;
     CRGB pulse_color;
 
-    // Reactive audio animation states
+    // Reactive audio animation states & Dynamic AGC trackers
     float reactive_energy;
     float reactive_hue;
     float reactive_flash;
     float last_bass;
     uint32_t last_beat_time;
+    float bass_max;
+    float bass_avg;
+    float rms_max;
+    float total_max;
 
     void updateReactiveModes(float dt);
 };
