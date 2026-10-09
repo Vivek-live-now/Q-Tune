@@ -8,6 +8,11 @@
 #include "hw_config.h"
 #include "audio_decoder.h"
 
+enum AudioOutputMode {
+    OUTPUT_MODE_SPEAKER_I2S = 0,
+    OUTPUT_MODE_FIIO_USB_DAC = 1
+};
+
 struct WAVHeader {
     char riff[4];
     uint32_t chunkSize;
@@ -49,6 +54,12 @@ public:
     bool hasFinished() const;
     void clearFinished();
 
+    // Audio Output Mode Selection (MAX98357A I2S Speaker vs FiiO KA11 USB DAC)
+    void setOutputMode(AudioOutputMode mode);
+    AudioOutputMode getOutputMode() const;
+    const char* getOutputModeName() const;
+    const char* getOutputModeShortName() const;
+
     // FreeRTOS Dedicated Audio Task Management
     void startAudioTask();
     void stopAudioTask();
@@ -85,12 +96,16 @@ private:
     uint8_t currentVolume;
     uint32_t volumeScale; // Fixed-point factor (0 to 256)
 
+    // Audio Output Mode
+    AudioOutputMode outputMode;
+
     // FreeRTOS Task state
     TaskHandle_t audioTaskHandle;
     volatile bool taskRunning;
 
     bool parseWAVHeader(File &file, WAVHeader &header);
     void setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample);
+    void routeAudioOutput(const void *stereoData, size_t sampleCount, size_t byteCount);
     static void audioTaskFunction(void *param);
 };
 

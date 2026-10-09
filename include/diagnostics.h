@@ -19,7 +19,7 @@ public:
 private:
     int selectedIndex;
     int scrollOffset;
-    static const int TOTAL_TESTS = 11;
+    static const int TOTAL_TESTS = 12;
     void renderMenu();
     void executeTest(int index);
 
@@ -33,6 +33,7 @@ private:
     void testRGBLED();
     void testI2SAudio();
     void testINMP441Mic();
+    void testFiiOKA11USB();
 };
 
 extern Diagnostics diagnostics;

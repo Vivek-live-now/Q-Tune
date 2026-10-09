@@ -68,6 +68,13 @@
 #define UART0_TX    43  // Dedicated Hardware Serial Debugging / Flashing
 #define UART0_RX    44  // Dedicated Hardware Serial Debugging / Flashing (Completely Freed)
 
+// ----------------------------------------------------------------------------
+// 7. FiiO KA11 High-Res USB DAC Host Interface (Cirrus Logic CS43131)
+// Native ESP32-S3 USB-OTG Full-Speed (12Mbps) Host Controller
+// ----------------------------------------------------------------------------
+#define USB_HOST_DM 19  // USB Native Data- (D-)
+#define USB_HOST_DP 20  // USB Native Data+ (D+)
+
 // Strictly Avoided Strapping/System Pins:
 // GPIO 0, 3, 45, 46 (Boot / Strapping - DO NOT USE)
 

@@ -1,4 +1,5 @@
 #include "diagnostics.h"
+#include "usb_manager.h"
 
 static const char* testNames[] = {
     "1. OLED Test",
@@ -11,7 +12,8 @@ static const char* testNames[] = {
     "8. RGB LED Test",
     "9. I2S Audio Test",
     "10. INMP441 Mic Test",
-    "11. Return to Menu"
+    "11. FiiO KA11 USB DAC",
+    "12. Return to Menu"
 };
 
 Diagnostics::Diagnostics() : selectedIndex(0), scrollOffset(0) {}
@@ -41,7 +43,7 @@ bool Diagnostics::runMenu() {
         ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_SEL_PRESS) {
-        if (selectedIndex == 10) {
+        if (selectedIndex == 11) {
             return false; // Return to Menu
         }
         executeTest(selectedIndex);
@@ -64,6 +66,7 @@ void Diagnostics::executeTest(int index) {
         case 7: testRGBLED(); break;
         case 8: testI2SAudio(); break;
         case 9: testINMP441Mic(); break;
+        case 10: testFiiOKA11USB(); break;
     }
 }
 
@@ -279,6 +282,52 @@ void Diagnostics::testINMP441Mic() {
 
     spectrumAnalyzer.stop();
     audioPlayer.begin();
+}
+
+void Diagnostics::testFiiOKA11USB() {
+    bool inTest = true;
+    while (inTest) {
+        display.clear();
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(0, 10, "FiiO KA11 USB DAC");
+        u8g2.drawHLine(0, 12, 128);
+
+        char stateBuf[32];
+        snprintf(stateBuf, sizeof(stateBuf), "State: %s", usbManager.getStateString());
+        u8g2.drawStr(0, 24, stateBuf);
+
+        char outBuf[32];
+        snprintf(outBuf, sizeof(outBuf), "Active Out: [%s]", audioPlayer.getOutputModeShortName());
+        u8g2.drawStr(0, 36, outBuf);
+
+        u8g2.drawStr(0, 48, "UP:Mount  DN:SafeEject");
+        u8g2.drawStr(0, 60, "OK:Toggle CANCEL:Exit");
+        display.sendBuffer();
+
+        ButtonEvent evt = buttonManager.update();
+        if (evt == BTN_EVENT_UP_PRESS) {
+            usbManager.mount();
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+        } else if (evt == BTN_EVENT_DN_PRESS) {
+            usbManager.safeEject();
+            ledManager.triggerButtonPulse(CRGB::Red, 1, 60);
+        } else if (evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_OK_PRESS) {
+            if (audioPlayer.getOutputMode() == OUTPUT_MODE_SPEAKER_I2S) {
+                if (!usbManager.isMounted()) {
+                    usbManager.mount();
+                }
+                audioPlayer.setOutputMode(OUTPUT_MODE_FIIO_USB_DAC);
+                ledManager.triggerButtonPulse(CRGB::Cyan, 1, 60);
+            } else {
+                audioPlayer.setOutputMode(OUTPUT_MODE_SPEAKER_I2S);
+                ledManager.triggerButtonPulse(CRGB::Orange, 1, 60);
+            }
+        } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+            inTest = false;
+        }
+        delay(20);
+    }
 }
 
 Diagnostics diagnostics;

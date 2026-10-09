@@ -10,6 +10,7 @@
 #include "ui_player.h"
 #include "power_manager.h"
 #include "spectrum_analyzer.h"
+#include "usb_manager.h"
 
 // Multi-core thread-safe SPI arbitration mutex (OLED vs microSD)
 SemaphoreHandle_t spiBusMutex = NULL;
@@ -263,9 +264,11 @@ void setup() {
 
     diagnostics.begin();
     uiPlayer.begin();
+    usbManager.begin();
 }
 
 void loop() {
+    usbManager.loop();
     ledManager.loop();
     powerManager.checkBatterySafety();
 

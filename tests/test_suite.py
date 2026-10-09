@@ -92,10 +92,14 @@ def test_pinout_matrix_and_qwatch_alignment():
         qtune_pins['BTN_DN'],
         qtune_pins['BTN_CANCEL'],
         qtune_pins['BATTERY_ADC'],
-        qtune_pins['RGB_LED']
+        qtune_pins['RGB_LED'],
+        qtune_pins['USB_HOST_DM'],
+        qtune_pins['USB_HOST_DP']
     ]
     assert len(active_pins) == len(set(active_pins)), f"Pin collision detected! {active_pins}"
-    print(f"  [PASS] Zero pin collisions across all {len(active_pins)} active peripherals.")
+    assert qtune_pins['USB_HOST_DM'] == 19, "USB_HOST_DM must be GPIO 19 (Native D-)"
+    assert qtune_pins['USB_HOST_DP'] == 20, "USB_HOST_DP must be GPIO 20 (Native D+)"
+    print(f"  [PASS] Zero pin collisions across all {len(active_pins)} active peripherals (including FiiO KA11 USB Host).")
 
     # Verify NO Strapping Pins are Used
     strapping_pins = {0, 3, 45, 46}
@@ -748,6 +752,51 @@ def test_sd_safety_mechanisms():
 
     print("  [PASS] Clean unmount protocol, deep-sleep SD_CS hold, brownout auto-shutdown, hot-unplug watchdog, and safe eject UI verified.")
 
+def test_fiio_ka11_usb_dac_and_safe_eject():
+    print("\n--- 17. FiiO KA11 High-Res USB DAC & Safe Eject Subsystem Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hw_h = os.path.join(base_dir, "include", "hw_config.h")
+    usb_h = os.path.join(base_dir, "include", "usb_manager.h")
+    usb_cpp = os.path.join(base_dir, "src", "usb_manager.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+
+    with open(hw_h) as f: hw_src = f.read()
+    with open(usb_h) as f: usbh_src = f.read()
+    with open(usb_cpp) as f: usbcpp_src = f.read()
+    with open(ap_h) as f: aph_src = f.read()
+    with open(ap_cpp) as f: apcpp_src = f.read()
+    with open(diag_cpp) as f: diag_src = f.read()
+    with open(ui_cpp) as f: ui_src = f.read()
+
+    # 1. Native USB-OTG Host Hardware Configuration
+    assert "USB_HOST_DM" in hw_src and "19" in hw_src, "USB_HOST_DM must be defined on GPIO 19"
+    assert "USB_HOST_DP" in hw_src and "20" in hw_src, "USB_HOST_DP must be defined on GPIO 20"
+
+    # 2. USBManager Safe Mount & Safe Eject Protocol
+    assert "mount()" in usbh_src and "safeEject()" in usbh_src, "USBManager must expose mount() and safeEject()"
+    assert "isMounted()" in usbh_src and "isSafeToEject()" in usbh_src, "USBManager must expose safe state queries"
+    assert "SAFE_TO_EJECT" in usbh_src, "USBAudioState must contain SAFE_TO_EJECT"
+    assert "parkHostBus();" in usbcpp_src, "safeEject must park and tristate USB bus lines"
+    assert "audioPlayer.setOutputMode(OUTPUT_MODE_SPEAKER_I2S);" in usbcpp_src, "safeEject must fall back to speaker"
+
+    # 3. Audio Router & Stream Output
+    assert "OUTPUT_MODE_SPEAKER_I2S" in aph_src, "Missing OUTPUT_MODE_SPEAKER_I2S"
+    assert "OUTPUT_MODE_FIIO_USB_DAC" in aph_src, "Missing OUTPUT_MODE_FIIO_USB_DAC"
+    assert "setOutputMode" in aph_src and "getOutputMode" in aph_src
+    assert "routeAudioOutput" in apcpp_src, "AudioPlayer must route audio through routeAudioOutput"
+    assert "usbManager.writeSamples" in apcpp_src, "routeAudioOutput must stream to usbManager when mounted"
+
+    # 4. Diagnostics & UI Integration
+    assert "FiiO KA11 USB DAC" in diag_src, "Diagnostics must include FiiO KA11 test menu item"
+    assert "testFiiOKA11USB" in diag_src, "Diagnostics must implement testFiiOKA11USB()"
+    assert "getOutputModeShortName" in ui_src, "UI player header must display active output mode badge"
+    assert "KA11" in apcpp_src, "AudioPlayer must provide KA11 short badge string"
+
+    print("  [PASS] FiiO KA11 native USB Host (GPIO 19/20), Safe Mount & Eject protocol, dual output routing, and UI badges verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -768,8 +817,8 @@ def main():
     test_qwatch_aligned_menu_system()
     test_flac_decoder_and_clean_naming()
     test_sd_safety_mechanisms()
-    print("\nAll 16 Q-Tune test verifications PASSED (100%)!\n")
+    test_fiio_ka11_usb_dac_and_safe_eject()
+    print("\nAll 17 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
-
     main()

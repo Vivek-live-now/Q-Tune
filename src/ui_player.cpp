@@ -190,10 +190,10 @@ void UIPlayer::renderPlayer() {
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_6x10_tr);
 
-    // Top status header
+    // Top status header (Battery, Output Mode, Playback Mode)
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "B:%d%% V:%d%% %s",
-             battery.getPercentage(), audioPlayer.getVolume(), getPlaybackModeString());
+    snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] %s",
+             battery.getPercentage(), audioPlayer.getOutputModeShortName(), getPlaybackModeString());
     u8g2.drawStr(0, 10, headerBuf);
     u8g2.drawHLine(0, 12, 128);
 

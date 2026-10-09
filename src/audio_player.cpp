@@ -1,12 +1,13 @@
 #include "audio_player.h"
 #include "spectrum_analyzer.h"
 #include "sd_manager.h"
+#include "usb_manager.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
     bytesPlayed(0), totalDataBytes(0), dataOffset(44), currentTrackPath(""),
     currentAudioType(0), consecutiveReadErrors(0), currentSampleRate(44100), currentChannels(2), currentBitsPerSample(16),
-    currentVolume(80), volumeScale(163),
+    currentVolume(80), volumeScale(163), outputMode(OUTPUT_MODE_SPEAKER_I2S),
     audioTaskHandle(NULL), taskRunning(false) {}
 
 bool AudioPlayer::begin() {
@@ -249,8 +250,7 @@ void AudioPlayer::update() {
                     stereoBuf[i * 2] = sample;
                     stereoBuf[i * 2 + 1] = sample;
                 }
-                size_t bytesWritten = 0;
-                i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
+                routeAudioOutput(stereoBuf, samples * 2, samples * 4);
                 bytesPlayed += bytesRead;
             } else {
                 consecutiveReadErrors++;
@@ -297,9 +297,8 @@ void AudioPlayer::update() {
                         samples[i] = (int16_t)(((int32_t)samples[i] * volumeScale) >> 8);
                     }
                 }
-                size_t bytesWritten = 0;
-                i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
-                bytesPlayed += bytesWritten;
+                routeAudioOutput(buffer, bytesRead / sizeof(int16_t), bytesRead);
+                bytesPlayed += bytesRead;
             } else {
                 consecutiveReadErrors++;
                 if (consecutiveReadErrors >= 5 || (bytesPlayed + bytesToRead >= totalDataBytes)) {
@@ -363,8 +362,7 @@ void AudioPlayer::update() {
                 stereoBuf[i * 2] = sample;
                 stereoBuf[i * 2 + 1] = sample;
             }
-            size_t bytesWritten = 0;
-            i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
+            routeAudioOutput(stereoBuf, samples * 2, samples * 4);
             bytesPlayed += bytesRead;
         } else {
             consecutiveReadErrors++;
@@ -424,9 +422,8 @@ void AudioPlayer::update() {
                     samples[i] = (int16_t)(((int32_t)samples[i] * volumeScale) >> 8);
                 }
             }
-            size_t bytesWritten = 0;
-            i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
-            bytesPlayed += bytesWritten;
+            routeAudioOutput(buffer, bytesRead / sizeof(int16_t), bytesRead);
+            bytesPlayed += bytesRead;
         } else {
             consecutiveReadErrors++;
             if (consecutiveReadErrors >= 5 || (bytesPlayed + bytesToRead >= totalDataBytes)) {
@@ -546,6 +543,39 @@ void AudioPlayer::volumeUp(uint8_t step) {
 void AudioPlayer::volumeDown(uint8_t step) {
     if (currentVolume < step) setVolume(0);
     else setVolume(currentVolume - step);
+}
+
+void AudioPlayer::setOutputMode(AudioOutputMode mode) {
+    outputMode = mode;
+}
+
+AudioOutputMode AudioPlayer::getOutputMode() const {
+    return outputMode;
+}
+
+const char* AudioPlayer::getOutputModeName() const {
+    switch (outputMode) {
+        case OUTPUT_MODE_FIIO_USB_DAC: return "FiiO KA11 USB";
+        case OUTPUT_MODE_SPEAKER_I2S:
+        default:                       return "I2S Speaker";
+    }
+}
+
+const char* AudioPlayer::getOutputModeShortName() const {
+    switch (outputMode) {
+        case OUTPUT_MODE_FIIO_USB_DAC: return "KA11";
+        case OUTPUT_MODE_SPEAKER_I2S:
+        default:                       return "SPKR";
+    }
+}
+
+void AudioPlayer::routeAudioOutput(const void *stereoData, size_t sampleCount, size_t byteCount) {
+    if (outputMode == OUTPUT_MODE_FIIO_USB_DAC && usbManager.isMounted()) {
+        usbManager.writeSamples((const int16_t*)stereoData, sampleCount);
+    } else {
+        size_t bytesWritten = 0;
+        i2s_write(I2S_NUM, stereoData, byteCount, &bytesWritten, portMAX_DELAY);
+    }
 }
 
 bool AudioPlayer::hasFinished() const {
