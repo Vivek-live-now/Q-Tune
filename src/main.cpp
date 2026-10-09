@@ -42,7 +42,7 @@ void renderMainMenu() {
 
     String vals[MAIN_MENU_COUNT];
     vals[0] = audioPlayer.isPlaying() ? "[PLAY]" : (audioPlayer.isPaused() ? "[PAUS]" : "[IDLE]");
-    vals[1] = String("[") + spectrumAnalyzer.getPresetName() + "]";
+    vals[1] = String("[") + spectrumAnalyzer.getPresetName() + ":" + spectrumAnalyzer.getSensitivityShortName() + "]";
     vals[2] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
     vals[3] = "[10]";
     vals[4] = "[INFO]";
@@ -198,6 +198,9 @@ void updateVisualizerMode() {
             uiPlayer.playNextTrack();
             ledManager.onPlaybackStart();
         }
+    } else if (evt == BTN_EVENT_SEL_HOLD) {
+        spectrumAnalyzer.cycleSensitivity();
+        ledManager.triggerButtonPulse(CRGB::Cyan, 1, 60);
     } else if (evt == BTN_EVENT_UP_HOLD) {
         audioPlayer.volumeUp(5);
         ledManager.triggerButtonPulse(CRGB::Green, 1, 60);

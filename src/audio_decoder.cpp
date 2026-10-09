@@ -1,42 +1,58 @@
 #include "audio_decoder.h"
+#include "hw_config.h"
 
 #define DR_WAV_IMPLEMENTATION
 #define DR_WAV_NO_STDIO
+#define DRWAV_ASSERT(x) ((void)0)
 #include "dr_wav.h"
 
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_STDIO
 #define DR_FLAC_NO_OGG
+#define DRFLAC_ASSERT(x) ((void)0)
 #include "dr_flac.h"
+
+extern SemaphoreHandle_t spiBusMutex;
 
 static size_t wav_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
     File* file = (File*)pUserData;
     if (!file || !(*file)) return 0;
-    return file->read((uint8_t*)pBufferOut, bytesToRead);
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    size_t n = file->read((uint8_t*)pBufferOut, bytesToRead);
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return n;
 }
 
 static drwav_bool32 wav_seek_cb(void* pUserData, int offset, drwav_seek_origin origin) {
     File* file = (File*)pUserData;
     if (!file || !(*file)) return DRWAV_FALSE;
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    drwav_bool32 res = DRWAV_FALSE;
     if (origin == DRWAV_SEEK_SET) {
-        if (offset < 0) return DRWAV_FALSE;
-        return file->seek((uint32_t)offset) ? DRWAV_TRUE : DRWAV_FALSE;
+        if (offset >= 0) {
+            res = file->seek((uint32_t)offset) ? DRWAV_TRUE : DRWAV_FALSE;
+        }
     } else if (origin == DRWAV_SEEK_CUR) {
         int64_t target = (int64_t)file->position() + offset;
-        if (target < 0 || target > (int64_t)file->size()) return DRWAV_FALSE;
-        return file->seek((uint32_t)target) ? DRWAV_TRUE : DRWAV_FALSE;
+        if (target >= 0 && target <= (int64_t)file->size()) {
+            res = file->seek((uint32_t)target) ? DRWAV_TRUE : DRWAV_FALSE;
+        }
     } else if (origin == DRWAV_SEEK_END) {
         int64_t target = (int64_t)file->size() + offset;
-        if (target < 0 || target > (int64_t)file->size()) return DRWAV_FALSE;
-        return file->seek((uint32_t)target) ? DRWAV_TRUE : DRWAV_FALSE;
+        if (target >= 0 && target <= (int64_t)file->size()) {
+            res = file->seek((uint32_t)target) ? DRWAV_TRUE : DRWAV_FALSE;
+        }
     }
-    return DRWAV_FALSE;
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return res;
 }
 
 static drwav_bool32 wav_tell_cb(void* pUserData, drwav_int64* pCursor) {
     File* file = (File*)pUserData;
     if (!file || !(*file) || !pCursor) return DRWAV_FALSE;
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     *pCursor = (drwav_int64)file->position();
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return DRWAV_TRUE;
 }
 
@@ -55,7 +71,9 @@ void WAVDecoder::close() {
         pWavHandle = nullptr;
     }
     if (srcFile) {
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         srcFile.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     }
     sampleRate = 44100;
     channels = 2;
@@ -77,7 +95,8 @@ bool WAVDecoder::open(File &file) {
     if (!pWav) return false;
 
     srcFile.seek(0);
-    if (!drwav_init(pWav, wav_read_cb, wav_seek_cb, wav_tell_cb, &srcFile, NULL)) {
+    // DRWAV_SEQUENTIAL avoids backward seeks and stops immediately at the data chunk header
+    if (!drwav_init_ex(pWav, wav_read_cb, wav_seek_cb, wav_tell_cb, NULL, &srcFile, NULL, DRWAV_SEQUENTIAL, NULL)) {
         free(pWav);
         srcFile = File();
         return false;
@@ -88,6 +107,14 @@ bool WAVDecoder::open(File &file) {
     channels = pWav->channels;
     bitsPerSample = 16; // drwav_read_pcm_frames_s16 normalizes all bit depths to 16-bit
     totalBytes = (uint32_t)(pWav->totalPCMFrameCount * channels * sizeof(int16_t));
+    if (totalBytes == 0 && channels > 0) {
+        uint32_t rawDataSize = (srcFile.size() > pWav->dataChunkDataPos) ? (srcFile.size() - (uint32_t)pWav->dataChunkDataPos) : 0;
+        uint32_t rawBytesPerFrame = pWav->channels * (pWav->bitsPerSample / 8);
+        if (rawBytesPerFrame > 0) {
+            uint32_t frames = rawDataSize / rawBytesPerFrame;
+            totalBytes = frames * channels * sizeof(int16_t);
+        }
+    }
     bytesReadSoFar = 0;
     return true;
 }
@@ -123,31 +150,42 @@ uint32_t MP3Decoder::getTotalBytes() const { return 0; }
 static size_t flac_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
     File* file = (File*)pUserData;
     if (!file || !(*file)) return 0;
-    return file->read((uint8_t*)pBufferOut, bytesToRead);
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    size_t n = file->read((uint8_t*)pBufferOut, bytesToRead);
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return n;
 }
 
 static drflac_bool32 flac_seek_cb(void* pUserData, int offset, drflac_seek_origin origin) {
     File* file = (File*)pUserData;
     if (!file || !(*file)) return DRFLAC_FALSE;
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    drflac_bool32 res = DRFLAC_FALSE;
     if (origin == DRFLAC_SEEK_SET) {
-        if (offset < 0) return DRFLAC_FALSE;
-        return file->seek((uint32_t)offset) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        if (offset >= 0) {
+            res = file->seek((uint32_t)offset) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        }
     } else if (origin == DRFLAC_SEEK_CUR) {
         int64_t target = (int64_t)file->position() + offset;
-        if (target < 0 || target > (int64_t)file->size()) return DRFLAC_FALSE;
-        return file->seek((uint32_t)target) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        if (target >= 0 && target <= (int64_t)file->size()) {
+            res = file->seek((uint32_t)target) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        }
     } else if (origin == DRFLAC_SEEK_END) {
         int64_t target = (int64_t)file->size() + offset;
-        if (target < 0 || target > (int64_t)file->size()) return DRFLAC_FALSE;
-        return file->seek((uint32_t)target) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        if (target >= 0 && target <= (int64_t)file->size()) {
+            res = file->seek((uint32_t)target) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        }
     }
-    return DRFLAC_FALSE;
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return res;
 }
 
 static drflac_bool32 flac_tell_cb(void* pUserData, drflac_int64* pCursor) {
     File* file = (File*)pUserData;
     if (!file || !(*file) || !pCursor) return DRFLAC_FALSE;
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     *pCursor = (drflac_int64)file->position();
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return DRFLAC_TRUE;
 }
 
@@ -165,7 +203,9 @@ void FLACDecoder::close() {
         pFlacHandle = nullptr;
     }
     if (srcFile) {
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         srcFile.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     }
     sampleRate = 44100;
     channels = 2;

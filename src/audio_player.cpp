@@ -139,22 +139,22 @@ bool AudioPlayer::playFile(const String &path) {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
         return false;
     }
+    // Release spiBusMutex before opening decoders because decoder callbacks manage mutex with fine granularity
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
     AudioFormat fmt = DecoderFactory::detectFormat(path);
     if (fmt == AUDIO_FORMAT_FLAC) {
         if (!flacDecoder.open(wavFile)) {
-            wavFile.close();
-            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+            closeFiles();
             return false;
         }
         currentAudioType = 2; // FLAC
         currentSampleRate = flacDecoder.getSampleRate();
         currentChannels = flacDecoder.getChannels();
-        currentBitsPerSample = flacDecoder.getBitsPerSample();
+        currentBitsPerSample = 16; // drflac_read_pcm_frames_s16 normalizes all output to 16-bit PCM
         totalDataBytes = flacDecoder.getTotalBytes();
         bytesPlayed = 0;
         dataOffset = 0;
-        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
         currentTrackPath = path;
@@ -168,11 +168,10 @@ bool AudioPlayer::playFile(const String &path) {
         currentAudioType = 1; // WAV
         currentSampleRate = wavDecoder.getSampleRate();
         currentChannels = wavDecoder.getChannels();
-        currentBitsPerSample = wavDecoder.getBitsPerSample();
+        currentBitsPerSample = 16; // drwav_read_pcm_frames_s16 normalizes all bit depths to 16-bit PCM
         totalDataBytes = wavDecoder.getTotalBytes();
         bytesPlayed = 0;
         dataOffset = 0;
-        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         setupI2S(currentSampleRate, currentChannels, currentBitsPerSample);
         currentTrackPath = path;
@@ -181,9 +180,12 @@ bool AudioPlayer::playFile(const String &path) {
         return true;
     }
 
-    if (!parseWAVHeader(wavFile, currentWavHeader)) {
-        wavFile.close();
+    // Fallback: raw WAV streaming only for valid 16-bit PCM
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    bool parsed = parseWAVHeader(wavFile, currentWavHeader);
+    if (!parsed || currentWavHeader.bitsPerSample != 16 || currentWavHeader.audioFormat != 1) {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        closeFiles();
         return false;
     }
 
@@ -232,10 +234,7 @@ void AudioPlayer::update() {
                 return;
             }
 
-            int bytesRead = 0;
-            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-            bytesRead = flacDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
-            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+            int bytesRead = flacDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
 
             if (bytesRead > 0) {
                 bytesRead &= ~1;
@@ -254,16 +253,21 @@ void AudioPlayer::update() {
                 i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
                 bytesPlayed += bytesRead;
             } else {
-                if (bytesPlayed + bytesToRead < totalDataBytes) {
-                    consecutiveReadErrors++;
-                    if (consecutiveReadErrors >= 15) {
-                        stop();
-                        sdManager.notifyCardRemoved();
-                        return;
+                consecutiveReadErrors++;
+                if (consecutiveReadErrors >= 5 || (bytesPlayed + bytesToRead >= totalDataBytes)) {
+                    bool cardGone = false;
+                    if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                        cardGone = !SD.exists(currentTrackPath);
+                        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
                     }
-                } else {
                     stop();
-                    trackFinished = true;
+                    if (cardGone) {
+                        sdManager.notifyCardRemoved();
+                    } else {
+                        trackFinished = true;
+                    }
+                    return;
                 }
             }
         } else {
@@ -278,10 +282,7 @@ void AudioPlayer::update() {
                 return;
             }
 
-            int bytesRead = 0;
-            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-            bytesRead = flacDecoder.readSamples(buffer, bytesToRead);
-            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+            int bytesRead = flacDecoder.readSamples(buffer, bytesToRead);
 
             if (bytesRead > 0) {
                 bytesRead &= ~3;
@@ -300,16 +301,21 @@ void AudioPlayer::update() {
                 i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
                 bytesPlayed += bytesWritten;
             } else {
-                if (bytesPlayed + bytesToRead < totalDataBytes) {
-                    consecutiveReadErrors++;
-                    if (consecutiveReadErrors >= 15) {
-                        stop();
-                        sdManager.notifyCardRemoved();
-                        return;
+                consecutiveReadErrors++;
+                if (consecutiveReadErrors >= 5 || (bytesPlayed + bytesToRead >= totalDataBytes)) {
+                    bool cardGone = false;
+                    if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                        cardGone = !SD.exists(currentTrackPath);
+                        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
                     }
-                } else {
                     stop();
-                    trackFinished = true;
+                    if (cardGone) {
+                        sdManager.notifyCardRemoved();
+                    } else {
+                        trackFinished = true;
+                    }
+                    return;
                 }
             }
         }
@@ -335,14 +341,14 @@ void AudioPlayer::update() {
         }
 
         int bytesRead = 0;
-        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         if (wavDecoder.isOpen()) {
             bytesRead = wavDecoder.readSamples((uint8_t*)monoBuf, bytesToRead);
         } else if (wavFile) {
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
             bytesRead = wavFile.read((uint8_t*)monoBuf, bytesToRead);
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             bytesRead &= ~1; // Keep 16-bit word alignment
         }
-        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
             bytesRead &= ~1;
@@ -361,16 +367,21 @@ void AudioPlayer::update() {
             i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
             bytesPlayed += bytesRead;
         } else {
-            if (bytesPlayed + bytesToRead < totalDataBytes) {
-                consecutiveReadErrors++;
-                if (consecutiveReadErrors >= 15) {
-                    stop();
-                    sdManager.notifyCardRemoved();
-                    return;
+            consecutiveReadErrors++;
+            if (consecutiveReadErrors >= 5 || (bytesPlayed + bytesToRead >= totalDataBytes)) {
+                bool cardGone = false;
+                if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                    cardGone = !SD.exists(currentTrackPath);
+                    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
                 }
-            } else {
                 stop();
-                trackFinished = true;
+                if (cardGone) {
+                    sdManager.notifyCardRemoved();
+                } else {
+                    trackFinished = true;
+                }
+                return;
             }
         }
     } else {
@@ -391,14 +402,14 @@ void AudioPlayer::update() {
         }
 
         int bytesRead = 0;
-        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         if (wavDecoder.isOpen()) {
             bytesRead = wavDecoder.readSamples(buffer, bytesToRead);
         } else if (wavFile) {
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
             bytesRead = wavFile.read(buffer, bytesToRead);
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             bytesRead &= ~3; // Keep 4-byte stereo frame alignment
         }
-        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
             bytesRead &= ~3;
@@ -417,16 +428,21 @@ void AudioPlayer::update() {
             i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
             bytesPlayed += bytesWritten;
         } else {
-            if (bytesPlayed + bytesToRead < totalDataBytes) {
-                consecutiveReadErrors++;
-                if (consecutiveReadErrors >= 15) {
-                    stop();
-                    sdManager.notifyCardRemoved();
-                    return;
+            consecutiveReadErrors++;
+            if (consecutiveReadErrors >= 5 || (bytesPlayed + bytesToRead >= totalDataBytes)) {
+                bool cardGone = false;
+                if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                    cardGone = !SD.exists(currentTrackPath);
+                    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
                 }
-            } else {
                 stop();
-                trackFinished = true;
+                if (cardGone) {
+                    sdManager.notifyCardRemoved();
+                } else {
+                    trackFinished = true;
+                }
+                return;
             }
         }
     }
@@ -473,13 +489,15 @@ bool AudioPlayer::isPaused() const {
 }
 
 uint32_t AudioPlayer::getPositionMs() const {
-    uint32_t byteRate = currentSampleRate * currentChannels * (currentBitsPerSample / 8);
+    uint32_t bps = (currentAudioType == 2 || wavDecoder.isOpen()) ? 16 : currentBitsPerSample;
+    uint32_t byteRate = currentSampleRate * currentChannels * (bps / 8);
     if (byteRate == 0) return 0;
     return (bytesPlayed * 1000ULL) / byteRate;
 }
 
 uint32_t AudioPlayer::getDurationMs() const {
-    uint32_t byteRate = currentSampleRate * currentChannels * (currentBitsPerSample / 8);
+    uint32_t bps = (currentAudioType == 2 || wavDecoder.isOpen()) ? 16 : currentBitsPerSample;
+    uint32_t byteRate = currentSampleRate * currentChannels * (bps / 8);
     if (byteRate == 0) return 0;
     return (totalDataBytes * 1000ULL) / byteRate;
 }

@@ -22,6 +22,7 @@ static const size_t PALETTE_COUNT = sizeof(COLOR_PALETTE) / sizeof(COLOR_PALETTE
 
 static const LedMode SELECTABLE_MODES[] = {
     LedMode::REACT_BASS_PULSE,
+    LedMode::REACT_VOCAL_LIGHTNING,
     LedMode::REACT_ENERGY_VU,
     LedMode::REACT_SPECTRUM_HUE,
     LedMode::REACT_RAINBOW_FLOW,
@@ -61,10 +62,48 @@ LEDManager::LEDManager() :
     bass_max(15.0f),
     bass_avg(5.0f),
     rms_max(15.0f),
-    total_max(15.0f)
+    total_max(15.0f),
+    vocal_avg(5.0f),
+    vocal_max(15.0f),
+    lightning_intensity(0.0f),
+    last_lightning_time(0),
+    lightning_burst_count(0)
 {}
 
+void LEDManager::loadSettings() {
+    Preferences prefs;
+    if (prefs.begin("qtune_led", true)) {
+        current_brightness = prefs.getUChar("bright", 160);
+        uint8_t m = prefs.getUChar("mode", (uint8_t)LedMode::REACT_BASS_PULSE);
+        user_mode = (LedMode)m;
+        color_index = prefs.getUChar("col_idx", 0);
+        if (color_index >= PALETTE_COUNT) color_index = 0;
+        current_color = COLOR_PALETTE[color_index].color;
+        uint8_t s = prefs.getUChar("sens", (uint8_t)LedSensitivity::SENS_NORMAL);
+        current_sensitivity = (LedSensitivity)s;
+        master_enabled = prefs.getBool("enabled", true);
+        button_feedback_enabled = prefs.getBool("btn_fb", true);
+        off_on_complete = prefs.getBool("off_done", true);
+        prefs.end();
+    }
+}
+
+void LEDManager::saveSettings() {
+    Preferences prefs;
+    if (prefs.begin("qtune_led", false)) {
+        prefs.putUChar("bright", current_brightness);
+        prefs.putUChar("mode", (uint8_t)user_mode);
+        prefs.putUChar("col_idx", color_index);
+        prefs.putUChar("sens", (uint8_t)current_sensitivity);
+        prefs.putBool("enabled", master_enabled);
+        prefs.putBool("btn_fb", button_feedback_enabled);
+        prefs.putBool("off_done", off_on_complete);
+        prefs.end();
+    }
+}
+
 void LEDManager::begin() {
+    loadSettings();
     FastLED.addLeds<WS2812, RGB_LED, GRB>(leds, 1);
     FastLED.setBrightness(current_brightness);
     triggerPulse(CRGB::Blue, 2, 200); // 2 short blue pulses on boot
@@ -72,6 +111,7 @@ void LEDManager::begin() {
 
 bool LEDManager::isReactiveMode(LedMode mode) {
     return (mode == LedMode::REACT_BASS_PULSE ||
+            mode == LedMode::REACT_VOCAL_LIGHTNING ||
             mode == LedMode::REACT_ENERGY_VU ||
             mode == LedMode::REACT_SPECTRUM_HUE ||
             mode == LedMode::REACT_RAINBOW_FLOW ||
@@ -91,6 +131,7 @@ void LEDManager::setMode(LedMode mode) {
 void LEDManager::setUserMode(LedMode mode) {
     user_mode = mode;
     setMode(mode);
+    saveSettings();
 }
 
 void LEDManager::cycleMode() {
@@ -107,6 +148,7 @@ void LEDManager::cycleMode() {
 
 void LEDManager::setEnabled(bool enabled) {
     master_enabled = enabled;
+    saveSettings();
     if (!master_enabled) {
         off();
     } else {
@@ -121,38 +163,40 @@ void LEDManager::toggleEnabled() {
 const char* LEDManager::getModeName() const {
     LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE || current_mode == LedMode::OFF) ? user_mode : current_mode;
     switch (m) {
-        case LedMode::REACT_BASS_PULSE:   return "BASS PULSE";
-        case LedMode::REACT_ENERGY_VU:    return "ENERGY VU";
-        case LedMode::REACT_SPECTRUM_HUE: return "SPECTRUM HUE";
-        case LedMode::REACT_RAINBOW_FLOW: return "RAINBOW FLOW";
-        case LedMode::REACT_FIRE:         return "FIRE FLAME";
-        case LedMode::REACT_DISCO_FLASH:  return "DISCO STROBE";
-        case LedMode::BREATHING:          return "BREATHING";
-        case LedMode::RAINBOW:            return "RAINBOW WHEEL";
-        case LedMode::SOLID:              return "SOLID COLOR";
-        case LedMode::OFF:                return "OFF";
-        case LedMode::BOOT_PULSE:         return "BOOT PULSE";
-        case LedMode::LOW_BATTERY_PULSE:  return "LOW BATTERY";
+        case LedMode::REACT_BASS_PULSE:       return "BASS PULSE";
+        case LedMode::REACT_VOCAL_LIGHTNING:  return "VOCAL LIGHTNING";
+        case LedMode::REACT_ENERGY_VU:        return "ENERGY VU";
+        case LedMode::REACT_SPECTRUM_HUE:     return "SPECTRUM HUE";
+        case LedMode::REACT_RAINBOW_FLOW:     return "RAINBOW FLOW";
+        case LedMode::REACT_FIRE:             return "FIRE FLAME";
+        case LedMode::REACT_DISCO_FLASH:      return "DISCO STROBE";
+        case LedMode::BREATHING:              return "BREATHING";
+        case LedMode::RAINBOW:                return "RAINBOW WHEEL";
+        case LedMode::SOLID:                  return "SOLID COLOR";
+        case LedMode::OFF:                    return "OFF";
+        case LedMode::BOOT_PULSE:             return "BOOT PULSE";
+        case LedMode::LOW_BATTERY_PULSE:      return "LOW BATTERY";
         case LedMode::PULSE:
-        case LedMode::BEAT_PULSE:         return "PULSE";
-        default:                          return "MUSIC SYNC";
+        case LedMode::BEAT_PULSE:             return "PULSE";
+        default:                              return "MUSIC SYNC";
     }
 }
 
 const char* LEDManager::getShortModeName() const {
     LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE || current_mode == LedMode::OFF) ? user_mode : current_mode;
     switch (m) {
-        case LedMode::REACT_BASS_PULSE:   return "BASS";
-        case LedMode::REACT_ENERGY_VU:    return "VU";
-        case LedMode::REACT_SPECTRUM_HUE: return "SPEC";
-        case LedMode::REACT_RAINBOW_FLOW: return "FLOW";
-        case LedMode::REACT_FIRE:         return "FIRE";
-        case LedMode::REACT_DISCO_FLASH:  return "DSCO";
-        case LedMode::BREATHING:          return "BRTH";
-        case LedMode::RAINBOW:            return "RAIN";
-        case LedMode::SOLID:              return "SLID";
-        case LedMode::OFF:                return "OFF";
-        default:                          return "RGB";
+        case LedMode::REACT_BASS_PULSE:       return "BASS";
+        case LedMode::REACT_VOCAL_LIGHTNING:  return "LGHT";
+        case LedMode::REACT_ENERGY_VU:        return "VU";
+        case LedMode::REACT_SPECTRUM_HUE:     return "SPEC";
+        case LedMode::REACT_RAINBOW_FLOW:     return "FLOW";
+        case LedMode::REACT_FIRE:             return "FIRE";
+        case LedMode::REACT_DISCO_FLASH:      return "DSCO";
+        case LedMode::BREATHING:              return "BRTH";
+        case LedMode::RAINBOW:                return "RAIN";
+        case LedMode::SOLID:                  return "SLID";
+        case LedMode::OFF:                    return "OFF";
+        default:                              return "RGB";
     }
 }
 
@@ -161,6 +205,7 @@ void LEDManager::setColor(CRGB color) {
     setMode(LedMode::SOLID);
     leds[0] = color;
     FastLED.show();
+    saveSettings();
 }
 
 void LEDManager::cycleColor() {
@@ -170,6 +215,7 @@ void LEDManager::cycleColor() {
         leds[0] = current_color;
         FastLED.show();
     }
+    saveSettings();
 }
 
 const char* LEDManager::getColorName() const {
@@ -180,6 +226,7 @@ void LEDManager::setBrightness(uint8_t brightness) {
     current_brightness = brightness;
     FastLED.setBrightness(brightness);
     FastLED.show();
+    saveSettings();
 }
 
 void LEDManager::cycleBrightness() {
@@ -194,6 +241,11 @@ void LEDManager::cycleBrightness() {
     setBrightness(BRIGHTNESS_LEVELS[nextIdx]);
 }
 
+void LEDManager::setSensitivity(LedSensitivity sens) {
+    current_sensitivity = sens;
+    saveSettings();
+}
+
 void LEDManager::cycleSensitivity() {
     if (current_sensitivity == LedSensitivity::SENS_LOW) {
         current_sensitivity = LedSensitivity::SENS_NORMAL;
@@ -202,6 +254,7 @@ void LEDManager::cycleSensitivity() {
     } else {
         current_sensitivity = LedSensitivity::SENS_LOW;
     }
+    saveSettings();
 }
 
 const char* LEDManager::getSensitivityName() const {
@@ -211,6 +264,26 @@ const char* LEDManager::getSensitivityName() const {
         case LedSensitivity::SENS_HIGH:   return "HIGH";
         default:                          return "NORM";
     }
+}
+
+void LEDManager::setButtonFeedbackEnabled(bool enabled) {
+    button_feedback_enabled = enabled;
+    saveSettings();
+}
+
+void LEDManager::toggleButtonFeedback() {
+    button_feedback_enabled = !button_feedback_enabled;
+    saveSettings();
+}
+
+void LEDManager::setTurnOffOnComplete(bool enable) {
+    off_on_complete = enable;
+    saveSettings();
+}
+
+void LEDManager::toggleTurnOffOnComplete() {
+    off_on_complete = !off_on_complete;
+    saveSettings();
 }
 
 void LEDManager::off() {
@@ -287,6 +360,31 @@ void LEDManager::updateReactiveModes(float dt) {
                 CRGB c = current_color;
                 c.nscale8(val);
                 leds[0] = c;
+                break;
+            }
+            case LedMode::REACT_VOCAL_LIGHTNING: {
+                uint32_t now = millis();
+                if (now - last_lightning_time > 400) {
+                    last_lightning_time = now;
+                    lightning_intensity = 1.0f;
+                    lightning_burst_count = (rand() % 3) + 1;
+                }
+                if (lightning_burst_count > 0 && (now - last_lightning_time < 90)) {
+                    if (rand() % 2 == 0) {
+                        lightning_intensity = 0.85f + (float)(rand() % 15) / 100.0f;
+                    }
+                } else {
+                    lightning_intensity -= dt * 9.0f;
+                    if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
+                }
+                if (lightning_intensity > 0.05f) {
+                    uint8_t whiteVal = (uint8_t)(lightning_intensity * 255.0f);
+                    uint8_t blueTint = (uint8_t)(lightning_intensity * 210.0f);
+                    uint8_t cyanTint = (uint8_t)(lightning_intensity * 240.0f);
+                    leds[0] = CRGB(blueTint, cyanTint, whiteVal);
+                } else {
+                    leds[0] = CHSV(136, 230, 12);
+                }
                 break;
             }
             case LedMode::REACT_ENERGY_VU: {
@@ -387,6 +485,20 @@ void LEDManager::updateReactiveModes(float dt) {
     if (total_max < 8.0f) total_max = 8.0f;
     float harmonicNorm = constrain((totalHarmonics / total_max) * sens, 0.0f, 1.0f);
 
+    // 4. Vocal Frequency Range & Formant Extraction (~300 Hz to 2.5 kHz)
+    float vocalInst = (bands[3] * 1.0f + bands[4] * 1.3f + bands[5] * 1.5f + bands[6] * 1.5f + bands[7] * 1.2f + bands[8] * 1.0f);
+    vocal_avg += (vocalInst - vocal_avg) * (dt * 3.0f);
+    float vocalDiff = vocalInst - vocal_avg;
+    if (vocalDiff < 0.0f) vocalDiff = 0.0f;
+
+    if (vocalDiff > vocal_max) {
+        vocal_max = vocalDiff;
+    } else {
+        vocal_max -= dt * (vocal_max * 0.40f);
+    }
+    if (vocal_max < 8.0f) vocal_max = 8.0f;
+    float vocalPunch = constrain((vocalDiff / vocal_max) * sens, 0.0f, 1.0f);
+
     switch (current_mode) {
         case LedMode::REACT_BASS_PULSE: {
             // Instant attack on beat transient, punchy exponential decay (~220ms)
@@ -403,6 +515,39 @@ void LEDManager::updateReactiveModes(float dt) {
             CRGB c = current_color;
             c.nscale8(val);
             leds[0] = c;
+            break;
+        }
+
+        case LedMode::REACT_VOCAL_LIGHTNING: {
+            uint32_t now = millis();
+            // Trigger lightning flash on vocal transients
+            if (vocalPunch > 0.38f && vocalDiff > (vocal_avg * 0.20f + 3.0f) && (now - last_lightning_time > 110)) {
+                last_lightning_time = now;
+                lightning_intensity = 1.0f;
+                lightning_burst_count = (rand() % 3) + 1; // 1-3 crackle bursts
+            }
+
+            // Rapid crackling exponential decay
+            if (lightning_burst_count > 0 && (now - last_lightning_time < 80)) {
+                if (rand() % 2 == 0) {
+                    lightning_intensity = 0.82f + (float)(rand() % 18) / 100.0f;
+                }
+            } else {
+                lightning_intensity -= dt * 8.5f;
+                if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
+            }
+
+            if (lightning_intensity > 0.05f) {
+                // Intense electric cyan-white lightning strike
+                uint8_t whiteVal = (uint8_t)(lightning_intensity * 255.0f);
+                uint8_t blueTint = (uint8_t)(lightning_intensity * 210.0f);
+                uint8_t cyanTint = (uint8_t)(lightning_intensity * 240.0f);
+                leds[0] = CRGB(blueTint, cyanTint, whiteVal);
+            } else {
+                // Resting electric azure aura reacting gently to ongoing vocal presence
+                uint8_t restVal = (uint8_t)(6 + vocalPunch * 32.0f);
+                leds[0] = CHSV(136, 230, restVal);
+            }
             break;
         }
 

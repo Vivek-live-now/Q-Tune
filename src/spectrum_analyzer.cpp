@@ -10,6 +10,7 @@ SpectrumAnalyzer::SpectrumAnalyzer() :
     lastSampleFeedMs(0),
     lastAnalysisMs(0),
     currentPreset(PRESET_BAR_SPECTRUM),
+    sensitivity(VIS_SENS_NORMAL),
     active(false),
     micHardwareInitialized(false),
     peakLevel(0.0f),
@@ -24,7 +25,69 @@ SpectrumAnalyzer::SpectrumAnalyzer() :
     memset(ringBuffer, 0, sizeof(ringBuffer));
 }
 
+void SpectrumAnalyzer::loadSettings() {
+    Preferences prefs;
+    if (prefs.begin("qtune_vis", true)) {
+        uint8_t s = prefs.getUChar("sens", (uint8_t)VIS_SENS_NORMAL);
+        if (s > 2) s = (uint8_t)VIS_SENS_NORMAL;
+        sensitivity = (VisualizerSensitivity)s;
+        prefs.end();
+    }
+}
+
+void SpectrumAnalyzer::saveSettings() {
+    Preferences prefs;
+    if (prefs.begin("qtune_vis", false)) {
+        prefs.putUChar("sens", (uint8_t)sensitivity);
+        prefs.end();
+    }
+}
+
+void SpectrumAnalyzer::setSensitivity(VisualizerSensitivity sens) {
+    sensitivity = sens;
+    saveSettings();
+}
+
+void SpectrumAnalyzer::cycleSensitivity() {
+    if (sensitivity == VIS_SENS_LOW) {
+        sensitivity = VIS_SENS_NORMAL;
+    } else if (sensitivity == VIS_SENS_NORMAL) {
+        sensitivity = VIS_SENS_HIGH;
+    } else {
+        sensitivity = VIS_SENS_LOW;
+    }
+    saveSettings();
+}
+
+const char* SpectrumAnalyzer::getSensitivityName() const {
+    switch (sensitivity) {
+        case VIS_SENS_LOW:    return "LOW";
+        case VIS_SENS_NORMAL: return "NORMAL";
+        case VIS_SENS_HIGH:   return "HIGH";
+        default:              return "NORMAL";
+    }
+}
+
+const char* SpectrumAnalyzer::getSensitivityShortName() const {
+    switch (sensitivity) {
+        case VIS_SENS_LOW:    return "LOW";
+        case VIS_SENS_NORMAL: return "NRM";
+        case VIS_SENS_HIGH:   return "HGH";
+        default:              return "NRM";
+    }
+}
+
+float SpectrumAnalyzer::getSensitivityMultiplier() const {
+    switch (sensitivity) {
+        case VIS_SENS_LOW:    return 0.65f;
+        case VIS_SENS_NORMAL: return 1.00f;
+        case VIS_SENS_HIGH:   return 1.60f;
+        default:              return 1.00f;
+    }
+}
+
 bool SpectrumAnalyzer::begin() {
+    loadSettings();
     active = false;
     micHardwareInitialized = false;
     peakLevel = 0.0f;
@@ -156,9 +219,10 @@ void SpectrumAnalyzer::sampleAudioStream() {
         bassSumSq += bassFilterState2 * bassFilterState2;
     }
 
-    peakLevel = (float)peak;
-    rmsLevel = sqrtf(sumSq / SAMPLE_SIZE);
-    bassLevel = sqrtf(bassSumSq / SAMPLE_SIZE);
+    float sensMult = getSensitivityMultiplier();
+    peakLevel = (float)peak * sensMult;
+    rmsLevel = sqrtf(sumSq / SAMPLE_SIZE) * sensMult;
+    bassLevel = sqrtf(bassSumSq / SAMPLE_SIZE) * sensMult;
 
     processFFT();
 }
@@ -313,8 +377,8 @@ void SpectrumAnalyzer::processFFT() {
             if (mag[k] > bandMax) bandMax = mag[k];
         }
 
-        // High frequency equal loudness pre-emphasis
-        float boost = 1.0f + ((float)b * 0.15f);
+        // High frequency equal loudness pre-emphasis & sensitivity scaling
+        float boost = (1.0f + ((float)b * 0.15f)) * getSensitivityMultiplier();
         float val = bandMax * boost;
 
         uint8_t targetHeight = 0;
@@ -414,7 +478,7 @@ void SpectrumAnalyzer::drawBars() {
         track = track.substring(0, 11) + "..";
     }
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "[BARS] %s", track.c_str());
+    snprintf(headerBuf, sizeof(headerBuf), "[BARS:%s] %s", getSensitivityShortName(), track.c_str());
     u8g2.drawStr(0, 10, headerBuf);
     u8g2.drawHLine(0, 12, 128);
 
@@ -461,7 +525,7 @@ void SpectrumAnalyzer::drawWaveform() {
         track = track.substring(0, 11) + "..";
     }
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "[WAVE] %s", track.c_str());
+    snprintf(headerBuf, sizeof(headerBuf), "[WAVE:%s] %s", getSensitivityShortName(), track.c_str());
     u8g2.drawStr(0, 10, headerBuf);
     u8g2.drawHLine(0, 12, 128);
 
@@ -508,7 +572,7 @@ void SpectrumAnalyzer::drawPlasma() {
         track = track.substring(0, 10) + "..";
     }
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "[PLASMA] %s", track.c_str());
+    snprintf(headerBuf, sizeof(headerBuf), "[PLS:%s] %s", getSensitivityShortName(), track.c_str());
     u8g2.drawStr(0, 10, headerBuf);
     u8g2.drawHLine(0, 12, 128);
 
@@ -540,7 +604,7 @@ void SpectrumAnalyzer::drawStarfield() {
         track = track.substring(0, 11) + "..";
     }
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "[STAR] %s", track.c_str());
+    snprintf(headerBuf, sizeof(headerBuf), "[STR:%s] %s", getSensitivityShortName(), track.c_str());
     u8g2.drawStr(0, 10, headerBuf);
     u8g2.drawHLine(0, 12, 128);
 

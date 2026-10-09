@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <driver/i2s.h>
+#include <Preferences.h>
 #include "hw_config.h"
 #include "display.h"
 
@@ -11,6 +12,12 @@ enum VisualizerPreset {
     PRESET_WAVEFORM,
     PRESET_MILKDROP_PLASMA,
     PRESET_STARFIELD
+};
+
+enum VisualizerSensitivity {
+    VIS_SENS_LOW = 0,
+    VIS_SENS_NORMAL = 1,
+    VIS_SENS_HIGH = 2
 };
 
 class SpectrumAnalyzer {
@@ -28,6 +35,16 @@ public:
 
     // Hardware microphone sampling (Retained for Diagnostics hardware test)
     void sampleMicrophone();
+
+    // Sensitivity adjustment & persistence
+    VisualizerSensitivity getSensitivity() const { return sensitivity; }
+    void setSensitivity(VisualizerSensitivity sens);
+    void cycleSensitivity();
+    const char* getSensitivityName() const;
+    const char* getSensitivityShortName() const;
+    float getSensitivityMultiplier() const;
+    void loadSettings();
+    void saveSettings();
 
     // Preset management & rendering
     void render();
@@ -61,6 +78,7 @@ private:
     uint8_t peakDecayTimer[16];
 
     VisualizerPreset currentPreset;
+    VisualizerSensitivity sensitivity;
     bool active;
     bool micHardwareInitialized;
     float peakLevel;

@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <FastLED.h>
+#include <Preferences.h>
 #include "hw_config.h"
 
 enum class LedMode {
@@ -16,6 +17,7 @@ enum class LedMode {
     BEAT_PULSE,
     // Music-Reactive Modes
     REACT_BASS_PULSE,
+    REACT_VOCAL_LIGHTNING,
     REACT_ENERGY_VU,
     REACT_SPECTRUM_HUE,
     REACT_RAINBOW_FLOW,
@@ -34,6 +36,10 @@ public:
     LEDManager();
     void begin();
     void loop();
+
+    // Persistent settings storage
+    void loadSettings();
+    void saveSettings();
 
     // Master on/off control for reactive lights
     bool isEnabled() const { return master_enabled; }
@@ -60,22 +66,22 @@ public:
     uint8_t getBrightness() const { return current_brightness; }
     void cycleBrightness();
 
-    void setSensitivity(LedSensitivity sens) { current_sensitivity = sens; }
+    void setSensitivity(LedSensitivity sens);
     LedSensitivity getSensitivity() const { return current_sensitivity; }
     void cycleSensitivity();
     const char* getSensitivityName() const;
 
     // Button reactive lights control
     bool isButtonFeedbackEnabled() const { return button_feedback_enabled; }
-    void setButtonFeedbackEnabled(bool enabled) { button_feedback_enabled = enabled; }
-    void toggleButtonFeedback() { button_feedback_enabled = !button_feedback_enabled; }
+    void setButtonFeedbackEnabled(bool enabled);
+    void toggleButtonFeedback();
     const char* getButtonFeedbackName() const { return button_feedback_enabled ? "ON" : "OFF"; }
     void triggerButtonPulse(CRGB color, int count = 1, int speed_ms = 40);
 
     // Auto-off when music play is complete
     bool isTurnOffOnComplete() const { return off_on_complete; }
-    void setTurnOffOnComplete(bool enable) { off_on_complete = enable; }
-    void toggleTurnOffOnComplete() { off_on_complete = !off_on_complete; }
+    void setTurnOffOnComplete(bool enable);
+    void toggleTurnOffOnComplete();
     const char* getTurnOffOnCompleteName() const { return off_on_complete ? "ON" : "OFF"; }
     void setMenuPreview(bool active) { in_menu_preview = active; }
 
@@ -120,6 +126,13 @@ private:
     float bass_avg;
     float rms_max;
     float total_max;
+
+    // Vocal lightning trackers
+    float vocal_avg;
+    float vocal_max;
+    float lightning_intensity;
+    uint32_t last_lightning_time;
+    uint8_t lightning_burst_count;
 
     void updateReactiveModes(float dt);
 };

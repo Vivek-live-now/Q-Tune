@@ -285,11 +285,14 @@ def test_led_manager_modes():
 
     # Music-reactive lighting modes verification
     assert "REACT_BASS_PULSE" in h_src
+    assert "REACT_VOCAL_LIGHTNING" in h_src
     assert "REACT_ENERGY_VU" in h_src
     assert "REACT_SPECTRUM_HUE" in h_src
     assert "REACT_RAINBOW_FLOW" in h_src
     assert "REACT_FIRE" in h_src
     assert "REACT_DISCO_FLASH" in h_src
+    assert "VOCAL LIGHTNING" in cpp_src
+    assert "vocalPunch" in cpp_src, "Vocal formant energy detection missing in led_manager.cpp"
 
     # Interactive controls & lifecycle verification
     assert "cycleMode" in h_src
@@ -303,6 +306,10 @@ def test_led_manager_modes():
     assert "updateReactiveModes" in cpp_src
     assert "punchNorm" in cpp_src, "Dynamic transient beat tracking missing in led_manager.cpp"
 
+    # NVS persistent settings storage verification
+    assert "loadSettings" in h_src and "saveSettings" in h_src
+    assert "qtune_led" in cpp_src, "Preferences namespace qtune_led missing"
+
     # Master toggle, button feedback, and auto-off on music completion
     assert "isEnabled" in h_src and "setEnabled" in h_src and "toggleEnabled" in h_src
     assert "isButtonFeedbackEnabled" in h_src and "triggerButtonPulse" in h_src
@@ -313,7 +320,7 @@ def test_led_manager_modes():
     assert "Reactive Lights" in open(os.path.join(base_dir, "src", "main.cpp")).read()
     assert "Button Lights" in open(os.path.join(base_dir, "src", "main.cpp")).read()
     assert "Off on Finish" in open(os.path.join(base_dir, "src", "main.cpp")).read()
-    print("  [PASS] FastLED non-blocking loop, 6 music-reactive modes, master toggle, button feedback, and finish auto-off verified.")
+    print("  [PASS] FastLED non-blocking loop, 7 music-reactive modes (including Vocal Lightning), NVS settings persistence, master toggle, button feedback, and finish auto-off verified.")
 
 def test_inmp441_microphone_pipeline():
     print("\n--- 8. INMP441 MEMS Microphone & Spectrum Analyzer Pipeline Test ---")
@@ -538,7 +545,14 @@ def test_live_wav_decoding_visualizer_pipeline():
         decay_timer = 0
     assert peak_hold_val == 45 and decay_timer == 0
 
-    print("  [PASS] Live WAV stream tap, lock-free ring buffer, stereo downmix, peak hold caps, and HUD mini-bars verified.")
+    # 7. Verify Visualizer Sensitivity adjustment & NVS persistence
+    assert "VisualizerSensitivity" in sa_h_text, "VisualizerSensitivity enum missing"
+    assert "VIS_SENS_LOW" in sa_h_text and "VIS_SENS_HIGH" in sa_h_text
+    assert "cycleSensitivity" in sa_h_text and "getSensitivityMultiplier" in sa_h_text
+    assert "qtune_vis" in sa_cpp_text, "qtune_vis Preferences namespace missing"
+    assert "spectrumAnalyzer.cycleSensitivity()" in main_cpp_text, "main.cpp missing visualizer sensitivity cycling"
+
+    print("  [PASS] Live WAV stream tap, lock-free ring buffer, stereo downmix, peak hold caps, sensitivity adjustment, and HUD mini-bars verified.")
 
 def test_qwatch_aligned_menu_system():
     print("\n--- 14. Q-Watch Aligned Menu System Architecture Test ---")
@@ -671,7 +685,11 @@ def test_flac_decoder_and_clean_naming():
     assert "007" not in main_src, "main.cpp must not contain 007"
     assert not readme_src.startswith("# 007"), "README.md should be titled Q-Tunes"
 
-    print("  [PASS] dr_flac stream decoder, custom I/O callbacks, format detection, and clean Q-Tunes branding verified.")
+    # 5. Verify stability against WDT crashes, seek failures, and abort panics
+    assert "DRWAV_SEQUENTIAL" in dcpp_src, "WAVDecoder must use DRWAV_SEQUENTIAL to prevent backward seek failures"
+    assert "DRWAV_ASSERT" in dcpp_src and "DRFLAC_ASSERT" in dcpp_src, "Assert panics must be disabled for dr_wav and dr_flac"
+
+    print("  [PASS] dr_flac stream decoder, DRWAV_SEQUENTIAL, assert overrides, custom I/O callbacks, and clean Q-Tunes branding verified.")
 
 def test_sd_safety_mechanisms():
     print("\n--- 16. SD Card Anti-Corruption & Safety Mechanisms Test ---")
