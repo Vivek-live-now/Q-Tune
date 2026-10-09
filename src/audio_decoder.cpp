@@ -143,13 +143,6 @@ uint16_t WAVDecoder::getChannels() const { return channels; }
 uint16_t WAVDecoder::getBitsPerSample() const { return bitsPerSample; }
 uint32_t WAVDecoder::getTotalBytes() const { return totalBytes; }
 
-MP3Decoder::MP3Decoder() {}
-bool MP3Decoder::open(File &file) { srcFile = file; return false; }
-int MP3Decoder::readSamples(uint8_t *buffer, size_t maxBytes) { return 0; }
-uint32_t MP3Decoder::getSampleRate() const { return 44100; }
-uint16_t MP3Decoder::getChannels() const { return 2; }
-uint16_t MP3Decoder::getBitsPerSample() const { return 16; }
-uint32_t MP3Decoder::getTotalBytes() const { return 0; }
 
 static size_t flac_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
     File* file = (File*)pUserData;
