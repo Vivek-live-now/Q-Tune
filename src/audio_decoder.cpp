@@ -19,13 +19,16 @@ static drwav_bool32 wav_seek_cb(void* pUserData, int offset, drwav_seek_origin o
     File* file = (File*)pUserData;
     if (!file || !(*file)) return DRWAV_FALSE;
     if (origin == DRWAV_SEEK_SET) {
+        if (offset < 0) return DRWAV_FALSE;
         return file->seek((uint32_t)offset) ? DRWAV_TRUE : DRWAV_FALSE;
     } else if (origin == DRWAV_SEEK_CUR) {
-        uint32_t cur = file->position();
-        return file->seek((uint32_t)(cur + offset)) ? DRWAV_TRUE : DRWAV_FALSE;
+        int64_t target = (int64_t)file->position() + offset;
+        if (target < 0 || target > (int64_t)file->size()) return DRWAV_FALSE;
+        return file->seek((uint32_t)target) ? DRWAV_TRUE : DRWAV_FALSE;
     } else if (origin == DRWAV_SEEK_END) {
-        uint32_t sz = file->size();
-        return file->seek((uint32_t)(sz + offset)) ? DRWAV_TRUE : DRWAV_FALSE;
+        int64_t target = (int64_t)file->size() + offset;
+        if (target < 0 || target > (int64_t)file->size()) return DRWAV_FALSE;
+        return file->seek((uint32_t)target) ? DRWAV_TRUE : DRWAV_FALSE;
     }
     return DRWAV_FALSE;
 }
@@ -51,6 +54,9 @@ void WAVDecoder::close() {
         free(pWavHandle);
         pWavHandle = nullptr;
     }
+    if (srcFile) {
+        srcFile.close();
+    }
     sampleRate = 44100;
     channels = 2;
     bitsPerSample = 16;
@@ -73,6 +79,7 @@ bool WAVDecoder::open(File &file) {
     srcFile.seek(0);
     if (!drwav_init(pWav, wav_read_cb, wav_seek_cb, wav_tell_cb, &srcFile, NULL)) {
         free(pWav);
+        srcFile = File();
         return false;
     }
 
@@ -123,13 +130,16 @@ static drflac_bool32 flac_seek_cb(void* pUserData, int offset, drflac_seek_origi
     File* file = (File*)pUserData;
     if (!file || !(*file)) return DRFLAC_FALSE;
     if (origin == DRFLAC_SEEK_SET) {
+        if (offset < 0) return DRFLAC_FALSE;
         return file->seek((uint32_t)offset) ? DRFLAC_TRUE : DRFLAC_FALSE;
     } else if (origin == DRFLAC_SEEK_CUR) {
-        uint32_t cur = file->position();
-        return file->seek((uint32_t)(cur + offset)) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        int64_t target = (int64_t)file->position() + offset;
+        if (target < 0 || target > (int64_t)file->size()) return DRFLAC_FALSE;
+        return file->seek((uint32_t)target) ? DRFLAC_TRUE : DRFLAC_FALSE;
     } else if (origin == DRFLAC_SEEK_END) {
-        uint32_t sz = file->size();
-        return file->seek((uint32_t)(sz + offset)) ? DRFLAC_TRUE : DRFLAC_FALSE;
+        int64_t target = (int64_t)file->size() + offset;
+        if (target < 0 || target > (int64_t)file->size()) return DRFLAC_FALSE;
+        return file->seek((uint32_t)target) ? DRFLAC_TRUE : DRFLAC_FALSE;
     }
     return DRFLAC_FALSE;
 }
@@ -153,6 +163,9 @@ void FLACDecoder::close() {
     if (pFlacHandle) {
         drflac_close((drflac*)pFlacHandle);
         pFlacHandle = nullptr;
+    }
+    if (srcFile) {
+        srcFile.close();
     }
     sampleRate = 44100;
     channels = 2;
@@ -180,7 +193,10 @@ bool FLACDecoder::open(File &file) {
     srcFile.seek(0);
 
     drflac* pFlac = drflac_open(flac_read_cb, flac_seek_cb, flac_tell_cb, &srcFile, NULL);
-    if (!pFlac) return false;
+    if (!pFlac) {
+        srcFile = File();
+        return false;
+    }
 
     pFlacHandle = (void*)pFlac;
     sampleRate = pFlac->sampleRate;

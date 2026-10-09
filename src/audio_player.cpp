@@ -238,6 +238,7 @@ void AudioPlayer::update() {
             if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
             if (bytesRead > 0) {
+                bytesRead &= ~1;
                 consecutiveReadErrors = 0;
                 int samples = bytesRead / sizeof(int16_t);
                 spectrumAnalyzer.feedSamples(monoBuf, samples, 1);
@@ -255,7 +256,7 @@ void AudioPlayer::update() {
             } else {
                 if (bytesPlayed + bytesToRead < totalDataBytes) {
                     consecutiveReadErrors++;
-                    if (consecutiveReadErrors >= 3) {
+                    if (consecutiveReadErrors >= 15) {
                         stop();
                         sdManager.notifyCardRemoved();
                         return;
@@ -283,6 +284,7 @@ void AudioPlayer::update() {
             if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
             if (bytesRead > 0) {
+                bytesRead &= ~3;
                 consecutiveReadErrors = 0;
                 int frameCount = bytesRead / (sizeof(int16_t) * 2);
                 spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
@@ -300,7 +302,7 @@ void AudioPlayer::update() {
             } else {
                 if (bytesPlayed + bytesToRead < totalDataBytes) {
                     consecutiveReadErrors++;
-                    if (consecutiveReadErrors >= 3) {
+                    if (consecutiveReadErrors >= 15) {
                         stop();
                         sdManager.notifyCardRemoved();
                         return;
@@ -343,6 +345,7 @@ void AudioPlayer::update() {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
+            bytesRead &= ~1;
             consecutiveReadErrors = 0;
             int samples = bytesRead / sizeof(int16_t);
             spectrumAnalyzer.feedSamples(monoBuf, samples, 1);
@@ -360,7 +363,7 @@ void AudioPlayer::update() {
         } else {
             if (bytesPlayed + bytesToRead < totalDataBytes) {
                 consecutiveReadErrors++;
-                if (consecutiveReadErrors >= 3) {
+                if (consecutiveReadErrors >= 15) {
                     stop();
                     sdManager.notifyCardRemoved();
                     return;
@@ -398,6 +401,7 @@ void AudioPlayer::update() {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
+            bytesRead &= ~3;
             consecutiveReadErrors = 0;
             int frameCount = bytesRead / (sizeof(int16_t) * 2);
             spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
@@ -415,7 +419,7 @@ void AudioPlayer::update() {
         } else {
             if (bytesPlayed + bytesToRead < totalDataBytes) {
                 consecutiveReadErrors++;
-                if (consecutiveReadErrors >= 3) {
+                if (consecutiveReadErrors >= 15) {
                     stop();
                     sdManager.notifyCardRemoved();
                     return;
@@ -553,7 +557,7 @@ void AudioPlayer::startAudioTask() {
         xTaskCreatePinnedToCore(
             audioTaskFunction,
             "QAudioTask",
-            4096,
+            16384,
             this,
             5,
             &audioTaskHandle,

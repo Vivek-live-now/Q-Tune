@@ -8,26 +8,57 @@ bool SDManager::begin() {
         xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     }
 
-    // Arbitrate shared SPI bus: ensure both CS lines are driven high
+    // Arbitrate shared SPI bus: ensure both CS lines are driven high (deselected)
     pinMode(OLED_CS, OUTPUT);
     digitalWrite(OLED_CS, HIGH);
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
 
-    if (mounted) {
-        SD.end();
-        mounted = false;
-    }
+    // Always reset FATFS driver before re-initialization
+    SD.end();
+    mounted = false;
+    delay(50);
 
-    // Try standard 10 MHz SPI clock for high reliability on shared bus, fallback to 4 MHz
-    if (!SD.begin(SD_CS, SPI, 10000000)) {
-        if (!SD.begin(SD_CS, SPI, 4000000)) {
-            mounted = false;
-            safeToRemove = true;
-            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
-            return false;
+    // Re-initialize SPI hardware bus on shared pins
+    SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, OLED_CS);
+
+    // Provide >80 clock cycles with CS=HIGH for SD card state synchronization per SD specification
+    digitalWrite(SD_CS, HIGH);
+    digitalWrite(OLED_CS, HIGH);
+    for (int i = 0; i < 16; i++) {
+        SPI.transfer(0xFF);
+    }
+    delay(50);
+
+    // Multi-frequency retry loop: try standard 10MHz, then 4MHz, then 1MHz
+    bool ok = false;
+    const uint32_t freqs[] = { 10000000, 4000000, 1000000 };
+    for (int retry = 0; retry < 3 && !ok; retry++) {
+        for (uint32_t freq : freqs) {
+            if (SD.begin(SD_CS, SPI, freq)) {
+                ok = true;
+                break;
+            }
+            delay(25);
+        }
+        if (!ok) {
+            delay(50);
+            digitalWrite(SD_CS, HIGH);
+            for (int i = 0; i < 16; i++) {
+                SPI.transfer(0xFF);
+            }
         }
     }
+
+    if (!ok) {
+        mounted = false;
+        safeToRemove = true;
+        pinMode(SD_CS, OUTPUT);
+        digitalWrite(SD_CS, HIGH);
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
     mounted = true;
     safeToRemove = false;
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -52,6 +83,9 @@ bool SDManager::unmount() {
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
 
+    // Give card 50ms settling time after bus disconnect
+    delay(50);
+
     if (spiBusMutex != NULL) {
         xSemaphoreGive(spiBusMutex);
     }
@@ -60,6 +94,7 @@ bool SDManager::unmount() {
 
 bool SDManager::remount() {
     unmount();
+    delay(100);
     return begin();
 }
 
@@ -72,10 +107,18 @@ bool SDManager::isSafeToRemove() const {
 }
 
 void SDManager::notifyCardRemoved() {
+    audioPlayer.stop();
+    if (spiBusMutex != NULL) {
+        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    }
+    SD.end();
     mounted = false;
     safeToRemove = true;
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
+    if (spiBusMutex != NULL) {
+        xSemaphoreGive(spiBusMutex);
+    }
 }
 
 std::vector<String> SDManager::listMusicFiles() {

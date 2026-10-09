@@ -3851,7 +3851,7 @@ DRWAV_PRIVATE drwav_bool32 drwav_init__internal(drwav* pWav, drwav_chunk_proc on
         dataChunkSize = 0;
 
         for (;;) {
-            drwav_uint8 temp[4096];
+            drwav_uint8 temp[512];
             size_t bytesRead = pWav->onRead(pWav->pUserData, temp, sizeof(temp));
             dataChunkSize += bytesRead;
 
@@ -5946,7 +5946,7 @@ DRWAV_API size_t drwav_read_raw(drwav* pWav, size_t bytesToRead, void* pBufferOu
 
         /* When we get here we may need to read-and-discard some data. */
         while (bytesRead < bytesToRead) {
-            drwav_uint8 buffer[4096];
+            drwav_uint8 buffer[512];
             size_t bytesSeeked;
             size_t bytesToSeek = (bytesToRead - bytesRead);
             if (bytesToSeek > sizeof(buffer)) {
@@ -6148,7 +6148,7 @@ DRWAV_API drwav_bool32 drwav_seek_to_pcm_frame(drwav* pWav, drwav_uint64 targetF
         if (targetFrameIndex > pWav->readCursorInPCMFrames) {
             drwav_uint64 offsetInFrames = targetFrameIndex - pWav->readCursorInPCMFrames;
 
-            drwav_int16 devnull[2048];
+            drwav_int16 devnull[256];
             while (offsetInFrames > 0) {
                 drwav_uint64 framesRead = 0;
                 drwav_uint64 framesToRead = offsetInFrames;
@@ -6342,7 +6342,7 @@ DRWAV_API drwav_uint64 drwav_write_pcm_frames_be(drwav* pWav, drwav_uint64 frame
     }
 
     while (bytesToWrite > 0) {
-        drwav_uint8 temp[4096];
+        drwav_uint8 temp[512];
         drwav_uint32 sampleCount;
         size_t bytesJustWritten;
         drwav_uint64 bytesToWriteThisIteration;
@@ -6863,7 +6863,7 @@ DRWAV_PRIVATE void drwav__ieee_to_s16(drwav_int16* pOut, const drwav_uint8* pIn,
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__pcm(drwav* pWav, drwav_uint64 framesToRead, drwav_int16* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -6914,7 +6914,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__pcm(drwav* pWav, drwav_uin
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__ieee(drwav* pWav, drwav_uint64 framesToRead, drwav_int16* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -6964,7 +6964,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__ieee(drwav* pWav, drwav_ui
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__alaw(drwav* pWav, drwav_uint64 framesToRead, drwav_int16* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7031,7 +7031,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__alaw(drwav* pWav, drwav_ui
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s16__mulaw(drwav* pWav, drwav_uint64 framesToRead, drwav_int16* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7316,7 +7316,7 @@ DRWAV_PRIVATE void drwav__ieee_to_f32(float* pOut, const drwav_uint8* pIn, size_
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__pcm(drwav* pWav, drwav_uint64 framesToRead, float* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7366,7 +7366,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__msadpcm_ima(drwav* pWav, d
     want to duplicate that code.
     */
     drwav_uint64 totalFramesRead;
-    drwav_int16 samples16[2048];
+    drwav_int16 samples16[256];
 
     totalFramesRead = 0;
 
@@ -7392,7 +7392,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__msadpcm_ima(drwav* pWav, d
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__ieee(drwav* pWav, drwav_uint64 framesToRead, float* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7443,7 +7443,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__ieee(drwav* pWav, drwav_ui
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__alaw(drwav* pWav, drwav_uint64 framesToRead, float* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7500,7 +7500,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__alaw(drwav* pWav, drwav_ui
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_f32__mulaw(drwav* pWav, drwav_uint64 framesToRead, float* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7801,7 +7801,7 @@ DRWAV_PRIVATE void drwav__ieee_to_s32(drwav_int32* pOut, const drwav_uint8* pIn,
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__pcm(drwav* pWav, drwav_uint64 framesToRead, drwav_int32* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7856,7 +7856,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__msadpcm_ima(drwav* pWav, d
     want to duplicate that code.
     */
     drwav_uint64 totalFramesRead = 0;
-    drwav_int16 samples16[2048];
+    drwav_int16 samples16[256];
 
     while (framesToRead > 0) {
         drwav_uint64 framesToReadThisIteration = drwav_min(framesToRead, drwav_countof(samples16)/pWav->channels);
@@ -7880,7 +7880,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__msadpcm_ima(drwav* pWav, d
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__ieee(drwav* pWav, drwav_uint64 framesToRead, drwav_int32* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7926,7 +7926,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__ieee(drwav* pWav, drwav_ui
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__alaw(drwav* pWav, drwav_uint64 framesToRead, drwav_int32* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;
@@ -7983,7 +7983,7 @@ DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__alaw(drwav* pWav, drwav_ui
 DRWAV_PRIVATE drwav_uint64 drwav_read_pcm_frames_s32__mulaw(drwav* pWav, drwav_uint64 framesToRead, drwav_int32* pBufferOut)
 {
     drwav_uint64 totalFramesRead;
-    drwav_uint8 sampleData[4096] = {0};
+    drwav_uint8 sampleData[512] = {0};
     drwav_uint32 bytesPerFrame;
     drwav_uint32 bytesPerSample;
     drwav_uint64 samplesRead;

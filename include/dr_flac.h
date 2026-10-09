@@ -11902,7 +11902,7 @@ static type* drflac__full_read_and_close_ ## extension (drflac* pFlac, unsigned 
 {                                                                                                                                                                   \
     type* pSampleData = NULL;                                                                                                                                       \
     drflac_uint64 totalPCMFrameCount;                                                                                                                               \
-    type buffer[4096];                                                                                                                                              \
+    type buffer[512];                                                                                                                                               \
     drflac_uint64 pcmFramesRead;                                                                                                                                    \
     size_t sampleDataBufferSize = sizeof(buffer);                                                                                                                   \
                                                                                                                                                                     \
