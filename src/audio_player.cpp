@@ -569,6 +569,40 @@ const char* AudioPlayer::getOutputModeShortName() const {
     }
 }
 
+void AudioPlayer::prepareForStream(uint32_t sampleRate) {
+    stop();
+    setupI2S(sampleRate, 2, 16);
+    currentSampleRate = sampleRate;
+    currentChannels = 2;
+    currentBitsPerSample = 16;
+}
+
+void AudioPlayer::playStreamChunk(const int16_t *stereoSamples, size_t frameCount) {
+    if (stereoSamples == NULL || frameCount == 0) return;
+
+    int16_t scaledBuffer[256];
+    size_t remaining = frameCount;
+    const int16_t *ptr = stereoSamples;
+
+    while (remaining > 0) {
+        size_t framesToProcess = (remaining > 128) ? 128 : remaining;
+
+        if (volumeScale < 256) {
+            for (size_t i = 0; i < framesToProcess * 2; i++) {
+                scaledBuffer[i] = (int16_t)(((int32_t)ptr[i] * volumeScale) >> 8);
+            }
+            routeAudioOutput(scaledBuffer, framesToProcess * 2, framesToProcess * 4);
+            spectrumAnalyzer.feedSamples(scaledBuffer, framesToProcess, 2);
+        } else {
+            routeAudioOutput(ptr, framesToProcess * 2, framesToProcess * 4);
+            spectrumAnalyzer.feedSamples(ptr, framesToProcess, 2);
+        }
+
+        ptr += framesToProcess * 2;
+        remaining -= framesToProcess;
+    }
+}
+
 void AudioPlayer::routeAudioOutput(const void *stereoData, size_t sampleCount, size_t byteCount) {
     if (outputMode == OUTPUT_MODE_FIIO_USB_DAC && usbManager.isMounted()) {
         usbManager.writeSamples((const int16_t*)stereoData, sampleCount);

@@ -11,6 +11,7 @@
 #include "power_manager.h"
 #include "spectrum_analyzer.h"
 #include "usb_manager.h"
+#include "wifi_streamer.h"
 
 // Multi-core thread-safe SPI arbitration mutex (OLED vs microSD)
 SemaphoreHandle_t spiBusMutex = NULL;
@@ -19,6 +20,7 @@ enum AppMode {
     MODE_MAIN_MENU,
     MODE_PLAYER,
     MODE_VISUALIZER,
+    MODE_WIFI_STREAMER,
     MODE_RGB_EFFECTS,
     MODE_DIAGNOSTICS,
     MODE_SYSTEM_INFO
@@ -27,13 +29,14 @@ enum AppMode {
 AppMode currentMode = MODE_MAIN_MENU;
 int menuSelection = 0;
 int menuScrollOffset = 0;
-const int MAIN_MENU_COUNT = 5;
+const int MAIN_MENU_COUNT = 6;
 const char* menuLabels[] = {
     "1. Music Player",
     "2. Spectrum Visualizer",
-    "3. RGB Light Effects",
-    "4. Diagnostics",
-    "5. System Info"
+    "3. Wi-Fi Audio Stream",
+    "4. RGB Light Effects",
+    "5. Diagnostics",
+    "6. System Info"
 };
 
 void renderMainMenu() {
@@ -44,9 +47,10 @@ void renderMainMenu() {
     String vals[MAIN_MENU_COUNT];
     vals[0] = audioPlayer.isPlaying() ? "[PLAY]" : (audioPlayer.isPaused() ? "[PAUS]" : "[IDLE]");
     vals[1] = String("[") + spectrumAnalyzer.getPresetName() + ":" + spectrumAnalyzer.getSensitivityShortName() + "]";
-    vals[2] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
-    vals[3] = "[10]";
-    vals[4] = "[INFO]";
+    vals[2] = wifiStreamer.isStreaming() ? "[STRM]" : (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED ? "[CONN]" : "[WIFI]");
+    vals[3] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
+    vals[4] = "[11]";
+    vals[5] = "[INFO]";
 
     display.drawStandardMenu("Q-TUNES", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -76,14 +80,18 @@ void updateMainMenu() {
                 }
                 break;
             case 2:
+                currentMode = MODE_WIFI_STREAMER;
+                wifiStreamer.start();
+                break;
+            case 3:
                 currentMode = MODE_RGB_EFFECTS;
                 ledManager.setMenuPreview(true);
                 break;
-            case 3:
+            case 4:
                 currentMode = MODE_DIAGNOSTICS;
                 diagnostics.begin();
                 break;
-            case 4:
+            case 5:
                 currentMode = MODE_SYSTEM_INFO;
                 break;
         }
@@ -265,6 +273,7 @@ void setup() {
     diagnostics.begin();
     uiPlayer.begin();
     usbManager.begin();
+    wifiStreamer.begin();
 }
 
 void loop() {
@@ -283,6 +292,12 @@ void loop() {
             break;
         case MODE_VISUALIZER:
             updateVisualizerMode();
+            break;
+        case MODE_WIFI_STREAMER:
+            if (!wifiStreamer.updateUI()) {
+                wifiStreamer.stop();
+                currentMode = MODE_MAIN_MENU;
+            }
             break;
         case MODE_RGB_EFFECTS:
             updateRgbEffectsMode();

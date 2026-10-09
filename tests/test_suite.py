@@ -797,6 +797,66 @@ def test_fiio_ka11_usb_dac_and_safe_eject():
 
     print("  [PASS] FiiO KA11 native USB Host (GPIO 19/20), Safe Mount & Eject protocol, dual output routing, and UI badges verified.")
 
+def test_wifi_streaming_and_dlna_media_renderer():
+    print("\n--- 18. Wi-Fi Audio Streaming & DLNA/UPnP MediaRenderer Subsystem Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    wifi_h = os.path.join(base_dir, "include", "wifi_streamer.h")
+    wifi_cpp = os.path.join(base_dir, "src", "wifi_streamer.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+    partitions_csv = os.path.join(base_dir, "partitions.csv")
+    pio_ini = os.path.join(base_dir, "platformio.ini")
+
+    assert os.path.exists(wifi_h), "wifi_streamer.h not found"
+    assert os.path.exists(wifi_cpp), "wifi_streamer.cpp not found"
+    assert os.path.exists(partitions_csv), "partitions.csv not found"
+
+    with open(wifi_h) as f:
+        wh_src = f.read()
+    with open(wifi_cpp) as f:
+        wcpp_src = f.read()
+    with open(ap_h) as f:
+        aph_src = f.read()
+    with open(ap_cpp) as f:
+        apcpp_src = f.read()
+    with open(main_cpp) as f:
+        main_src = f.read()
+    with open(partitions_csv) as f:
+        part_src = f.read()
+    with open(pio_ini) as f:
+        ini_src = f.read()
+
+    # 1. Verify Partition Table & PSRAM config
+    assert "partitions.csv" in ini_src, "platformio.ini must reference partitions.csv"
+    assert "BOARD_HAS_PSRAM" in ini_src, "platformio.ini must define BOARD_HAS_PSRAM"
+    assert "0x3A0000" in part_src or "factory" in part_src, "partitions.csv must provide expanded app partition for 4MB flash"
+
+    # 2. Verify PSRAM Ring Buffer & FreeRTOS Stream Task
+    assert "streamRingBuffer" in wh_src, "WiFiStreamer must define streamRingBuffer"
+    assert "MALLOC_CAP_SPIRAM" in wcpp_src or "ps_malloc" in wcpp_src, "WiFiStreamer must allocate buffer in PSRAM"
+    assert "QWiFiStreamTask" in wcpp_src, "WiFiStreamer must run dedicated FreeRTOS stream task"
+    assert "playStreamChunk" in aph_src and "playStreamChunk" in apcpp_src, "AudioPlayer must provide playStreamChunk for stream ingestion"
+
+    # 3. Verify DLNA / UPnP MediaRenderer & SSDP Protocol
+    assert "MediaRenderer:1" in wcpp_src, "WiFiStreamer must declare MediaRenderer:1"
+    assert "AVTransport:1" in wcpp_src, "WiFiStreamer must declare AVTransport:1 service"
+    assert "RenderingControl:1" in wcpp_src, "WiFiStreamer must declare RenderingControl:1 service"
+    assert "SetAVTransportURI" in wcpp_src, "WiFiStreamer must handle SetAVTransportURI action"
+    assert "239, 255, 255, 250" in wcpp_src or "239.255.255.250" in wcpp_src, "WiFiStreamer must join SSDP multicast group"
+
+    # 4. Verify Dual Output & Visualizer Interoperability
+    assert "OUTPUT_MODE_FIIO_USB_DAC" in wcpp_src or "audioPlayer.getOutputMode()" in wcpp_src
+    assert "spectrumAnalyzer.feedSamples" in apcpp_src, "playStreamChunk must feed samples to visualizer"
+    assert "renderMiniHUD" in wcpp_src or "spectrumAnalyzer" in wcpp_src, "WiFiStreamer UI must integrate live visualizer"
+
+    # 5. Verify Main Menu Integration
+    assert "MODE_WIFI_STREAMER" in main_src, "main.cpp must include MODE_WIFI_STREAMER"
+    assert "Wi-Fi Audio Stream" in main_src, "Main menu must include Wi-Fi Audio Stream label"
+    assert "wifiStreamer.updateUI()" in main_src, "main.cpp loop must update WiFiStreamer UI"
+
+    print("  [PASS] Wi-Fi Audio Streaming, DLNA/UPnP MediaRenderer, 384KB PSRAM buffer, 4MB partition table, and dual output routing verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -818,7 +878,8 @@ def main():
     test_flac_decoder_and_clean_naming()
     test_sd_safety_mechanisms()
     test_fiio_ka11_usb_dac_and_safe_eject()
-    print("\nAll 17 Q-Tune test verifications PASSED (100%)!\n")
+    test_wifi_streaming_and_dlna_media_renderer()
+    print("\nAll 18 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

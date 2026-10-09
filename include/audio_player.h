@@ -54,6 +54,10 @@ public:
     bool hasFinished() const;
     void clearFinished();
 
+    // Stream Audio Playback (Wi-Fi streaming / DLNA / AirMusic)
+    void prepareForStream(uint32_t sampleRate = 44100);
+    void playStreamChunk(const int16_t *stereoSamples, size_t frameCount);
+
     // Audio Output Mode Selection (MAX98357A I2S Speaker vs FiiO KA11 USB DAC)
     void setOutputMode(AudioOutputMode mode);
     AudioOutputMode getOutputMode() const;

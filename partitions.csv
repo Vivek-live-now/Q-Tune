@@ -1,0 +1,8 @@
+# ESP32-S3 4MB Flash Partition Scheme for Q-Tune
+# Gives 3.6MB flash space to factory app for Wi-Fi + Audio + Visualizer
+# Name,   Type, SubType, Offset,  Size,     Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  factory, 0x10000, 0x3A0000,
+spiffs,   data, spiffs,  0x3B0000,0x40000,
+coredump, data, coredump,0x3F0000,0x10000,
