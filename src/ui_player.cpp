@@ -17,10 +17,13 @@ UIPlayer::UIPlayer() :
     currentCategoryTitle("Q-TUNES MUSIC"),
     currentFolderPath("/music"),
     folderSelection(0),
-    folderScrollOffset(0) {}
+    folderScrollOffset(0),
+    settingsSelection(0),
+    settingsScrollOffset(0) {}
 
 void UIPlayer::begin() {
     if (!sdManager.isMounted()) sdManager.begin();
+    playerConfig.begin();
 
     // If already playing or paused, jump straight to Now Playing view without restarting!
     if (audioPlayer.isPlaying() || audioPlayer.isPaused()) {
@@ -41,6 +44,7 @@ void UIPlayer::openNowPlaying() {
     inListMode = false;
     currentPage = PAGE_NOW_PLAYING;
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+    albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
 }
 
 PlayerPage UIPlayer::getCurrentPage() const {
@@ -55,6 +59,8 @@ void UIPlayer::cyclePage() {
     currentPage = (PlayerPage)((currentPage + 1) % 3);
     if (currentPage == PAGE_LYRICS) {
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+    } else if (currentPage == PAGE_NOW_PLAYING) {
+        albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 }
 
@@ -100,6 +106,7 @@ void UIPlayer::playNextTrack() {
         ledManager.onPlaybackStop();
     }
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+    albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
 }
 
 void UIPlayer::playPreviousTrack() {
@@ -107,6 +114,7 @@ void UIPlayer::playPreviousTrack() {
     currentTrackIndex = (currentTrackIndex - 1 + trackList.size()) % trackList.size();
     audioPlayer.playFile(trackList[currentTrackIndex]);
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+    albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
 }
 
 void UIPlayer::setPlaybackMode(PlaybackMode mode) {
@@ -161,6 +169,7 @@ bool UIPlayer::update() {
         catLabels.push_back("Playlists");
         catLabels.push_back("Recently Played");
         catLabels.push_back(String("Playback: ") + getPlaybackModeString());
+        catLabels.push_back("Player Settings");
         catLabels.push_back("Rescan Library");
 
         int totalCats = (int)catLabels.size();
@@ -190,7 +199,6 @@ bool UIPlayer::update() {
                     inListMode = true;
                     trackScrollOffset = 0;
                     currentTrackIndex = 0;
-                    // If playing, select currently playing track
                     for (size_t i = 0; i < trackList.size(); i++) {
                         if (trackList[i] == audioPlayer.getCurrentTrackPath()) {
                             currentTrackIndex = (int)i;
@@ -238,7 +246,12 @@ bool UIPlayer::update() {
                 case 6: // Playback Mode toggle
                     cyclePlaybackMode();
                     break;
-                case 7: // Rescan Library
+                case 7: // Player Settings
+                    currentView = VIEW_PLAYER_SETTINGS;
+                    settingsSelection = 0;
+                    settingsScrollOffset = 0;
+                    break;
+                case 8: // Rescan Library
                     display.clear();
                     display.drawTopStatusBar("INDEXING...", battery.getPercentage());
                     display.getU8g2().setFont(u8g2_font_6x10_tr);
@@ -253,8 +266,31 @@ bool UIPlayer::update() {
         }
         renderCategories();
 
+    } else if (currentView == VIEW_PLAYER_SETTINGS) {
+        // --- Customization Settings Menu ---
+        const int SETTINGS_COUNT = 5;
+        if (evt == BTN_EVENT_UP_PRESS) {
+            Display::navigateMenu(settingsSelection, settingsScrollOffset, SETTINGS_COUNT, -1);
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+        } else if (evt == BTN_EVENT_DN_PRESS) {
+            Display::navigateMenu(settingsSelection, settingsScrollOffset, SETTINGS_COUNT, +1);
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+        } else if (evt == BTN_EVENT_SEL_PRESS) {
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+            switch (settingsSelection) {
+                case 0: playerConfig.cycleLayout(); break;
+                case 1: playerConfig.cycleArtSource(); break;
+                case 2: playerConfig.cycleDitherMode(); break;
+                case 3: playerConfig.toggleLyricsAutoScroll(); break;
+                case 4: currentView = VIEW_CATEGORIES; break;
+            }
+        } else if (evt == BTN_EVENT_CANCEL_PRESS) {
+            currentView = VIEW_CATEGORIES;
+        }
+        renderPlayerSettings();
+
     } else if (currentView == VIEW_TRACK_LIST) {
-        // --- 2. Track List View ---
+        // --- Track List View ---
         if (evt == BTN_EVENT_UP_PRESS) {
             Display::navigateMenu(currentTrackIndex, trackScrollOffset, (int)trackList.size(), -1);
             ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
@@ -269,7 +305,6 @@ bool UIPlayer::update() {
             } else if (!trackList.empty()) {
                 String selected = trackList[currentTrackIndex];
 
-                // If this is a Playlist file (.m3u), load its songs
                 if (selected.endsWith(".m3u") || selected.endsWith(".m3u8")) {
                     currentCategoryTitle = "PLAYLIST";
                     trackList = sdManager.loadPlaylist(selected);
@@ -287,7 +322,6 @@ bool UIPlayer::update() {
                     return true;
                 }
 
-                // Play new track
                 audioPlayer.playFile(selected);
                 openNowPlaying();
                 ledManager.onPlaybackStart();
@@ -300,7 +334,7 @@ bool UIPlayer::update() {
         renderTrackList();
 
     } else if (currentView == VIEW_FOLDER_BROWSER) {
-        // --- 3. Hierarchical Folder Browser View ---
+        // --- Hierarchical Folder Browser View ---
         bool hasParent = (currentFolderPath != "/music" && currentFolderPath != "/music/");
         int totalItems = (hasParent ? 1 : 0) + currentFolderDirs.size() + currentFolderFiles.size();
 
@@ -315,7 +349,6 @@ bool UIPlayer::update() {
             int idx = folderSelection;
             if (hasParent) {
                 if (idx == 0) {
-                    // Go up one directory level
                     int lastSlash = currentFolderPath.lastIndexOf('/');
                     if (lastSlash > 0) {
                         enterFolder(currentFolderPath.substring(0, lastSlash));
@@ -328,23 +361,19 @@ bool UIPlayer::update() {
             }
 
             if (idx < (int)currentFolderDirs.size()) {
-                // Enter subdirectory
                 String newPath = currentFolderPath;
                 if (!newPath.endsWith("/")) newPath += "/";
                 newPath += currentFolderDirs[idx];
                 enterFolder(newPath);
             } else {
-                // Play audio file
                 int fileIdx = idx - currentFolderDirs.size();
                 if (fileIdx >= 0 && fileIdx < (int)currentFolderFiles.size()) {
                     String selected = currentFolderFiles[fileIdx];
                     if ((audioPlayer.isPlaying() || audioPlayer.isPaused()) &&
                         audioPlayer.getCurrentTrackPath() == selected) {
-                        // Already playing: DO NOT RESTART!
                         openNowPlaying();
                         return true;
                     }
-                    // Load folder's files into trackList for consecutive playback
                     trackList = currentFolderFiles;
                     currentTrackIndex = fileIdx;
                     audioPlayer.playFile(selected);
@@ -367,14 +396,12 @@ bool UIPlayer::update() {
         renderFolderBrowser();
 
     } else {
-        // --- 4. Now Playing Multi-Page View (VIEW_PLAYER) ---
+        // --- Now Playing Multi-Page View (VIEW_PLAYER) ---
         if (evt == BTN_EVENT_SEL_PRESS) {
             if (currentPage == PAGE_TRACK_INFO) {
-                // On Page 2 (Info), single click OK cycles Playback Mode
                 cyclePlaybackMode();
                 ledManager.triggerButtonPulse(CRGB::Magenta, 1, 60);
             } else {
-                // On Page 1 (Now Playing) and Page 3 (Lyrics), single click OK toggles Play/Pause
                 if (audioPlayer.isPlaying()) {
                     audioPlayer.pause();
                     ledManager.onPlaybackPause();
@@ -404,10 +431,8 @@ bool UIPlayer::update() {
             showVolumeOverlay();
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             if (currentPage == PAGE_TRACK_INFO || currentPage == PAGE_LYRICS) {
-                // Short CANCEL from Page 2 or Page 3 returns directly to Page 1 (Now Playing)
                 currentPage = PAGE_NOW_PLAYING;
             } else {
-                // Short CANCEL from Page 1 returns to Category / Library menu
                 currentView = VIEW_CATEGORIES;
                 inListMode = true;
             }
@@ -435,6 +460,7 @@ void UIPlayer::renderCategories() {
     items.push_back("Playlists");
     items.push_back("Recently Played");
     items.push_back(String("Playback: ") + getPlaybackModeString());
+    items.push_back("Player Settings");
     items.push_back("Rescan Library");
 
     for (size_t i = 0; i < items.size(); i++) {
@@ -442,6 +468,31 @@ void UIPlayer::renderCategories() {
     }
 
     display.drawStandardMenu("Q-TUNES MUSIC", itemPtrs.data(), (int)items.size(), categorySelection, categoryScrollOffset, (const String*)nullptr, batBuf);
+    display.sendBuffer();
+}
+
+void UIPlayer::renderPlayerSettings() {
+    display.clear();
+    char batBuf[16];
+    snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
+
+    const int SETTINGS_COUNT = 5;
+    const char* labels[SETTINGS_COUNT] = {
+        "Now Playing",
+        "Art Source",
+        "Dithering",
+        "Lyrics Sync",
+        "Back to Menu"
+    };
+
+    String vals[SETTINGS_COUNT];
+    vals[0] = String("[") + playerConfig.getLayoutName() + "]";
+    vals[1] = String("[") + playerConfig.getArtSourceName() + "]";
+    vals[2] = String("[") + playerConfig.getDitherName() + "]";
+    vals[3] = String("[") + playerConfig.getLyricsAutoScrollName() + "]";
+    vals[4] = "[EXIT]";
+
+    display.drawStandardMenu("SETTINGS", labels, SETTINGS_COUNT, settingsSelection, settingsScrollOffset, vals, batBuf);
     display.sendBuffer();
 }
 
@@ -471,7 +522,6 @@ void UIPlayer::renderTrackList() {
             int slash = name.lastIndexOf('/');
             if (slash >= 0) name = name.substring(slash + 1);
 
-            // Add playing indicator if currently active!
             if (trackList[i] == currentPlaying && (audioPlayer.isPlaying() || audioPlayer.isPaused())) {
                 name = "▶ " + name;
             }
@@ -542,75 +592,221 @@ void UIPlayer::renderPlayer() {
 }
 
 // ============================================================================
-// Page 1: Standard Now Playing with Mini Spectrum & Progress
+// Page 1: Now Playing Dispatcher (Auto / Split Art / Cover Hero / Spectrum HUD)
 // ============================================================================
 void UIPlayer::renderPlayerPage1() {
+    PlayerLayout layout = playerConfig.getLayout();
+    if (layout == LAYOUT_AUTO) {
+        if (albumArtManager.hasArt()) {
+            renderPlayerSplitArt();
+        } else {
+            // Default Spectrum HUD when no art is available
+            display.clear();
+            U8G2 &u8g2 = display.getU8g2();
+            u8g2.setFont(u8g2_font_6x10_tr);
+
+            char headerBuf[32];
+            snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+                     battery.getPercentage(), audioPlayer.getOutputModeShortName());
+            u8g2.drawStr(0, 10, headerBuf);
+            u8g2.drawHLine(0, 12, 128);
+
+            String displayName = audioPlayer.getCurrentTrackName();
+            if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+                displayName = trackList[currentTrackIndex];
+                int slash = displayName.lastIndexOf('/');
+                if (slash >= 0) displayName = displayName.substring(slash + 1);
+            }
+            if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
+            u8g2.drawStr(0, 23, displayName.c_str());
+
+            String stateStr = "■ STOPPED";
+            if (audioPlayer.isPlaying()) {
+                stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
+            } else if (audioPlayer.isPaused()) {
+                stateStr = "❚❚ PAUSED";
+            }
+            u8g2.drawStr(0, 35, stateStr.c_str());
+
+            uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+            uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+            char timeBuf[32];
+            snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+            u8g2.drawStr(0, 47, timeBuf);
+
+            spectrumAnalyzer.sampleAudioStream();
+            spectrumAnalyzer.renderMiniBars(u8g2, 92, 28, 34, 18);
+
+            u8g2.drawFrame(0, 53, 128, 7);
+            if (durSec > 0) {
+                int progressWidth = (posSec * 126) / durSec;
+                if (progressWidth > 126) progressWidth = 126;
+                u8g2.drawBox(1, 54, progressWidth, 5);
+            }
+
+            if (millis() < volumeOverlayExpiry) {
+                u8g2.setDrawColor(0);
+                u8g2.drawBox(18, 16, 92, 34);
+                u8g2.setDrawColor(1);
+                u8g2.drawFrame(18, 16, 92, 34);
+                char volStr[20];
+                snprintf(volStr, sizeof(volStr), "VOLUME: %d%%", audioPlayer.getVolume());
+                u8g2.drawStr(24, 28, volStr);
+                u8g2.drawFrame(24, 34, 80, 8);
+                int volBar = (audioPlayer.getVolume() * 76) / 100;
+                if (volBar > 76) volBar = 76;
+                u8g2.drawBox(26, 36, volBar, 4);
+            }
+            display.sendBuffer();
+        }
+    } else if (layout == LAYOUT_SPLIT_ART) {
+        renderPlayerSplitArt();
+    } else if (layout == LAYOUT_COVER_HERO) {
+        renderPlayerCoverHero();
+    } else { // LAYOUT_SPECTRUM_HUD
+        display.clear();
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+
+        char headerBuf[32];
+        snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+                 battery.getPercentage(), audioPlayer.getOutputModeShortName());
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+
+        String displayName = audioPlayer.getCurrentTrackName();
+        if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+            displayName = trackList[currentTrackIndex];
+            int slash = displayName.lastIndexOf('/');
+            if (slash >= 0) displayName = displayName.substring(slash + 1);
+        }
+        if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
+        u8g2.drawStr(0, 23, displayName.c_str());
+
+        String stateStr = "■ STOPPED";
+        if (audioPlayer.isPlaying()) {
+            stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
+        } else if (audioPlayer.isPaused()) {
+            stateStr = "❚❚ PAUSED";
+        }
+        u8g2.drawStr(0, 35, stateStr.c_str());
+
+        uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+        uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+        char timeBuf[32];
+        snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+        u8g2.drawStr(0, 47, timeBuf);
+
+        spectrumAnalyzer.sampleAudioStream();
+        spectrumAnalyzer.renderMiniBars(u8g2, 92, 28, 34, 18);
+
+        u8g2.drawFrame(0, 53, 128, 7);
+        if (durSec > 0) {
+            int progressWidth = (posSec * 126) / durSec;
+            if (progressWidth > 126) progressWidth = 126;
+            u8g2.drawBox(1, 54, progressWidth, 5);
+        }
+
+        if (millis() < volumeOverlayExpiry) {
+            u8g2.setDrawColor(0);
+            u8g2.drawBox(18, 16, 92, 34);
+            u8g2.setDrawColor(1);
+            u8g2.drawFrame(18, 16, 92, 34);
+            char volStr[20];
+            snprintf(volStr, sizeof(volStr), "VOLUME: %d%%", audioPlayer.getVolume());
+            u8g2.drawStr(24, 28, volStr);
+            u8g2.drawFrame(24, 34, 80, 8);
+            int volBar = (audioPlayer.getVolume() * 76) / 100;
+            if (volBar > 76) volBar = 76;
+            u8g2.drawBox(26, 36, volBar, 4);
+        }
+        display.sendBuffer();
+    }
+}
+
+// ============================================================================
+// Layout Style: Split Album Art (56x56 Dithered Cover + Side Info)
+// ============================================================================
+void UIPlayer::renderPlayerSplitArt() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_6x10_tr);
 
-    // Top status header (Battery, Output Mode, Page 1/3)
+    // Top status header
+    u8g2.setFont(u8g2_font_5x7_tr);
     char headerBuf[32];
     snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
              battery.getPercentage(), audioPlayer.getOutputModeShortName());
-    u8g2.drawStr(0, 10, headerBuf);
-    u8g2.drawHLine(0, 12, 128);
+    u8g2.drawStr(0, 8, headerBuf);
+    u8g2.drawHLine(0, 9, 128);
 
-    // Track Title
+    // Left: Draw 56x56 Album Art (or Default Icon)
+    albumArtManager.draw(u8g2, 1, 10);
+
+    // Right: Song Info
+    u8g2.setFont(u8g2_font_5x7_tr);
     String displayName = audioPlayer.getCurrentTrackName();
     if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
         displayName = trackList[currentTrackIndex];
         int slash = displayName.lastIndexOf('/');
         if (slash >= 0) displayName = displayName.substring(slash + 1);
     }
-    if (displayName.length() > 20) {
-        displayName = displayName.substring(0, 18) + "..";
-    }
-    u8g2.drawStr(0, 23, displayName.c_str());
+    if (displayName.length() > 11) displayName = displayName.substring(0, 10) + ".";
+    u8g2.drawStr(60, 18, displayName.c_str());
 
     // Playback state
-    String stateStr = "■ STOPPED";
-    if (audioPlayer.isPlaying()) {
-        stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
-    } else if (audioPlayer.isPaused()) {
-        stateStr = "❚❚ PAUSED";
-    }
-    u8g2.drawStr(0, 35, stateStr.c_str());
+    String stateStr = audioPlayer.isPlaying() ? ("▶ " + String(audioPlayer.getFormatName())) : "❚❚ PAUS";
+    u8g2.drawStr(60, 28, stateStr.c_str());
 
     // Time elapsed / total
     uint32_t posSec = audioPlayer.getPositionMs() / 1000;
     uint32_t durSec = audioPlayer.getDurationMs() / 1000;
-    char timeBuf[32];
-    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
-    u8g2.drawStr(0, 47, timeBuf);
+    char timeBuf[20];
+    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+    u8g2.drawStr(60, 39, timeBuf);
 
-    // Mini Spectrum Visualizer (Live audio tap)
-    spectrumAnalyzer.sampleAudioStream();
-    spectrumAnalyzer.renderMiniBars(u8g2, 92, 28, 34, 18);
+    // Output Mode / Vol
+    char outBuf[16];
+    snprintf(outBuf, sizeof(outBuf), "VOL:%d%%", audioPlayer.getVolume());
+    u8g2.drawStr(60, 50, outBuf);
 
-    // Progress bar
-    u8g2.drawFrame(0, 53, 128, 7);
+    // Mini progress bar
+    u8g2.drawFrame(60, 56, 66, 6);
     if (durSec > 0) {
-        int progressWidth = (posSec * 126) / durSec;
-        if (progressWidth > 126) progressWidth = 126;
-        u8g2.drawBox(1, 54, progressWidth, 5);
+        int progressWidth = (posSec * 64) / durSec;
+        if (progressWidth > 64) progressWidth = 64;
+        u8g2.drawBox(61, 57, progressWidth, 4);
     }
 
-    // Volume popup overlay
-    if (millis() < volumeOverlayExpiry) {
-        u8g2.setDrawColor(0);
-        u8g2.drawBox(18, 16, 92, 34);
-        u8g2.setDrawColor(1);
-        u8g2.drawFrame(18, 16, 92, 34);
+    display.sendBuffer();
+}
 
-        char volStr[20];
-        snprintf(volStr, sizeof(volStr), "VOLUME: %d%%", audioPlayer.getVolume());
-        u8g2.drawStr(24, 28, volStr);
+// ============================================================================
+// Layout Style: Centered 64x64 Hero Cover Art
+// ============================================================================
+void UIPlayer::renderPlayerCoverHero() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
 
-        u8g2.drawFrame(24, 34, 80, 8);
-        int volBar = (audioPlayer.getVolume() * 76) / 100;
-        if (volBar > 76) volBar = 76;
-        u8g2.drawBox(26, 36, volBar, 4);
+    // Centered 64x64 Album Art at X=32, Y=0
+    albumArtManager.draw(u8g2, 32, 0);
+
+    // Floating bottom HUD
+    u8g2.setFont(u8g2_font_5x7_tr);
+    String displayName = audioPlayer.getCurrentTrackName();
+    if (displayName.length() > 14) displayName = displayName.substring(0, 12) + "..";
+    u8g2.drawStr(0, 56, displayName.c_str());
+
+    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+    char timeBuf[12];
+    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u", posSec / 60, posSec % 60);
+    u8g2.drawStr(100, 56, timeBuf);
+
+    uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+    u8g2.drawFrame(0, 59, 128, 4);
+    if (durSec > 0) {
+        int pw = (posSec * 126) / durSec;
+        if (pw > 126) pw = 126;
+        u8g2.drawBox(1, 60, pw, 2);
     }
 
     display.sendBuffer();
@@ -624,38 +820,31 @@ void UIPlayer::renderPlayerPage2() {
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_5x7_tr);
 
-    // Top status header
     char headerBuf[32];
     snprintf(headerBuf, sizeof(headerBuf), "TRACK INFO  [2/3]  B:%d%%", battery.getPercentage());
     u8g2.drawStr(0, 8, headerBuf);
     u8g2.drawHLine(0, 10, 128);
 
-    // Format & Codec
     char buf[40];
     snprintf(buf, sizeof(buf), "Codec: %s (%d-bit)", audioPlayer.getFormatName(), audioPlayer.getBitsPerSample());
     u8g2.drawStr(2, 19, buf);
 
-    // Sample Rate & Channels
     uint32_t sr = audioPlayer.getSampleRate();
     const char* chStr = (audioPlayer.getChannels() == 1) ? "Mono" : "Stereo";
     snprintf(buf, sizeof(buf), "Rate: %u.%ukHz %s", sr / 1000, (sr % 1000) / 100, chStr);
     u8g2.drawStr(2, 28, buf);
 
-    // Bitrate
     uint32_t kbps = audioPlayer.getBitrateKbps();
     snprintf(buf, sizeof(buf), "Bitrate: %u kbps", kbps);
     u8g2.drawStr(2, 37, buf);
 
-    // File size in MB
     uint32_t sz = audioPlayer.getTotalBytes();
     snprintf(buf, sizeof(buf), "Size: %u.%01u MB", sz / 1048576, (sz % 1048576) / 104857);
     u8g2.drawStr(2, 46, buf);
 
-    // Output Route
     snprintf(buf, sizeof(buf), "Out: %s", audioPlayer.getOutputModeName());
     u8g2.drawStr(2, 55, buf);
 
-    // Mode toggle prompt
     snprintf(buf, sizeof(buf), "Mode: %s (OK: Cycle)", getPlaybackModeString());
     u8g2.drawStr(2, 63, buf);
 
@@ -669,7 +858,6 @@ void UIPlayer::renderPlayerPage3() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
 
-    // Header
     u8g2.setFont(u8g2_font_5x7_tr);
     char headerBuf[32];
     snprintf(headerBuf, sizeof(headerBuf), "LYRICS  [3/3]  B:%d%%", battery.getPercentage());
@@ -684,7 +872,6 @@ void UIPlayer::renderPlayerPage3() {
         uint32_t curPos = audioPlayer.getPositionMs();
         int curIdx = lyricsParser.getCurrentLineIndex(curPos);
 
-        // Previous Line (dim / smaller)
         u8g2.setFont(u8g2_font_5x7_tr);
         if (curIdx > 0) {
             String prevText = lyricsParser.getLineText(curIdx - 1);
@@ -692,7 +879,6 @@ void UIPlayer::renderPlayerPage3() {
             u8g2.drawStr(2, 22, prevText.c_str());
         }
 
-        // Active Current Line (Highlighted in inverted box!)
         String curText = lyricsParser.getLineText(curIdx);
         if (curText.length() > 20) curText = curText.substring(0, 18) + "..";
         u8g2.drawBox(0, 26, 128, 14);
@@ -701,7 +887,6 @@ void UIPlayer::renderPlayerPage3() {
         u8g2.drawStr(2, 37, curText.c_str());
         u8g2.setDrawColor(1);
 
-        // Next Line (smaller)
         u8g2.setFont(u8g2_font_5x7_tr);
         if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
             String nextText = lyricsParser.getLineText(curIdx + 1);
@@ -709,7 +894,6 @@ void UIPlayer::renderPlayerPage3() {
             u8g2.drawStr(2, 51, nextText.c_str());
         }
 
-        // Timestamp tag at bottom
         uint32_t posSec = curPos / 1000;
         char tsBuf[16];
         snprintf(tsBuf, sizeof(tsBuf), "[%02u:%02u]", posSec / 60, posSec % 60);

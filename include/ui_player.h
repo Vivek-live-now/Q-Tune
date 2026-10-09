@@ -8,6 +8,8 @@
 #include "sd_manager.h"
 #include "audio_player.h"
 #include "lyrics_parser.h"
+#include "album_art.h"
+#include "player_config.h"
 
 enum PlaybackMode {
     PLAY_MODE_ALL,        // Repeat All tracks sequentially
@@ -20,11 +22,12 @@ enum UIPlayerView {
     VIEW_CATEGORIES,       // Music Categories Menu (Now Playing, All Songs, Folders, etc.)
     VIEW_TRACK_LIST,       // List of tracks (All Songs, Artist tracks, Album tracks, etc.)
     VIEW_FOLDER_BROWSER,   // Hierarchical directory browser
-    VIEW_PLAYER            // Player screens (Pages 1, 2, 3)
+    VIEW_PLAYER,           // Player screens (Pages 1, 2, 3)
+    VIEW_PLAYER_SETTINGS   // Customization settings menu
 };
 
 enum PlayerPage {
-    PAGE_NOW_PLAYING = 0,  // Page 1: Progress, spectrum, elapsed/total, format
+    PAGE_NOW_PLAYING = 0,  // Page 1: Progress, spectrum, elapsed/total, format / album art
     PAGE_TRACK_INFO = 1,   // Page 2: Audio engine & track technical details
     PAGE_LYRICS = 2        // Page 3: Synchronized LRC lyrics
 };
@@ -72,6 +75,10 @@ private:
     int folderSelection;
     int folderScrollOffset;
 
+    // Settings navigation
+    int settingsSelection;
+    int settingsScrollOffset;
+
     void refreshTrackList();
     void renderCategories();
     void renderTrackList();
@@ -80,6 +87,9 @@ private:
     void renderPlayerPage1();
     void renderPlayerPage2();
     void renderPlayerPage3();
+    void renderPlayerSplitArt();
+    void renderPlayerCoverHero();
+    void renderPlayerSettings();
     void showVolumeOverlay();
     void enterFolder(const String &folderPath);
     void refreshCurrentFolder();

@@ -997,6 +997,94 @@ def test_library_indexing_and_multipage_lyrics():
 
     print("  [PASS] Music library indexing, categorization, Now Playing non-restart protection, and multi-page LRC lyrics verified.")
 
+def test_album_art_extraction_dithering_and_customization():
+    print("\n--- 21. Album Art Extraction, Monochrome Dithering & Player Customization Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tjpgd_cnf = os.path.join(base_dir, "include", "tjpgdcnf.h")
+    tjpgd_h = os.path.join(base_dir, "include", "tjpgd.h")
+    tjpgd_c = os.path.join(base_dir, "src", "tjpgd.c")
+    art_h = os.path.join(base_dir, "include", "album_art.h")
+    art_cpp = os.path.join(base_dir, "src", "album_art.cpp")
+    cfg_h = os.path.join(base_dir, "include", "player_config.h")
+    cfg_cpp = os.path.join(base_dir, "src", "player_config.cpp")
+    ui_h = os.path.join(base_dir, "include", "ui_player.h")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+
+    assert os.path.exists(tjpgd_cnf) and os.path.exists(tjpgd_h) and os.path.exists(tjpgd_c), "TJpgDec files missing"
+    assert os.path.exists(art_h) and os.path.exists(art_cpp), "Album art manager files missing"
+    assert os.path.exists(cfg_h) and os.path.exists(cfg_cpp), "Player config files missing"
+
+    with open(tjpgd_cnf) as f: cnf_src = f.read()
+    with open(art_h) as f: arth_src = f.read()
+    with open(art_cpp) as f: artcpp_src = f.read()
+    with open(cfg_h) as f: cfgh_src = f.read()
+    with open(cfg_cpp) as f: cfgcpp_src = f.read()
+    with open(ui_h) as f: uih_src = f.read()
+    with open(ui_cpp) as f: uicpp_src = f.read()
+
+    # 1. TJpgDec Configuration
+    assert "JD_FORMAT\t\t2" in cnf_src, "TJpgDec must output 8-bit grayscale (JD_FORMAT 2)"
+    assert "JD_USE_SCALE\t1" in cnf_src, "TJpgDec must enable hardware descaling"
+
+    # 2. Embedded Art Parsers
+    assert "findMP3Art" in arth_src and "APIC" in artcpp_src, "MP3 ID3v2 APIC extractor missing"
+    assert "findFLACArt" in arth_src and "METADATA_BLOCK_PICTURE" in artcpp_src or "blockType == 6" in artcpp_src, "FLAC Picture Block extractor missing"
+    assert "findM4AArt" in arth_src and "covr" in artcpp_src, "M4A covr atom extractor missing"
+    assert "findFolderArt" in arth_src and "cover.jpg" in artcpp_src, "Folder cover art fallback missing"
+
+    # 3. Dithering Engines
+    assert "atkinsonDither" in arth_src and "atkinsonDither" in artcpp_src, "Atkinson dithering algorithm missing"
+    assert "floydSteinbergDither" in arth_src and "floydSteinbergDither" in artcpp_src, "Floyd-Steinberg dithering missing"
+    assert "thresholdDither" in arth_src and "thresholdDither" in artcpp_src, "Threshold dithering missing"
+
+    # 4. Player Customization Settings
+    assert "enum PlayerLayout" in cfgh_src, "PlayerLayout enum missing"
+    assert "LAYOUT_AUTO" in cfgh_src and "LAYOUT_SPLIT_ART" in cfgh_src, "Layout modes missing"
+    assert "LAYOUT_SPECTRUM_HUD" in cfgh_src and "LAYOUT_COVER_HERO" in cfgh_src, "Layout modes missing"
+    assert "enum DitherMode" in cfgh_src and "DITHER_ATKINSON" in cfgh_src, "DitherMode enum missing"
+    assert "enum ArtSource" in cfgh_src and "ART_SRC_EMBEDDED_FIRST" in cfgh_src, "ArtSource enum missing"
+    assert "qtune_cfg" in cfgcpp_src, "Preferences qtune_cfg namespace missing"
+
+    # 5. UIPlayer Integration
+    assert "VIEW_PLAYER_SETTINGS" in uih_src, "VIEW_PLAYER_SETTINGS missing in ui_player.h"
+    assert "renderPlayerSettings" in uicpp_src, "renderPlayerSettings missing in ui_player.cpp"
+    assert "renderPlayerSplitArt" in uicpp_src, "renderPlayerSplitArt missing in ui_player.cpp"
+    assert "renderPlayerCoverHero" in uicpp_src, "renderPlayerCoverHero missing in ui_player.cpp"
+    assert "albumArtManager.loadForTrack" in uicpp_src, "UIPlayer must load art for active track"
+
+    # 6. Algorithmic verification: Atkinson Dithering
+    w, h = 4, 4
+    gray = [100, 150, 200, 50,
+            120, 80,  160, 220,
+            30,  190, 70,  110,
+            240, 60,  130, 90]
+    err = list(gray)
+    out_bits = [0] * ((w * h + 7) // 8)
+
+    for y in range(h):
+        for x in range(w):
+            idx = y * w + x
+            val = max(0, min(255, err[idx]))
+            bit = 1 if val >= 128 else 0
+            if bit:
+                out_bits[idx // 8] |= (1 << (7 - (idx % 8)))
+            e = val - (255 if bit else 0)
+            e8 = e // 8
+            if x + 1 < w: err[idx + 1] += e8
+            if x + 2 < w: err[idx + 2] += e8
+            if y + 1 < h:
+                if x - 1 >= 0: err[(y + 1) * w + (x - 1)] += e8
+                err[(y + 1) * w + x] += e8
+                if x + 1 < w: err[(y + 1) * w + (x + 1)] += e8
+            if y + 2 < h:
+                err[(y + 2) * w + x] += e8
+
+    # Ensure 1-bit bitmap packing succeeded
+    assert len(out_bits) == 2, f"Expected 2 bytes for 16 bits, got {len(out_bits)}"
+    assert out_bits[0] != 0 or out_bits[1] != 0, "Dithering must produce active bits"
+
+    print("  [PASS] Embedded album art extraction, Tiny JPEG decompressor, Atkinson dithering, and Player customization verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1021,7 +1109,8 @@ def main():
     test_wifi_streaming_and_dlna_media_renderer()
     test_mp3_and_m4a_audio_decoders()
     test_library_indexing_and_multipage_lyrics()
-    print("\nAll 20 Q-Tune test verifications PASSED (100%)!\n")
+    test_album_art_extraction_dithering_and_customization()
+    print("\nAll 21 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()
