@@ -24,6 +24,7 @@ enum AppMode {
 
 AppMode currentMode = MODE_MAIN_MENU;
 int menuSelection = 0;
+int menuScrollOffset = 0;
 const int MAIN_MENU_COUNT = 4;
 const char* menuLabels[] = {
     "1. Music Player",
@@ -34,24 +35,16 @@ const char* menuLabels[] = {
 
 void renderMainMenu() {
     display.clear();
-    U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "--- 007 Q-TUNE ---");
-
     char batBuf[16];
     snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
-    u8g2.drawStr(104, 10, batBuf);
-    u8g2.drawHLine(0, 12, 128);
 
-    for (int i = 0; i < MAIN_MENU_COUNT; i++) {
-        int y = 24 + (i * 10);
-        if (i == menuSelection) {
-            u8g2.drawStr(0, y, ">");
-            u8g2.drawStr(10, y, menuLabels[i]);
-        } else {
-            u8g2.drawStr(10, y, menuLabels[i]);
-        }
-    }
+    String vals[MAIN_MENU_COUNT];
+    vals[0] = audioPlayer.isPlaying() ? "[PLAY]" : (audioPlayer.isPaused() ? "[PAUS]" : "[IDLE]");
+    vals[1] = String("[") + spectrumAnalyzer.getPresetName() + "]";
+    vals[2] = "[10]";
+    vals[3] = "[INFO]";
+
+    display.drawStandardMenu("007 Q-TUNE", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
     display.sendBuffer();
 }
 
@@ -59,10 +52,13 @@ void updateMainMenu() {
     renderMainMenu();
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_UP_PRESS) {
-        menuSelection = (menuSelection - 1 + MAIN_MENU_COUNT) % MAIN_MENU_COUNT;
+        Display::navigateMenu(menuSelection, menuScrollOffset, MAIN_MENU_COUNT, -1);
+        ledManager.triggerPulse(CRGB::Blue, 1, 40);
     } else if (evt == BTN_EVENT_DN_PRESS) {
-        menuSelection = (menuSelection + 1) % MAIN_MENU_COUNT;
+        Display::navigateMenu(menuSelection, menuScrollOffset, MAIN_MENU_COUNT, +1);
+        ledManager.triggerPulse(CRGB::Blue, 1, 40);
     } else if (evt == BTN_EVENT_SEL_PRESS) {
+        ledManager.triggerPulse(CRGB::Green, 1, 60);
         switch (menuSelection) {
             case 0:
                 currentMode = MODE_PLAYER;
@@ -122,25 +118,24 @@ void updateVisualizerMode() {
 
 void updateSystemInfoMode() {
     display.clear();
+    display.drawTopStatusBar("SYSTEM INFO", battery.getPercentage());
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "--- SYSTEM INFO ---");
-    u8g2.drawHLine(0, 12, 128);
 
     char buf[32];
     snprintf(buf, sizeof(buf), "VBAT: %.2fV (%d%%)", battery.getVoltage(), battery.getPercentage());
-    u8g2.drawStr(0, 24, buf);
+    u8g2.drawStr(4, 23, buf);
 
     snprintf(buf, sizeof(buf), "CPU:  %d MHz", (int)powerManager.getTargetCpuFreqMhz());
-    u8g2.drawStr(0, 35, buf);
+    u8g2.drawStr(4, 35, buf);
 
     snprintf(buf, sizeof(buf), "VOL:  %d%%", audioPlayer.getVolume());
-    u8g2.drawStr(0, 46, buf);
+    u8g2.drawStr(4, 47, buf);
 
     snprintf(buf, sizeof(buf), "MODE: %s | SD: %s",
              uiPlayer.getPlaybackModeString(),
              sdManager.isMounted() ? "OK" : "NO");
-    u8g2.drawStr(0, 57, buf);
+    u8g2.drawStr(4, 59, buf);
 
     display.sendBuffer();
 

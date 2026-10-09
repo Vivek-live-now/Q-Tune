@@ -30,6 +30,7 @@ public:
 private:
     std::vector<String> trackList;
     int currentTrackIndex;
+    int trackScrollOffset;
     bool inListMode;
     PlaybackMode playbackMode;
     unsigned long volumeOverlayExpiry;

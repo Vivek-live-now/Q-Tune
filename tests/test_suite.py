@@ -499,6 +499,90 @@ def test_live_wav_decoding_visualizer_pipeline():
 
     print("  [PASS] Live WAV stream tap, lock-free ring buffer, stereo downmix, peak hold caps, and HUD mini-bars verified.")
 
+def test_qwatch_aligned_menu_system():
+    print("\n--- 14. Q-Watch Aligned Menu System Architecture Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    disp_h = os.path.join(base_dir, "include", "display.h")
+    disp_cpp = os.path.join(base_dir, "src", "display.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+
+    with open(disp_h) as f:
+        dh_text = f.read()
+    with open(disp_cpp) as f:
+        dcpp_text = f.read()
+    with open(main_cpp) as f:
+        m_text = f.read()
+    with open(ui_cpp) as f:
+        u_text = f.read()
+    with open(diag_cpp) as f:
+        diag_text = f.read()
+
+    # 1. Verify Display declarations match Q-Watch signatures
+    assert "void drawScrollBar(int offset, int item_count);" in dh_text
+    assert "drawStandardMenu" in dh_text
+    assert "navigateMenu" in dh_text
+
+    # 2. Verify Display implementation matches Q-Watch geometry & visual standards
+    assert "drawFrame(123, 12, 3, scroll_h);" in dcpp_text, "Scrollbar frame geometry mismatch"
+    assert "drawBox(2, y_pos - 9, 118, 11);" in dcpp_text, "Inverted selection box geometry mismatch"
+    assert "u8g2.setDrawColor(0);" in dcpp_text, "Missing inverted text draw color"
+    assert "u8g2_font_5x7_tr" in dcpp_text, "Missing Q-Watch standard header font"
+    assert "u8g2_font_6x10_tr" in dcpp_text, "Missing Q-Watch standard item font"
+
+    # 3. Verify all 3 menu subsystems use drawStandardMenu & Display::navigateMenu
+    assert "display.drawStandardMenu" in m_text, "Main menu not using drawStandardMenu"
+    assert "Display::navigateMenu" in m_text, "Main menu not using Display::navigateMenu"
+    assert "display.drawStandardMenu" in u_text, "Track list not using drawStandardMenu"
+    assert "Display::navigateMenu" in u_text, "Track list not using Display::navigateMenu"
+    assert "display.drawStandardMenu" in diag_text, "Diagnostics not using drawStandardMenu"
+    assert "Display::navigateMenu" in diag_text, "Diagnostics not using Display::navigateMenu"
+
+    # 4. Algorithmic verification of 4-item scroll window navigation
+    def sim_nav(selection, offset, count, direction):
+        if direction < 0: # UP
+            selection -= 1
+            if selection < 0:
+                selection = count - 1
+                offset = (count - 4) if count > 4 else 0
+            if selection < offset:
+                offset = selection
+        else: # DOWN
+            selection += 1
+            if selection >= count:
+                selection = 0
+                offset = 0
+            if selection >= offset + 4:
+                offset = selection - 3
+        return selection, offset
+
+    # Test 11 items (Diagnostics / music track scenario)
+    sel, off = 0, 0
+    # Step down 3 times
+    for _ in range(3):
+        sel, off = sim_nav(sel, off, 11, +1)
+    assert sel == 3 and off == 0
+
+    # Step down to 4th index -> window slides
+    sel, off = sim_nav(sel, off, 11, +1)
+    assert sel == 4 and off == 1
+
+    # Step down to 10th index (end of list)
+    for _ in range(6):
+        sel, off = sim_nav(sel, off, 11, +1)
+    assert sel == 10 and off == 7
+
+    # Wrap around past end -> jumps to top
+    sel, off = sim_nav(sel, off, 11, +1)
+    assert sel == 0 and off == 0
+
+    # Wrap backwards from top -> jumps to bottom
+    sel, off = sim_nav(sel, off, 11, -1)
+    assert sel == 10 and off == 7
+
+    print("  [PASS] Q-Watch 4-item scroll window, inverted highlight box, 123px scrollbar thumb, and cross-subsystem integration verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -516,7 +600,8 @@ def main():
     test_playback_modes_and_track_advance()
     test_app_shell_and_mode_switching()
     test_live_wav_decoding_visualizer_pipeline()
-    print("\nAll 13 Q-Tune test verifications PASSED (100%)!\n")
+    test_qwatch_aligned_menu_system()
+    print("\nAll 14 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

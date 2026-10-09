@@ -5,12 +5,14 @@
 
 UIPlayer::UIPlayer() :
     currentTrackIndex(0),
+    trackScrollOffset(0),
     inListMode(true),
     playbackMode(PLAY_MODE_ALL),
     volumeOverlayExpiry(0) {}
 
 void UIPlayer::begin() {
     refreshTrackList();
+    trackScrollOffset = 0;
     playbackMode = PLAY_MODE_ALL;
 }
 
@@ -90,13 +92,11 @@ bool UIPlayer::update() {
 
     if (inListMode) {
         if (evt == BTN_EVENT_UP_PRESS) {
-            if (!trackList.empty()) {
-                currentTrackIndex = (currentTrackIndex - 1 + trackList.size()) % trackList.size();
-            }
+            Display::navigateMenu(currentTrackIndex, trackScrollOffset, (int)trackList.size(), -1);
+            ledManager.triggerPulse(CRGB::Blue, 1, 40);
         } else if (evt == BTN_EVENT_DN_PRESS) {
-            if (!trackList.empty()) {
-                currentTrackIndex = (currentTrackIndex + 1) % trackList.size();
-            }
+            Display::navigateMenu(currentTrackIndex, trackScrollOffset, (int)trackList.size(), +1);
+            ledManager.triggerPulse(CRGB::Blue, 1, 40);
         } else if (evt == BTN_EVENT_SEL_PRESS) {
             if (!trackList.empty()) {
                 inListMode = false;
@@ -149,36 +149,26 @@ bool UIPlayer::update() {
 
 void UIPlayer::renderTrackList() {
     display.clear();
-    U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "--- Q-TUNE MUSIC ---");
-
     if (trackList.empty()) {
-        u8g2.drawStr(0, 30, "No WAV files in /music");
-        u8g2.drawStr(0, 45, "SEL: Refresh");
-        u8g2.drawStr(0, 58, "CANCEL: Main Menu");
+        display.drawTopStatusBar("Q-TUNE MUSIC", battery.getPercentage());
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(10, 26, "No WAV in /music");
+        u8g2.drawStr(10, 40, "SEL: Refresh");
+        u8g2.drawStr(10, 54, "CANCEL: Main Menu");
     } else {
-        int visibleItems = 4;
-        int topIndex = currentTrackIndex;
-        if (topIndex > (int)trackList.size() - visibleItems) {
-            topIndex = trackList.size() - visibleItems;
+        std::vector<const char*> itemPtrs(trackList.size());
+        std::vector<String> displayNames(trackList.size());
+        for (size_t i = 0; i < trackList.size(); i++) {
+            String name = trackList[i];
+            if (name.startsWith("/music/")) name = name.substring(7);
+            if (name.length() > 18) name = name.substring(0, 16) + "..";
+            displayNames[i] = name;
+            itemPtrs[i] = displayNames[i].c_str();
         }
-        if (topIndex < 0) topIndex = 0;
-
-        for (int i = 0; i < visibleItems && (topIndex + i) < (int)trackList.size(); i++) {
-            int idx = topIndex + i;
-            int y = 24 + (i * 10);
-            String displayName = trackList[idx];
-            if (displayName.startsWith("/music/")) {
-                displayName = displayName.substring(7);
-            }
-            if (idx == currentTrackIndex) {
-                u8g2.drawStr(0, y, ">");
-                u8g2.drawStr(10, y, displayName.c_str());
-            } else {
-                u8g2.drawStr(10, y, displayName.c_str());
-            }
-        }
+        char headerBuf[24];
+        snprintf(headerBuf, sizeof(headerBuf), "%d/%d", currentTrackIndex + 1, (int)trackList.size());
+        display.drawStandardMenu("Q-TUNE MUSIC", itemPtrs.data(), (int)trackList.size(), currentTrackIndex, trackScrollOffset, (const String*)nullptr, headerBuf);
     }
     display.sendBuffer();
 }

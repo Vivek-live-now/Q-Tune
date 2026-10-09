@@ -130,6 +130,18 @@ Q-Tune leverages the ESP32-S3 dual-core LX7 processor to guarantee stutter-free 
 
 ---
 
+## Q-Watch Signature Menu System
+
+Q-Tune implements the identical high-fidelity menu architecture from the **Q-Watch** OS:
+- **Header Title Bar**: Micro font (`5x7`) header at `(2, 7)` with dividing rule line at `y=9` and right-aligned battery percentage or counter.
+- **Inverted Selection Box**: High-contrast `118x11` inverted solid box (`u8g2.drawBox(2, y_pos - 9, 118, 11)`) with reverse monochrome text rendering (`drawColor 0`).
+- **4-Item Viewport Window**: Fixed 4-item view window with automatic smooth window sliding (`offset = selection - 3` on down, `offset = selection` on up).
+- **Proportional Scrollbar**: Crisp 3px wide right frame at `(123, 12, 3, 46)` with a 10px sliding thumb indicator computed proportionally over `(item_count - 4)`.
+- **Right-Aligned Parameter Tags**: Standardized right-aligned values (`[PLAY]`, `[BARS]`, `100%`, etc.) styled with reverse video inside the selection box.
+- **Unified Navigation Engine**: `Display::navigateMenu(selection, offset, count, direction, wrap)` powers the Main Menu, Music Player track browser, and Hardware Diagnostics.
+
+---
+
 ## Interactive Diagnostic Menu
 
 The diagnostics suite verifies all physical subsystems:

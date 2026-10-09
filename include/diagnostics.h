@@ -18,6 +18,7 @@ public:
 
 private:
     int selectedIndex;
+    int scrollOffset;
     static const int TOTAL_TESTS = 11;
     void renderMenu();
     void executeTest(int index);

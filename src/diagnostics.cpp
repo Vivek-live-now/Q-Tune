@@ -14,36 +14,18 @@ static const char* testNames[] = {
     "11. Return to Menu"
 };
 
-Diagnostics::Diagnostics() : selectedIndex(0) {}
+Diagnostics::Diagnostics() : selectedIndex(0), scrollOffset(0) {}
 
 void Diagnostics::begin() {
     selectedIndex = 0;
+    scrollOffset = 0;
 }
 
 void Diagnostics::renderMenu() {
     display.clear();
-    U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "--- Q-TUNE DIAGNOSTICS ---");
-
-    int startY = 24;
-    int visibleItems = 4;
-    int topIndex = selectedIndex;
-    if (topIndex > TOTAL_TESTS - visibleItems) {
-        topIndex = TOTAL_TESTS - visibleItems;
-    }
-    if (topIndex < 0) topIndex = 0;
-
-    for (int i = 0; i < visibleItems && (topIndex + i) < TOTAL_TESTS; i++) {
-        int idx = topIndex + i;
-        int y = startY + (i * 10);
-        if (idx == selectedIndex) {
-            u8g2.drawStr(0, y, ">");
-            u8g2.drawStr(10, y, testNames[idx]);
-        } else {
-            u8g2.drawStr(10, y, testNames[idx]);
-        }
-    }
+    char countBuf[16];
+    snprintf(countBuf, sizeof(countBuf), "%d/%d", selectedIndex + 1, TOTAL_TESTS);
+    display.drawStandardMenu("DIAGNOSTICS", testNames, TOTAL_TESTS, selectedIndex, scrollOffset, (const String*)nullptr, countBuf);
     display.sendBuffer();
 }
 
@@ -51,14 +33,16 @@ bool Diagnostics::runMenu() {
     renderMenu();
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_UP_PRESS) {
-        selectedIndex = (selectedIndex - 1 + TOTAL_TESTS) % TOTAL_TESTS;
+        Display::navigateMenu(selectedIndex, scrollOffset, TOTAL_TESTS, -1);
+        ledManager.triggerPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_DN_PRESS) {
-        selectedIndex = (selectedIndex + 1) % TOTAL_TESTS;
+        Display::navigateMenu(selectedIndex, scrollOffset, TOTAL_TESTS, +1);
+        ledManager.triggerPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_SEL_PRESS) {
         if (selectedIndex == 10) {
-            return false; // Exit to Main Menu
+            return false; // Return to Menu
         }
         executeTest(selectedIndex);
         renderMenu();
