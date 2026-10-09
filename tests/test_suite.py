@@ -302,7 +302,18 @@ def test_led_manager_modes():
     assert "onPlaybackStop" in h_src
     assert "updateReactiveModes" in cpp_src
     assert "punchNorm" in cpp_src, "Dynamic transient beat tracking missing in led_manager.cpp"
-    print("  [PASS] FastLED non-blocking loop, 6 music-reactive modes, UI controls, and battery override verified.")
+
+    # Master toggle, button feedback, and auto-off on music completion
+    assert "isEnabled" in h_src and "setEnabled" in h_src and "toggleEnabled" in h_src
+    assert "isButtonFeedbackEnabled" in h_src and "triggerButtonPulse" in h_src
+    assert "isTurnOffOnComplete" in h_src and "toggleTurnOffOnComplete" in h_src
+    assert "master_enabled" in cpp_src
+    assert "button_feedback_enabled" in cpp_src
+    assert "off_on_complete" in cpp_src
+    assert "Reactive Lights" in open(os.path.join(base_dir, "src", "main.cpp")).read()
+    assert "Button Lights" in open(os.path.join(base_dir, "src", "main.cpp")).read()
+    assert "Off on Finish" in open(os.path.join(base_dir, "src", "main.cpp")).read()
+    print("  [PASS] FastLED non-blocking loop, 6 music-reactive modes, master toggle, button feedback, and finish auto-off verified.")
 
 def test_inmp441_microphone_pipeline():
     print("\n--- 8. INMP441 MEMS Microphone & Spectrum Analyzer Pipeline Test ---")

@@ -34,11 +34,11 @@ bool Diagnostics::runMenu() {
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_UP_PRESS) {
         Display::navigateMenu(selectedIndex, scrollOffset, TOTAL_TESTS, -1);
-        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_DN_PRESS) {
         Display::navigateMenu(selectedIndex, scrollOffset, TOTAL_TESTS, +1);
-        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_SEL_PRESS) {
         if (selectedIndex == 10) {

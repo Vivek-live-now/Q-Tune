@@ -35,6 +35,12 @@ public:
     void begin();
     void loop();
 
+    // Master on/off control for reactive lights
+    bool isEnabled() const { return master_enabled; }
+    void setEnabled(bool enabled);
+    void toggleEnabled();
+    const char* getEnabledName() const { return master_enabled ? "ON" : "OFF"; }
+
     void setMode(LedMode mode);
     LedMode getMode() const { return current_mode; }
     LedMode getUserMode() const { return user_mode; }
@@ -59,6 +65,20 @@ public:
     void cycleSensitivity();
     const char* getSensitivityName() const;
 
+    // Button reactive lights control
+    bool isButtonFeedbackEnabled() const { return button_feedback_enabled; }
+    void setButtonFeedbackEnabled(bool enabled) { button_feedback_enabled = enabled; }
+    void toggleButtonFeedback() { button_feedback_enabled = !button_feedback_enabled; }
+    const char* getButtonFeedbackName() const { return button_feedback_enabled ? "ON" : "OFF"; }
+    void triggerButtonPulse(CRGB color, int count = 1, int speed_ms = 40);
+
+    // Auto-off when music play is complete
+    bool isTurnOffOnComplete() const { return off_on_complete; }
+    void setTurnOffOnComplete(bool enable) { off_on_complete = enable; }
+    void toggleTurnOffOnComplete() { off_on_complete = !off_on_complete; }
+    const char* getTurnOffOnCompleteName() const { return off_on_complete ? "ON" : "OFF"; }
+    void setMenuPreview(bool active) { in_menu_preview = active; }
+
     void off();
     void triggerPulse(CRGB color, int count = 1, int speed_ms = 150);
 
@@ -73,6 +93,11 @@ private:
     LedMode current_mode;
     LedMode previous_mode;
     LedMode user_mode;
+
+    bool master_enabled;
+    bool button_feedback_enabled;
+    bool off_on_complete;
+    bool in_menu_preview;
 
     CRGB current_color;
     uint8_t color_index;

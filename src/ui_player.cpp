@@ -41,6 +41,7 @@ void UIPlayer::playNextTrack() {
     } else { // PLAY_MODE_SINGLE
         audioPlayer.stop();
         inListMode = true;
+        ledManager.onPlaybackStop();
     }
 }
 
@@ -93,15 +94,15 @@ bool UIPlayer::update() {
     if (inListMode) {
         if (evt == BTN_EVENT_UP_PRESS) {
             Display::navigateMenu(currentTrackIndex, trackScrollOffset, (int)trackList.size(), -1);
-            ledManager.triggerPulse(CRGB::Blue, 1, 40);
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         } else if (evt == BTN_EVENT_DN_PRESS) {
             Display::navigateMenu(currentTrackIndex, trackScrollOffset, (int)trackList.size(), +1);
-            ledManager.triggerPulse(CRGB::Blue, 1, 40);
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         } else if (evt == BTN_EVENT_SEL_PRESS) {
             if (!sdManager.isMounted()) {
                 sdManager.remount();
                 refreshTrackList();
-                ledManager.triggerPulse(CRGB::Green, 1, 60);
+                ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
             } else if (!trackList.empty()) {
                 inListMode = false;
                 audioPlayer.playFile(trackList[currentTrackIndex]);
@@ -128,13 +129,13 @@ bool UIPlayer::update() {
             }
         } else if (evt == BTN_EVENT_OK_HOLD) {
             cyclePlaybackMode();
-            ledManager.triggerPulse(CRGB::Magenta, 1, 100);
+            ledManager.triggerButtonPulse(CRGB::Magenta, 1, 100);
         } else if (evt == BTN_EVENT_DN_PRESS) {
             playNextTrack();
-            ledManager.triggerPulse(CRGB::Cyan, 1, 100);
+            ledManager.triggerButtonPulse(CRGB::Cyan, 1, 100);
         } else if (evt == BTN_EVENT_UP_PRESS) {
             playPreviousTrack();
-            ledManager.triggerPulse(CRGB::Cyan, 1, 100);
+            ledManager.triggerButtonPulse(CRGB::Cyan, 1, 100);
         } else if (evt == BTN_EVENT_UP_HOLD) {
             audioPlayer.volumeUp(5);
             showVolumeOverlay();

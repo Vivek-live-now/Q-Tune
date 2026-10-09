@@ -43,7 +43,7 @@ void renderMainMenu() {
     String vals[MAIN_MENU_COUNT];
     vals[0] = audioPlayer.isPlaying() ? "[PLAY]" : (audioPlayer.isPaused() ? "[PAUS]" : "[IDLE]");
     vals[1] = String("[") + spectrumAnalyzer.getPresetName() + "]";
-    vals[2] = String("[") + ledManager.getShortModeName() + "]";
+    vals[2] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
     vals[3] = "[10]";
     vals[4] = "[INFO]";
 
@@ -56,12 +56,12 @@ void updateMainMenu() {
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_UP_PRESS) {
         Display::navigateMenu(menuSelection, menuScrollOffset, MAIN_MENU_COUNT, -1);
-        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
     } else if (evt == BTN_EVENT_DN_PRESS) {
         Display::navigateMenu(menuSelection, menuScrollOffset, MAIN_MENU_COUNT, +1);
-        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
     } else if (evt == BTN_EVENT_SEL_PRESS) {
-        ledManager.triggerPulse(CRGB::Green, 1, 60);
+        ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
         switch (menuSelection) {
             case 0:
                 currentMode = MODE_PLAYER;
@@ -76,6 +76,7 @@ void updateMainMenu() {
                 break;
             case 2:
                 currentMode = MODE_RGB_EFFECTS;
+                ledManager.setMenuPreview(true);
                 break;
             case 3:
                 currentMode = MODE_DIAGNOSTICS;
@@ -93,12 +94,15 @@ void updateMainMenu() {
 
 int rgbMenuSelection = 0;
 int rgbMenuScrollOffset = 0;
-const int RGB_MENU_COUNT = 6;
+const int RGB_MENU_COUNT = 9;
 const char* rgbMenuLabels[] = {
+    "Reactive Lights",
     "Mode",
     "Color",
     "Brightness",
     "Sensitivity",
+    "Button Lights",
+    "Off on Finish",
     "Test Pulse",
     "Back to Menu"
 };
@@ -112,12 +116,15 @@ void updateRgbEffectsMode() {
     snprintf(brBuf, sizeof(brBuf), "%d%%", (ledManager.getBrightness() * 100) / 255);
 
     String vals[RGB_MENU_COUNT];
-    vals[0] = String("[") + ledManager.getModeName() + "]";
-    vals[1] = String("[") + ledManager.getColorName() + "]";
-    vals[2] = String("[") + brBuf + "]";
-    vals[3] = String("[") + ledManager.getSensitivityName() + "]";
-    vals[4] = "[PULSE]";
-    vals[5] = "[EXIT]";
+    vals[0] = String("[") + ledManager.getEnabledName() + "]";
+    vals[1] = String("[") + ledManager.getModeName() + "]";
+    vals[2] = String("[") + ledManager.getColorName() + "]";
+    vals[3] = String("[") + brBuf + "]";
+    vals[4] = String("[") + ledManager.getSensitivityName() + "]";
+    vals[5] = String("[") + ledManager.getButtonFeedbackName() + "]";
+    vals[6] = String("[") + ledManager.getTurnOffOnCompleteName() + "]";
+    vals[7] = "[PULSE]";
+    vals[8] = "[EXIT]";
 
     display.drawStandardMenu("RGB LIGHTS", rgbMenuLabels, RGB_MENU_COUNT, rgbMenuSelection, rgbMenuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -125,32 +132,43 @@ void updateRgbEffectsMode() {
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_UP_PRESS) {
         Display::navigateMenu(rgbMenuSelection, rgbMenuScrollOffset, RGB_MENU_COUNT, -1);
-        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
     } else if (evt == BTN_EVENT_DN_PRESS) {
         Display::navigateMenu(rgbMenuSelection, rgbMenuScrollOffset, RGB_MENU_COUNT, +1);
-        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
     } else if (evt == BTN_EVENT_SEL_PRESS) {
         switch (rgbMenuSelection) {
             case 0:
-                ledManager.cycleMode();
+                ledManager.toggleEnabled();
                 break;
             case 1:
-                ledManager.cycleColor();
+                ledManager.cycleMode();
                 break;
             case 2:
-                ledManager.cycleBrightness();
+                ledManager.cycleColor();
                 break;
             case 3:
-                ledManager.cycleSensitivity();
+                ledManager.cycleBrightness();
                 break;
             case 4:
-                ledManager.triggerPulse(CRGB::White, 2, 70);
+                ledManager.cycleSensitivity();
                 break;
             case 5:
+                ledManager.toggleButtonFeedback();
+                break;
+            case 6:
+                ledManager.toggleTurnOffOnComplete();
+                break;
+            case 7:
+                ledManager.triggerPulse(CRGB::White, 2, 70);
+                break;
+            case 8:
+                ledManager.setMenuPreview(false);
                 currentMode = MODE_MAIN_MENU;
                 break;
         }
     } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+        ledManager.setMenuPreview(false);
         currentMode = MODE_MAIN_MENU;
     }
 }
@@ -165,10 +183,10 @@ void updateVisualizerMode() {
         currentMode = MODE_MAIN_MENU;
     } else if (evt == BTN_EVENT_DN_PRESS) {
         spectrumAnalyzer.nextPreset();
-        ledManager.triggerPulse(CRGB::Magenta, 1, 80);
+        ledManager.triggerButtonPulse(CRGB::Magenta, 1, 80);
     } else if (evt == BTN_EVENT_UP_PRESS) {
         spectrumAnalyzer.previousPreset();
-        ledManager.triggerPulse(CRGB::Magenta, 1, 80);
+        ledManager.triggerButtonPulse(CRGB::Magenta, 1, 80);
     } else if (evt == BTN_EVENT_SEL_PRESS) {
         if (audioPlayer.isPlaying()) {
             audioPlayer.pause();
@@ -182,10 +200,10 @@ void updateVisualizerMode() {
         }
     } else if (evt == BTN_EVENT_UP_HOLD) {
         audioPlayer.volumeUp(5);
-        ledManager.triggerPulse(CRGB::Green, 1, 60);
+        ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
     } else if (evt == BTN_EVENT_DN_HOLD) {
         audioPlayer.volumeDown(5);
-        ledManager.triggerPulse(CRGB::Red, 1, 60);
+        ledManager.triggerButtonPulse(CRGB::Red, 1, 60);
     }
 }
 
@@ -215,10 +233,10 @@ void updateSystemInfoMode() {
     if (evt == BTN_EVENT_SEL_PRESS) {
         if (sdManager.isMounted()) {
             sdManager.unmount();
-            ledManager.triggerPulse(CRGB::Orange, 2, 80);
+            ledManager.triggerButtonPulse(CRGB::Orange, 2, 80);
         } else {
             sdManager.remount();
-            ledManager.triggerPulse(CRGB::Green, 2, 80);
+            ledManager.triggerButtonPulse(CRGB::Green, 2, 80);
         }
     } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
         currentMode = MODE_MAIN_MENU;

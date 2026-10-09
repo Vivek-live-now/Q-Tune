@@ -29,8 +29,7 @@ static const LedMode SELECTABLE_MODES[] = {
     LedMode::REACT_DISCO_FLASH,
     LedMode::BREATHING,
     LedMode::RAINBOW,
-    LedMode::SOLID,
-    LedMode::OFF
+    LedMode::SOLID
 };
 static const size_t SELECTABLE_MODES_COUNT = sizeof(SELECTABLE_MODES) / sizeof(SELECTABLE_MODES[0]);
 
@@ -41,6 +40,10 @@ LEDManager::LEDManager() :
     current_mode(LedMode::BOOT_PULSE),
     previous_mode(LedMode::OFF),
     user_mode(LedMode::REACT_BASS_PULSE),
+    master_enabled(true),
+    button_feedback_enabled(true),
+    off_on_complete(true),
+    in_menu_preview(false),
     current_color(CRGB::Cyan),
     color_index(0),
     current_brightness(160),
@@ -102,8 +105,21 @@ void LEDManager::cycleMode() {
     setUserMode(SELECTABLE_MODES[nextIdx]);
 }
 
+void LEDManager::setEnabled(bool enabled) {
+    master_enabled = enabled;
+    if (!master_enabled) {
+        off();
+    } else {
+        setMode(user_mode);
+    }
+}
+
+void LEDManager::toggleEnabled() {
+    setEnabled(!master_enabled);
+}
+
 const char* LEDManager::getModeName() const {
-    LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE) ? user_mode : current_mode;
+    LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE || current_mode == LedMode::OFF) ? user_mode : current_mode;
     switch (m) {
         case LedMode::REACT_BASS_PULSE:   return "BASS PULSE";
         case LedMode::REACT_ENERGY_VU:    return "ENERGY VU";
@@ -124,7 +140,7 @@ const char* LEDManager::getModeName() const {
 }
 
 const char* LEDManager::getShortModeName() const {
-    LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE) ? user_mode : current_mode;
+    LedMode m = (current_mode == LedMode::PULSE || current_mode == LedMode::BOOT_PULSE || current_mode == LedMode::LOW_BATTERY_PULSE || current_mode == LedMode::OFF) ? user_mode : current_mode;
     switch (m) {
         case LedMode::REACT_BASS_PULSE:   return "BASS";
         case LedMode::REACT_ENERGY_VU:    return "VU";
@@ -203,7 +219,13 @@ void LEDManager::off() {
     FastLED.show();
 }
 
+void LEDManager::triggerButtonPulse(CRGB color, int count, int speed_ms) {
+    if (!master_enabled || !button_feedback_enabled) return;
+    triggerPulse(color, count, speed_ms);
+}
+
 void LEDManager::triggerPulse(CRGB color, int count, int speed_ms) {
+    if (!master_enabled) return;
     pulse_color = color;
     pulse_count = count * 2; // ON + OFF phases
     pulse_speed = speed_ms;
@@ -211,21 +233,32 @@ void LEDManager::triggerPulse(CRGB color, int count, int speed_ms) {
 }
 
 void LEDManager::onPlaybackStart() {
+    if (!master_enabled) return;
     setMode(user_mode);
 }
 
 void LEDManager::onPlaybackResume() {
+    if (!master_enabled) return;
     setMode(user_mode);
 }
 
 void LEDManager::onPlaybackPause() {
+    if (!master_enabled) return;
     setMode(LedMode::BREATHING);
     leds[0] = CRGB::Orange;
     FastLED.show();
 }
 
 void LEDManager::onPlaybackStop() {
-    setMode(user_mode);
+    if (off_on_complete) {
+        off();
+    } else {
+        if (master_enabled) {
+            setMode(user_mode);
+        } else {
+            off();
+        }
+    }
 }
 
 void LEDManager::updateReactiveModes(float dt) {
@@ -240,6 +273,10 @@ void LEDManager::updateReactiveModes(float dt) {
     // If audio is not playing (e.g. idle or previewing in RGB settings menu),
     // provide an active, dynamic preview/demo of each mode!
     if (!isPlaying) {
+        if (off_on_complete && !in_menu_preview) {
+            leds[0] = CRGB::Black;
+            return;
+        }
         anim_phase += dt * 2.5f;
         switch (current_mode) {
             case LedMode::REACT_BASS_PULSE: {
@@ -481,6 +518,12 @@ void LEDManager::loop() {
         setMode(LedMode::LOW_BATTERY_PULSE);
     } else if ((bat_v <= 0.5f || bat_pct > 10) && current_mode == LedMode::LOW_BATTERY_PULSE) {
         setMode(user_mode);
+    }
+
+    if (!master_enabled && current_mode != LedMode::LOW_BATTERY_PULSE) {
+        leds[0] = CRGB::Black;
+        FastLED.show();
+        return;
     }
 
     if (isReactiveMode(current_mode)) {
