@@ -1,8 +1,10 @@
 #include "audio_player.h"
 
 AudioPlayer::AudioPlayer() :
-    initialized(false), playing(false), paused(false),
-    bytesPlayed(0), totalDataBytes(0), dataOffset(44) {}
+    initialized(false), playing(false), paused(false), trackFinished(false),
+    bytesPlayed(0), totalDataBytes(0), dataOffset(44),
+    currentVolume(80), volumeScale(163),
+    audioTaskHandle(NULL), taskRunning(false) {}
 
 bool AudioPlayer::begin() {
     i2s_config_t i2s_config = {
@@ -33,6 +35,9 @@ bool AudioPlayer::begin() {
     if (i2s_set_pin(I2S_NUM, &pin_config) != ESP_OK) {
         return false;
     }
+
+    setVolume(currentVolume);
+    startAudioTask();
 
     initialized = true;
     return true;
@@ -110,21 +115,34 @@ bool AudioPlayer::parseWAVHeader(File &file, WAVHeader &header) {
 
 bool AudioPlayer::playFile(const String &path) {
     stop();
-    if (!SD.exists(path)) return false;
+    clearFinished();
 
-    wavFile = SD.open(path, FILE_READ);
-    if (!wavFile) return false;
-
-    if (!parseWAVHeader(wavFile, currentWavHeader)) {
-        wavFile.close();
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    bool exists = SD.exists(path);
+    if (!exists) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
         return false;
     }
 
-    setupI2S(currentWavHeader.sampleRate, currentWavHeader.numChannels, currentWavHeader.bitsPerSample);
+    wavFile = SD.open(path, FILE_READ);
+    if (!wavFile) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    if (!parseWAVHeader(wavFile, currentWavHeader)) {
+        wavFile.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
 
     totalDataBytes = currentWavHeader.dataSize;
     bytesPlayed = 0;
     wavFile.seek(dataOffset);
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+    setupI2S(currentWavHeader.sampleRate, currentWavHeader.numChannels, currentWavHeader.bitsPerSample);
+
     playing = true;
     paused = false;
     return true;
@@ -144,21 +162,33 @@ void AudioPlayer::update() {
 
         if (bytesToRead <= 0) {
             stop();
+            trackFinished = true;
             return;
         }
 
-        int bytesRead = wavFile.read((uint8_t*)monoBuf, bytesToRead);
+        int bytesRead = 0;
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        if (wavFile) {
+            bytesRead = wavFile.read((uint8_t*)monoBuf, bytesToRead);
+        }
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
         if (bytesRead > 0) {
             int samples = bytesRead / sizeof(int16_t);
             for (int i = 0; i < samples; i++) {
-                stereoBuf[i * 2] = monoBuf[i];
-                stereoBuf[i * 2 + 1] = monoBuf[i];
+                int16_t sample = monoBuf[i];
+                if (volumeScale < 256) {
+                    sample = (int16_t)(((int32_t)sample * volumeScale) >> 8);
+                }
+                stereoBuf[i * 2] = sample;
+                stereoBuf[i * 2 + 1] = sample;
             }
             size_t bytesWritten = 0;
             i2s_write(I2S_NUM, stereoBuf, samples * 4, &bytesWritten, portMAX_DELAY);
             bytesPlayed += bytesRead;
         } else {
             stop();
+            trackFinished = true;
         }
     } else {
         // Direct Stereo PCM streaming
@@ -170,16 +200,31 @@ void AudioPlayer::update() {
 
         if (bytesToRead <= 0) {
             stop();
+            trackFinished = true;
             return;
         }
 
-        int bytesRead = wavFile.read(buffer, bytesToRead);
+        int bytesRead = 0;
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        if (wavFile) {
+            bytesRead = wavFile.read(buffer, bytesToRead);
+        }
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
         if (bytesRead > 0) {
+            if (volumeScale < 256) {
+                int16_t *samples = (int16_t*)buffer;
+                int sampleCount = bytesRead / sizeof(int16_t);
+                for (int i = 0; i < sampleCount; i++) {
+                    samples[i] = (int16_t)(((int32_t)samples[i] * volumeScale) >> 8);
+                }
+            }
             size_t bytesWritten = 0;
             i2s_write(I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
             bytesPlayed += bytesWritten;
         } else {
             stop();
+            trackFinished = true;
         }
     }
 }
@@ -195,9 +240,11 @@ void AudioPlayer::resume() {
 void AudioPlayer::stop() {
     playing = false;
     paused = false;
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     if (wavFile) {
         wavFile.close();
     }
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     bytesPlayed = 0;
     i2s_zero_dma_buffer(I2S_NUM);
 }
@@ -241,6 +288,76 @@ void AudioPlayer::playTestTone(uint16_t frequencyHz, uint16_t durationMs) {
         samplesGenerated += chunkSamples;
     }
     i2s_zero_dma_buffer(I2S_NUM);
+}
+
+void AudioPlayer::setVolume(uint8_t volume) {
+    if (volume > 100) volume = 100;
+    currentVolume = volume;
+    // Quadratic volume scaling for natural perceptual loudness:
+    // (volume / 100)^2 * 256 = (volume * volume * 256) / 10000
+    volumeScale = ((uint32_t)volume * volume * 256) / 10000;
+}
+
+uint8_t AudioPlayer::getVolume() const {
+    return currentVolume;
+}
+
+void AudioPlayer::volumeUp(uint8_t step) {
+    if (currentVolume + step > 100) setVolume(100);
+    else setVolume(currentVolume + step);
+}
+
+void AudioPlayer::volumeDown(uint8_t step) {
+    if (currentVolume < step) setVolume(0);
+    else setVolume(currentVolume - step);
+}
+
+bool AudioPlayer::hasFinished() const {
+    return trackFinished;
+}
+
+void AudioPlayer::clearFinished() {
+    trackFinished = false;
+}
+
+void AudioPlayer::audioTaskFunction(void *param) {
+    AudioPlayer *player = (AudioPlayer*)param;
+    while (player->taskRunning) {
+        if (player->playing && !player->paused) {
+            player->update();
+            vTaskDelay(pdMS_TO_TICKS(1));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(15));
+        }
+    }
+    vTaskDelete(NULL);
+}
+
+void AudioPlayer::startAudioTask() {
+    if (audioTaskHandle == NULL) {
+        taskRunning = true;
+        xTaskCreatePinnedToCore(
+            audioTaskFunction,
+            "QAudioTask",
+            4096,
+            this,
+            5,
+            &audioTaskHandle,
+            0 // Pin audio engine to Core 0
+        );
+    }
+}
+
+void AudioPlayer::stopAudioTask() {
+    if (audioTaskHandle != NULL) {
+        taskRunning = false;
+        vTaskDelay(pdMS_TO_TICKS(25));
+        audioTaskHandle = NULL;
+    }
+}
+
+bool AudioPlayer::isAudioTaskRunning() const {
+    return taskRunning && (audioTaskHandle != NULL);
 }
 
 AudioPlayer audioPlayer;

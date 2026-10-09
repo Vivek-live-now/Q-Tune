@@ -3,6 +3,10 @@
 SDManager::SDManager() : mounted(false) {}
 
 bool SDManager::begin() {
+    if (spiBusMutex != NULL) {
+        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    }
+
     // Arbitrate shared SPI bus: ensure both CS lines are driven high
     pinMode(OLED_CS, OUTPUT);
     digitalWrite(OLED_CS, HIGH);
@@ -18,10 +22,12 @@ bool SDManager::begin() {
     if (!SD.begin(SD_CS, SPI, 10000000)) {
         if (!SD.begin(SD_CS, SPI, 4000000)) {
             mounted = false;
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             return false;
         }
     }
     mounted = true;
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return true;
 }
 
@@ -35,8 +41,14 @@ std::vector<String> SDManager::listMusicFiles() {
         if (!begin()) return musicFiles;
     }
 
+    if (spiBusMutex != NULL) {
+        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    }
+
     File dir = SD.open("/music");
     if (!dir || !dir.isDirectory()) {
+        if (dir) dir.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
         return musicFiles;
     }
 
@@ -61,6 +73,7 @@ std::vector<String> SDManager::listMusicFiles() {
         file = dir.openNextFile();
     }
     dir.close();
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return musicFiles;
 }
 

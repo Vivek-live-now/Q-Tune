@@ -27,7 +27,13 @@ void Display::clear() {
 }
 
 void Display::sendBuffer() {
+    if (spiBusMutex != NULL) {
+        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    }
     u8g2.sendBuffer();
+    if (spiBusMutex != NULL) {
+        xSemaphoreGive(spiBusMutex);
+    }
 }
 
 Display display;

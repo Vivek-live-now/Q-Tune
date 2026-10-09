@@ -10,7 +10,11 @@ enum ButtonEvent {
     BTN_EVENT_SEL_PRESS,
     BTN_EVENT_OK_PRESS = BTN_EVENT_SEL_PRESS,
     BTN_EVENT_DN_PRESS,
-    BTN_EVENT_CANCEL_PRESS
+    BTN_EVENT_CANCEL_PRESS,
+    BTN_EVENT_UP_HOLD,
+    BTN_EVENT_DN_HOLD,
+    BTN_EVENT_OK_HOLD,
+    BTN_EVENT_CANCEL_HOLD
 };
 
 class ButtonManager {
@@ -25,6 +29,9 @@ private:
         bool lastState;
         bool currentState;
         unsigned long lastDebounceTime;
+        unsigned long pressStartTime;
+        bool holdTriggered;
+        unsigned long lastRepeatTime;
     };
 
     Button btnUp;
@@ -32,8 +39,11 @@ private:
     Button btnDn;
     Button btnCancel;
     const unsigned long debounceDelay = 50;
+    const unsigned long holdThreshold = 450;
+    const unsigned long repeatInterval = 150;
 
     bool checkButton(Button &btn);
+    bool checkButtonHold(Button &btn);
 };
 
 extern ButtonManager buttonManager;

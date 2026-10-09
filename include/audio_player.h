@@ -38,18 +38,43 @@ public:
     uint32_t getPositionMs() const;
     uint32_t getDurationMs() const;
 
+    // Digital Volume Control (0-100%)
+    void setVolume(uint8_t volume);
+    uint8_t getVolume() const;
+    void volumeUp(uint8_t step = 5);
+    void volumeDown(uint8_t step = 5);
+
+    // Track status & completion
+    bool hasFinished() const;
+    void clearFinished();
+
+    // FreeRTOS Dedicated Audio Task Management
+    void startAudioTask();
+    void stopAudioTask();
+    bool isAudioTaskRunning() const;
+
 private:
     bool initialized;
-    bool playing;
-    bool paused;
+    volatile bool playing;
+    volatile bool paused;
+    volatile bool trackFinished;
     File wavFile;
     WAVHeader currentWavHeader;
     uint32_t bytesPlayed;
     uint32_t totalDataBytes;
     uint32_t dataOffset;
 
+    // Digital Volume Scaling (Quadratic perceptual curve)
+    uint8_t currentVolume;
+    uint32_t volumeScale; // Fixed-point factor (0 to 256)
+
+    // FreeRTOS Task state
+    TaskHandle_t audioTaskHandle;
+    volatile bool taskRunning;
+
     bool parseWAVHeader(File &file, WAVHeader &header);
     void setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample);
+    static void audioTaskFunction(void *param);
 };
 
 extern AudioPlayer audioPlayer;

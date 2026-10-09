@@ -10,7 +10,8 @@ static const char* testNames[] = {
     "7. Battery ADC",
     "8. RGB LED Test",
     "9. I2S Audio Test",
-    "10. INMP441 Mic Test"
+    "10. INMP441 Mic Test",
+    "11. Return to Menu"
 };
 
 Diagnostics::Diagnostics() : selectedIndex(0) {}
@@ -46,7 +47,7 @@ void Diagnostics::renderMenu() {
     display.sendBuffer();
 }
 
-void Diagnostics::runMenu() {
+bool Diagnostics::runMenu() {
     renderMenu();
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_UP_PRESS) {
@@ -56,9 +57,15 @@ void Diagnostics::runMenu() {
         selectedIndex = (selectedIndex + 1) % TOTAL_TESTS;
         renderMenu();
     } else if (evt == BTN_EVENT_SEL_PRESS) {
+        if (selectedIndex == 10) {
+            return false; // Exit to Main Menu
+        }
         executeTest(selectedIndex);
         renderMenu();
+    } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+        return false; // Exit to Main Menu
     }
+    return true;
 }
 
 void Diagnostics::executeTest(int index) {
@@ -268,6 +275,9 @@ void Diagnostics::testINMP441Mic() {
     display.sendBuffer();
     delay(400);
 
+    audioPlayer.stopAudioTask();
+    audioPlayer.stop();
+
     spectrumAnalyzer.start();
 
     VisualizerPreset p = PRESET_BAR_SPECTRUM;
@@ -276,7 +286,7 @@ void Diagnostics::testINMP441Mic() {
         spectrumAnalyzer.render(p);
 
         ButtonEvent evt = buttonManager.update();
-        if (evt == BTN_EVENT_SEL_PRESS) break;
+        if (evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_CANCEL_PRESS) break;
         if (evt == BTN_EVENT_DN_PRESS) {
             p = (VisualizerPreset)((p + 1) % 4);
         }
@@ -284,6 +294,7 @@ void Diagnostics::testINMP441Mic() {
     }
 
     spectrumAnalyzer.stop();
+    audioPlayer.begin();
 }
 
 Diagnostics diagnostics;

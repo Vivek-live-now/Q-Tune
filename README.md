@@ -85,9 +85,49 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 
 ---
 
+## Operating Modes & Application Shell
+
+On startup, Q-Tune launches into the **Unified Home Menu**, providing instant access to all core applications:
+
+1. **Music Player**: Full standalone playback engine with track listing, status, progress bar, digital volume, and repeat/shuffle modes.
+2. **Spectrum Visualizer**: Real-time 16-band FFT audio visualizer (Bar Spectrum, Waveform, MilkDrop Plasma, Starfield) powered by INMP441 MEMS mic.
+3. **Hardware Diagnostics**: 10-point interactive diagnostic suite with return-to-menu navigation.
+4. **System Info**: Live VBAT voltage, battery %, CPU frequency profile, volume %, and SD mount status.
+
+---
+
+## Navigation & Controls Matrix
+
+| Context | Button | Action |
+| :--- | :--- | :--- |
+| **Main Menu** | UP / DOWN (Short) | Move cursor |
+| **Main Menu** | OK / SEL (Short) | Launch selected mode |
+| **Main Menu** | CANCEL (Long) | Screen off / sleep |
+| **Track List** | UP / DOWN (Short) | Browse files in `/music/` |
+| **Track List** | OK / SEL (Short) | Play selected track |
+| **Track List** | CANCEL (Short) | Return to Main Menu |
+| **Now Playing** | OK / SEL (Short) | Toggle Play / Pause |
+| **Now Playing** | OK / SEL (Hold >450ms) | Cycle Playback Mode (`[ALL]` → `[R-1]` → `[SHF]` → `[SGL]`) |
+| **Now Playing** | UP / DOWN (Short) | Previous / Next track |
+| **Now Playing** | UP / DOWN (Hold >450ms) | Digital Volume Up / Down (with on-screen overlay) |
+| **Now Playing** | CANCEL (Short) | Return to Track List |
+| **Any Screen** | CANCEL (Hold >450ms) | Global escape to Main Menu |
+
+---
+
+## FreeRTOS Dual-Core Audio Architecture
+
+Q-Tune leverages the ESP32-S3 dual-core LX7 processor to guarantee stutter-free audio output:
+- **Core 0 (Audio Engine Task)**: Dedicated FreeRTOS background task continuously streams audio samples to I2S DMA with zero starvation.
+- **Core 1 (UI & Peripherals)**: Handles OLED rendering, button debouncing, LED animations, and battery monitoring.
+- **Multi-Core SPI Mutex**: Thread-safe hardware arbitration (`spiBusMutex`) prevents bus contention between the SPI microSD card and SPI OLED display.
+- **Digital Volume Scaling**: Non-linear quadratic perceptual volume curve (`(vol / 100)^2 * 256`) applied using fast fixed-point arithmetic.
+
+---
+
 ## Interactive Diagnostic Menu
 
-On startup, Q-Tune launches an interactive hardware diagnostic menu allowing verification of:
+The diagnostics suite verifies all physical subsystems:
 1. **OLED Display** - Border & text rendering
 2. **SD Card Detect** - Bus communication check
 3. **SD Filesystem** - Total & used capacity report
@@ -98,6 +138,7 @@ On startup, Q-Tune launches an interactive hardware diagnostic menu allowing ver
 8. **RGB LED Test** - WS2812 color cycle
 9. **I2S Audio Test** - Synthesized 1kHz test tone through MAX98357A
 10. **INMP441 Mic Visualizer** - Audio spectrum and MilkDrop-style visualizer presets
+11. **Return to Menu** - Clean exit to the unified home shell
 
 ---
 

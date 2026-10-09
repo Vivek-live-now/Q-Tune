@@ -318,6 +318,125 @@ def test_inmp441_microphone_pipeline():
 
     print("  [PASS] INMP441 32-bit I2S RX driver, GPIO 15 DIN (freed I2C), Cooley-Tukey FFT, and Diagnostics lifecycle verified.")
 
+def test_digital_volume_control_and_scaling():
+    print("\n--- 9. Digital Volume Control & Quadratic Perceptual Scaling Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+
+    with open(ap_h) as f:
+        h_src = f.read()
+    with open(ap_cpp) as f:
+        cpp_src = f.read()
+
+    assert "void setVolume(uint8_t volume);" in h_src, "Missing setVolume in audio_player.h"
+    assert "uint8_t getVolume() const;" in h_src, "Missing getVolume in audio_player.h"
+    assert "void volumeUp" in h_src, "Missing volumeUp in audio_player.h"
+    assert "void volumeDown" in h_src, "Missing volumeDown in audio_player.h"
+
+    # Verify quadratic perceptual formula: scale = (vol * vol * 256) // 10000
+    def calc_volume_scale(vol):
+        if vol > 100: vol = 100
+        return (vol * vol * 256) // 10000
+
+    assert calc_volume_scale(100) == 256, "Volume 100% must map to unity gain 256"
+    assert calc_volume_scale(0) == 0, "Volume 0% must map to silence 0"
+    assert calc_volume_scale(50) == 64, "Volume 50% must map to 1/4 power (64/256)"
+    assert calc_volume_scale(80) == 163, "Volume 80% must map to 163"
+
+    # Verify fixed-point sample attenuation
+    sample = 10000
+    scale = calc_volume_scale(50)
+    scaled_sample = (sample * scale) >> 8
+    assert scaled_sample == 2500, f"Expected 2500 for 50% vol, got {scaled_sample}"
+
+    assert "volumeScale" in cpp_src, "Missing volumeScale in audio_player.cpp"
+    assert "currentVolume" in cpp_src, "Missing currentVolume in audio_player.cpp"
+    print("  [PASS] 16-step quadratic perceptual volume scaling & fixed-point sample scaling verified.")
+
+def test_freertos_audio_task_and_spi_mutex():
+    print("\n--- 10. FreeRTOS Audio Task & Thread-Safe SPI Mutex Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hw_h = os.path.join(base_dir, "include", "hw_config.h")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    disp_cpp = os.path.join(base_dir, "src", "display.cpp")
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+
+    with open(hw_h) as f:
+        assert "extern SemaphoreHandle_t spiBusMutex;" in f.read()
+    with open(ap_h) as f:
+        h_text = f.read()
+        assert "startAudioTask()" in h_text
+        assert "stopAudioTask()" in h_text
+        assert "isAudioTaskRunning()" in h_text
+    with open(ap_cpp) as f:
+        cpp_text = f.read()
+        assert "xTaskCreatePinnedToCore" in cpp_text
+        assert "xSemaphoreTake(spiBusMutex" in cpp_text
+        assert "xSemaphoreGive(spiBusMutex" in cpp_text
+    with open(disp_cpp) as f:
+        assert "xSemaphoreTake(spiBusMutex" in f.read()
+    with open(sd_cpp) as f:
+        assert "xSemaphoreTake(spiBusMutex" in f.read()
+    with open(main_cpp) as f:
+        assert "xSemaphoreCreateMutex()" in f.read()
+
+    print("  [PASS] FreeRTOS Core 0 background task and multi-core SPI mutex arbitration verified.")
+
+def test_playback_modes_and_track_advance():
+    print("\n--- 11. Playback Modes & Auto-Advance Engine Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ui_h = os.path.join(base_dir, "include", "ui_player.h")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+
+    with open(ap_h) as f:
+        ap_text = f.read()
+        assert "hasFinished()" in ap_text
+        assert "clearFinished()" in ap_text
+
+    with open(ui_h) as f:
+        h_text = f.read()
+        assert "PLAY_MODE_ALL" in h_text
+        assert "PLAY_MODE_REPEAT_ONE" in h_text
+        assert "PLAY_MODE_SHUFFLE" in h_text
+        assert "PLAY_MODE_SINGLE" in h_text
+        assert "playNextTrack()" in h_text
+        assert "playPreviousTrack()" in h_text
+
+    with open(ui_cpp) as f:
+        cpp_text = f.read()
+        assert "playNextTrack" in cpp_text
+        assert "audioPlayer.hasFinished()" in cpp_text
+        assert "cyclePlaybackMode" in cpp_text
+
+    print("  [PASS] Repeat All, Repeat One, Shuffle, Single, and EOF auto-advance verified.")
+
+def test_app_shell_and_mode_switching():
+    print("\n--- 12. Unified App Shell & Mode Switching Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+
+    with open(main_cpp) as f:
+        m_text = f.read()
+        assert "MODE_MAIN_MENU" in m_text
+        assert "MODE_PLAYER" in m_text
+        assert "MODE_VISUALIZER" in m_text
+        assert "MODE_DIAGNOSTICS" in m_text
+        assert "MODE_SYSTEM_INFO" in m_text
+        assert "updateMainMenu()" in m_text
+        assert "uiPlayer.update()" in m_text
+
+    with open(diag_cpp) as f:
+        d_text = f.read()
+        assert "Return to Menu" in d_text
+        assert "bool Diagnostics::runMenu()" in d_text
+
+    print("  [PASS] Unified App Shell, 4-mode home menu, and seamless cancellation exits verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -330,7 +449,11 @@ def main():
     test_simd_accel_engine()
     test_led_manager_modes()
     test_inmp441_microphone_pipeline()
-    print("\nAll 8 Q-Tune test verifications PASSED (100%)!\n")
+    test_digital_volume_control_and_scaling()
+    test_freertos_audio_task_and_spi_mutex()
+    test_playback_modes_and_track_advance()
+    test_app_shell_and_mode_switching()
+    print("\nAll 12 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

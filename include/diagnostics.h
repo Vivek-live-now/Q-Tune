@@ -14,11 +14,11 @@ class Diagnostics {
 public:
     Diagnostics();
     void begin();
-    void runMenu();
+    bool runMenu();
 
 private:
     int selectedIndex;
-    static const int TOTAL_TESTS = 10;
+    static const int TOTAL_TESTS = 11;
     void renderMenu();
     void executeTest(int index);
 
