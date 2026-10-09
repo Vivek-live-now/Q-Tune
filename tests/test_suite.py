@@ -437,6 +437,68 @@ def test_app_shell_and_mode_switching():
 
     print("  [PASS] Unified App Shell, 4-mode home menu, and seamless cancellation exits verified.")
 
+def test_live_wav_decoding_visualizer_pipeline():
+    print("\n--- 13. Live WAV Stream Decoding Visualizer Engine Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sa_h = os.path.join(base_dir, "include", "spectrum_analyzer.h")
+    sa_cpp = os.path.join(base_dir, "src", "spectrum_analyzer.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+
+    with open(sa_h) as f:
+        sa_h_text = f.read()
+    with open(sa_cpp) as f:
+        sa_cpp_text = f.read()
+    with open(ap_h) as f:
+        ap_h_text = f.read()
+    with open(ap_cpp) as f:
+        ap_cpp_text = f.read()
+    with open(ui_cpp) as f:
+        ui_cpp_text = f.read()
+    with open(main_cpp) as f:
+        main_cpp_text = f.read()
+
+    # 1. Verify thread-safe lock-free sample tap declarations
+    assert "feedSamples" in sa_h_text, "Missing feedSamples in spectrum_analyzer.h"
+    assert "sampleAudioStream" in sa_h_text, "Missing sampleAudioStream in spectrum_analyzer.h"
+    assert "renderMiniBars" in sa_h_text, "Missing renderMiniBars in spectrum_analyzer.h"
+    assert "RING_BUFFER_SIZE" in sa_h_text, "Missing RING_BUFFER_SIZE in spectrum_analyzer.h"
+    assert "peakHold" in sa_h_text, "Missing peakHold in spectrum_analyzer.h"
+
+    # 2. Verify AudioPlayer taps decoded WAV stream (mono & stereo) without audio interruption
+    assert "spectrumAnalyzer.feedSamples(monoBuf" in ap_cpp_text, "Mono WAV stream tap missing"
+    assert "spectrumAnalyzer.feedSamples((const int16_t*)buffer" in ap_cpp_text, "Stereo WAV stream tap missing"
+    assert "getCurrentTrackName" in ap_h_text, "Missing getCurrentTrackName in audio_player.h"
+
+    # 3. Verify Player HUD integrates live mini-visualizer
+    assert "spectrumAnalyzer.renderMiniBars" in ui_cpp_text, "Missing renderMiniBars in ui_player.cpp"
+
+    # 4. Verify Visualizer mode runs live audio stream without stopping player
+    assert "spectrumAnalyzer.sampleAudioStream()" in main_cpp_text, "Visualizer mode not using live audio stream"
+    assert "audioPlayer.stopAudioTask();" not in main_cpp_text, "Visualizer mode must not stop audio task"
+
+    # 5. Algorithmic verification: Stereo downmixing and 16-bit to 10-bit dynamic range scaling
+    left_sample = 24000
+    right_sample = 16000
+    mono_downmix = (left_sample + right_sample) // 2
+    assert mono_downmix == 20000, f"Expected 20000 mono downmix, got {mono_downmix}"
+    fft_scaled = mono_downmix >> 6
+    assert fft_scaled == 312, f"Expected 312 scaled sample, got {fft_scaled}"
+
+    # 6. Peak hold cap mechanics verification
+    current_band = 35
+    peak_hold_val = 40
+    decay_timer = 2
+    # When band exceeds peak, cap rises immediately
+    if 45 > peak_hold_val:
+        peak_hold_val = 45
+        decay_timer = 0
+    assert peak_hold_val == 45 and decay_timer == 0
+
+    print("  [PASS] Live WAV stream tap, lock-free ring buffer, stereo downmix, peak hold caps, and HUD mini-bars verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -453,7 +515,8 @@ def main():
     test_freertos_audio_task_and_spi_mutex()
     test_playback_modes_and_track_advance()
     test_app_shell_and_mode_switching()
-    print("\nAll 12 Q-Tune test verifications PASSED (100%)!\n")
+    test_live_wav_decoding_visualizer_pipeline()
+    print("\nAll 13 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

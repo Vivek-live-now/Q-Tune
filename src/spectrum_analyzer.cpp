@@ -6,78 +6,171 @@
 #include <string.h>
 
 SpectrumAnalyzer::SpectrumAnalyzer() :
+    ringHead(0),
+    lastSampleFeedMs(0),
     currentPreset(PRESET_BAR_SPECTRUM),
     active(false),
+    micHardwareInitialized(false),
     peakLevel(0.0f),
     rmsLevel(0.0f) {
     memset(bands, 0, sizeof(bands));
+    memset(peakHold, 0, sizeof(peakHold));
+    memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
     memset(micBuffer, 0, sizeof(micBuffer));
+    memset(ringBuffer, 0, sizeof(ringBuffer));
 }
 
 bool SpectrumAnalyzer::begin() {
     active = false;
+    micHardwareInitialized = false;
     peakLevel = 0.0f;
     rmsLevel = 0.0f;
+    ringHead = 0;
+    lastSampleFeedMs = 0;
     memset(bands, 0, sizeof(bands));
+    memset(peakHold, 0, sizeof(peakHold));
+    memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
     memset(micBuffer, 0, sizeof(micBuffer));
+    memset(ringBuffer, 0, sizeof(ringBuffer));
     return true;
 }
 
 bool SpectrumAnalyzer::start() {
-    if (active) return true;
-
-    // Disconnect GPIO 44 from previous UART state and configure as digital input
-    gpio_reset_pin((gpio_num_t)I2S_MIC_DIN);
-    pinMode(I2S_MIC_DIN, INPUT);
-
-    // Uninstall existing I2S driver on I2S_NUM to reconfigure for microphone RX
-    i2s_driver_uninstall(I2S_NUM);
-
-    // INMP441 standard Philips I2S configuration (32-bit slot width, master RX)
-    i2s_config_t i2s_config = {
-        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-        .sample_rate = 16000,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 4,
-        .dma_buf_len = 128,
-        .use_apll = false,
-        .tx_desc_auto_clear = false,
-        .fixed_mclk = 0
-    };
-
-    i2s_pin_config_t pin_config = {
-        .bck_io_num = I2S_BCLK,        // GPIO 17
-        .ws_io_num = I2S_LRCK,         // GPIO 18
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = I2S_MIC_DIN     // GPIO 44
-    };
-
-    if (i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL) != ESP_OK) {
-        return false;
-    }
-    if (i2s_set_pin(I2S_NUM, &pin_config) != ESP_OK) {
-        i2s_driver_uninstall(I2S_NUM);
-        return false;
-    }
-
     active = true;
+    lastSampleFeedMs = millis();
     return true;
 }
 
 void SpectrumAnalyzer::stop() {
-    if (!active) return;
-    i2s_driver_uninstall(I2S_NUM);
+    if (!active && !micHardwareInitialized) return;
+    if (micHardwareInitialized) {
+        i2s_driver_uninstall(I2S_NUM);
+        micHardwareInitialized = false;
+        // Restore AudioPlayer I2S TX configuration
+        audioPlayer.begin();
+    }
     active = false;
-    // Restore AudioPlayer I2S TX configuration
-    audioPlayer.begin();
+    clearSamples();
+}
+
+void SpectrumAnalyzer::feedSamples(const int16_t *samples, size_t count, uint8_t channels) {
+    if (!samples || count == 0) return;
+    size_t head = ringHead;
+    for (size_t i = 0; i < count; i++) {
+        int16_t sample;
+        if (channels == 1) {
+            sample = samples[i];
+        } else {
+            // Downmix stereo (L + R) / 2 to mono
+            sample = (int16_t)(((int32_t)samples[i * 2] + (int32_t)samples[i * 2 + 1]) / 2);
+        }
+        ringBuffer[head] = sample;
+        head = (head + 1) % RING_BUFFER_SIZE;
+    }
+    ringHead = head;
+    lastSampleFeedMs = millis();
+}
+
+void SpectrumAnalyzer::clearSamples() {
+    memset(ringBuffer, 0, sizeof(ringBuffer));
+    memset(micBuffer, 0, sizeof(micBuffer));
+    memset(bands, 0, sizeof(bands));
+    memset(peakHold, 0, sizeof(peakHold));
+    memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
+    peakLevel = 0.0f;
+    rmsLevel = 0.0f;
+    ringHead = 0;
+}
+
+void SpectrumAnalyzer::sampleAudioStream() {
+    unsigned long now = millis();
+    bool isAudioActive = audioPlayer.isPlaying() && (now - lastSampleFeedMs < 350);
+
+    if (!isAudioActive) {
+        // Smoothly decay frequency bands and peak hold to zero when audio is stopped or paused
+        for (int i = 0; i < 16; i++) {
+            bands[i] = (uint8_t)(bands[i] * 0.70f);
+            if (peakHold[i] > 0) peakHold[i]--;
+        }
+        peakLevel = peakLevel * 0.70f;
+        rmsLevel = rmsLevel * 0.70f;
+        for (size_t i = 0; i < SAMPLE_SIZE; i++) {
+            micBuffer[i] = 0;
+        }
+        return;
+    }
+
+    // Capture latest SAMPLE_SIZE samples from lock-free circular ring buffer
+    size_t head = ringHead;
+    size_t start = (head + RING_BUFFER_SIZE - SAMPLE_SIZE) % RING_BUFFER_SIZE;
+
+    int64_t sum = 0;
+    for (size_t i = 0; i < SAMPLE_SIZE; i++) {
+        size_t idx = (start + i) % RING_BUFFER_SIZE;
+        // Scale 16-bit PCM down (>> 6) to match calibrated FFT dynamic range
+        int16_t s = ringBuffer[idx] >> 6;
+        micBuffer[i] = s;
+        sum += s;
+    }
+
+    // DC bias removal
+    int16_t dc = (int16_t)(sum / SAMPLE_SIZE);
+    float sumSq = 0.0f;
+    int16_t peak = 0;
+
+    for (size_t i = 0; i < SAMPLE_SIZE; i++) {
+        micBuffer[i] -= dc;
+        int16_t a = abs(micBuffer[i]);
+        if (a > peak) peak = a;
+        sumSq += (float)a * a;
+    }
+
+    peakLevel = (float)peak;
+    rmsLevel = sqrtf(sumSq / SAMPLE_SIZE);
+
+    processFFT();
 }
 
 void SpectrumAnalyzer::sampleMicrophone() {
-    if (!active) {
-        if (!start()) return;
+    if (!micHardwareInitialized) {
+        // Disconnect GPIO from previous state and configure as digital input
+        gpio_reset_pin((gpio_num_t)I2S_MIC_DIN);
+        pinMode(I2S_MIC_DIN, INPUT);
+
+        // Uninstall existing I2S driver on I2S_NUM to reconfigure for microphone RX
+        i2s_driver_uninstall(I2S_NUM);
+
+        // INMP441 standard Philips I2S configuration (32-bit slot width, master RX)
+        i2s_config_t i2s_config = {
+            .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+            .sample_rate = 16000,
+            .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+            .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+            .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+            .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+            .dma_buf_count = 4,
+            .dma_buf_len = 128,
+            .use_apll = false,
+            .tx_desc_auto_clear = false,
+            .fixed_mclk = 0
+        };
+
+        i2s_pin_config_t pin_config = {
+            .bck_io_num = I2S_BCLK,        // GPIO 17
+            .ws_io_num = I2S_LRCK,         // GPIO 18
+            .data_out_num = I2S_PIN_NO_CHANGE,
+            .data_in_num = I2S_MIC_DIN     // GPIO 15 (Freed former I2C SDA)
+        };
+
+        if (i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL) != ESP_OK) {
+            return;
+        }
+        if (i2s_set_pin(I2S_NUM, &pin_config) != ESP_OK) {
+            i2s_driver_uninstall(I2S_NUM);
+            return;
+        }
+
+        micHardwareInitialized = true;
     }
 
     int32_t rawSamples[SAMPLE_SIZE * 2];
@@ -94,7 +187,6 @@ void SpectrumAnalyzer::sampleMicrophone() {
         int32_t right = rawSamples[i * 2 + 1];
 
         // INMP441 outputs 24-bit audio in upper bits of 32-bit slot
-        // Auto-detect active channel (whether L/R pin is tied to GND or 3.3V)
         int32_t chosen = (labs(left) >= labs(right)) ? left : right;
         int16_t sample = (int16_t)(chosen >> 14);
         micBuffer[i] = sample;
@@ -178,7 +270,7 @@ void SpectrumAnalyzer::processFFT() {
         mag[k] = sqrtf(xr[k] * xr[k] + xi[k] * xi[k]);
     }
 
-    // 16 Logarithmic octave frequency bands across 64 bins (125 Hz to 8000 Hz)
+    // 16 Logarithmic octave frequency bands across 64 bins (125 Hz to 8000+ Hz)
     static const uint8_t binStart[16] = {1, 2, 3, 4, 5, 7, 9, 12, 15, 19, 24, 30, 37, 44, 52, 60};
     static const uint8_t binEnd[16]   = {1, 2, 3, 4, 6, 8, 11, 14, 18, 23, 29, 36, 43, 51, 59, 63};
 
@@ -195,7 +287,7 @@ void SpectrumAnalyzer::processFFT() {
         uint8_t targetHeight = 0;
         if (val > 40.0f) {
             float scaled = log10f(val / 40.0f) * 24.0f;
-            if (scaled > 48.0f) scaled = 48.0f;
+            if (scaled > 46.0f) scaled = 46.0f;
             if (scaled < 0.0f) scaled = 0.0f;
             targetHeight = (uint8_t)scaled;
         }
@@ -204,13 +296,43 @@ void SpectrumAnalyzer::processFFT() {
         if (targetHeight >= bands[b]) {
             bands[b] = targetHeight;
         } else {
-            bands[b] = (uint8_t)(bands[b] * 0.75f);
+            bands[b] = (uint8_t)(bands[b] * 0.78f);
+        }
+
+        // Dynamic peak hold cap calculation
+        if (bands[b] >= peakHold[b]) {
+            peakHold[b] = bands[b];
+            peakDecayTimer[b] = 0;
+        } else {
+            peakDecayTimer[b]++;
+            if (peakDecayTimer[b] >= 3 && peakHold[b] > 0) {
+                peakHold[b]--;
+                peakDecayTimer[b] = 0;
+            }
         }
     }
 }
 
 void SpectrumAnalyzer::nextPreset() {
     currentPreset = (VisualizerPreset)((currentPreset + 1) % 4);
+}
+
+void SpectrumAnalyzer::previousPreset() {
+    currentPreset = (VisualizerPreset)((currentPreset + 3) % 4);
+}
+
+const char* SpectrumAnalyzer::getPresetName() const {
+    switch (currentPreset) {
+        case PRESET_BAR_SPECTRUM:    return "BARS";
+        case PRESET_WAVEFORM:        return "WAVE";
+        case PRESET_MILKDROP_PLASMA: return "PLASMA";
+        case PRESET_STARFIELD:       return "STAR";
+        default:                     return "BARS";
+    }
+}
+
+void SpectrumAnalyzer::render() {
+    render(currentPreset);
 }
 
 void SpectrumAnalyzer::render(VisualizerPreset preset) {
@@ -222,26 +344,72 @@ void SpectrumAnalyzer::render(VisualizerPreset preset) {
     }
 }
 
+void SpectrumAnalyzer::renderMiniBars(U8G2 &u8g2, int x, int y, int width, int height) {
+    const int numMiniBands = 8;
+    int spacing = 1;
+    int barWidth = (width - ((numMiniBands - 1) * spacing)) / numMiniBands;
+    if (barWidth < 2) barWidth = 2;
+
+    for (int i = 0; i < numMiniBands; i++) {
+        // Average adjacent 2 bands from 16 bands
+        int val = (bands[i * 2] + bands[i * 2 + 1]) / 2;
+        int barH = (val * height) / 46;
+        if (barH > height) barH = height;
+        if (barH < 0) barH = 0;
+
+        int bx = x + i * (barWidth + spacing);
+        int by = y + height - barH;
+
+        if (barH > 0) {
+            u8g2.drawBox(bx, by, barWidth, barH);
+        } else {
+            u8g2.drawHLine(bx, y + height - 1, barWidth);
+        }
+    }
+}
+
 void SpectrumAnalyzer::drawBars() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "Spectrum (INMP441)");
 
-    if (peakLevel < 5.0f) {
-        u8g2.drawStr(16, 32, "No audio / silence");
+    String track = audioPlayer.getCurrentTrackName();
+    if (track.length() == 0) {
+        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+    }
+    if (track.length() > 13) {
+        track = track.substring(0, 11) + "..";
+    }
+    char headerBuf[32];
+    snprintf(headerBuf, sizeof(headerBuf), "[BARS] %s", track.c_str());
+    u8g2.drawStr(0, 10, headerBuf);
+    u8g2.drawHLine(0, 12, 128);
+
+    if (!audioPlayer.isPlaying() && peakLevel < 5.0f) {
+        if (audioPlayer.isPaused()) {
+            u8g2.drawStr(36, 36, "❚❚ PAUSED");
+        } else {
+            u8g2.drawStr(24, 36, "No Active Stream");
+        }
     }
 
     int barWidth = 6;
     for (int i = 0; i < 16; i++) {
         int h = bands[i];
-        if (h > 48) h = 48;
+        if (h > 46) h = 46;
         int x = i * 8;
         int y = 64 - h;
         if (h > 0) {
             u8g2.drawBox(x, y, barWidth, h);
         } else {
             u8g2.drawHLine(x, 63, barWidth);
+        }
+
+        // Floating peak hold cap
+        if (peakHold[i] > 0) {
+            int capY = 63 - peakHold[i];
+            if (capY < 14) capY = 14;
+            u8g2.drawHLine(x, capY, barWidth);
         }
     }
     display.sendBuffer();
@@ -251,12 +419,23 @@ void SpectrumAnalyzer::drawWaveform() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "Oscilloscope (Mic)");
+
+    String track = audioPlayer.getCurrentTrackName();
+    if (track.length() == 0) {
+        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+    }
+    if (track.length() > 13) {
+        track = track.substring(0, 11) + "..";
+    }
+    char headerBuf[32];
+    snprintf(headerBuf, sizeof(headerBuf), "[WAVE] %s", track.c_str());
+    u8g2.drawStr(0, 10, headerBuf);
+    u8g2.drawHLine(0, 12, 128);
 
     float scale = 0.01f;
-    if (peakLevel > 50.0f) {
+    if (peakLevel > 20.0f) {
         scale = 22.0f / peakLevel;
-        if (scale > 0.1f) scale = 0.1f;
+        if (scale > 0.15f) scale = 0.15f;
     }
 
     int prevY = 38;
@@ -287,9 +466,20 @@ void SpectrumAnalyzer::drawPlasma() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "MilkDrop Plasma");
 
-    float energy = (rmsLevel / 400.0f);
+    String track = audioPlayer.getCurrentTrackName();
+    if (track.length() == 0) {
+        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+    }
+    if (track.length() > 12) {
+        track = track.substring(0, 10) + "..";
+    }
+    char headerBuf[32];
+    snprintf(headerBuf, sizeof(headerBuf), "[PLASMA] %s", track.c_str());
+    u8g2.drawStr(0, 10, headerBuf);
+    u8g2.drawHLine(0, 12, 128);
+
+    float energy = (rmsLevel / 300.0f);
     if (energy > 2.5f) energy = 2.5f;
     float t = millis() * 0.002f * (1.0f + energy);
 
@@ -308,9 +498,20 @@ void SpectrumAnalyzer::drawStarfield() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 10, "Starfield Audio");
 
-    int warp = (int)(rmsLevel / 80.0f);
+    String track = audioPlayer.getCurrentTrackName();
+    if (track.length() == 0) {
+        track = audioPlayer.isPlaying() ? "Live WAV" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+    }
+    if (track.length() > 13) {
+        track = track.substring(0, 11) + "..";
+    }
+    char headerBuf[32];
+    snprintf(headerBuf, sizeof(headerBuf), "[STAR] %s", track.c_str());
+    u8g2.drawStr(0, 10, headerBuf);
+    u8g2.drawHLine(0, 12, 128);
+
+    int warp = (int)(rmsLevel / 60.0f);
     if (warp > 12) warp = 12;
 
     for (int i = 0; i < 20; i++) {

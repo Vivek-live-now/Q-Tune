@@ -89,9 +89,9 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 
 On startup, Q-Tune launches into the **Unified Home Menu**, providing instant access to all core applications:
 
-1. **Music Player**: Full standalone playback engine with track listing, status, progress bar, digital volume, and repeat/shuffle modes.
-2. **Spectrum Visualizer**: Real-time 16-band FFT audio visualizer (Bar Spectrum, Waveform, MilkDrop Plasma, Starfield) powered by INMP441 MEMS mic.
-3. **Hardware Diagnostics**: 10-point interactive diagnostic suite with return-to-menu navigation.
+1. **Music Player**: Full standalone playback engine with track listing, status, live 8-band mini-equalizer HUD, progress bar, digital volume, and repeat/shuffle modes.
+2. **Spectrum Visualizer**: Real-time live WAV stream visualizer (16-Band Spectrum with Peak-Hold caps, Oscilloscope Waveform, MilkDrop Plasma, Starfield) reacting directly to live decoded WAV audio playing from SD card.
+3. **Hardware Diagnostics**: 10-point interactive diagnostic suite (including dedicated INMP441 MEMS microphone hardware test) with return-to-menu navigation.
 4. **System Info**: Live VBAT voltage, battery %, CPU frequency profile, volume %, and SD mount status.
 
 ---
@@ -111,6 +111,10 @@ On startup, Q-Tune launches into the **Unified Home Menu**, providing instant ac
 | **Now Playing** | UP / DOWN (Short) | Previous / Next track |
 | **Now Playing** | UP / DOWN (Hold >450ms) | Digital Volume Up / Down (with on-screen overlay) |
 | **Now Playing** | CANCEL (Short) | Return to Track List |
+| **Visualizer Mode** | UP / DOWN (Short) | Previous / Next visualizer preset (`BARS` ↔ `WAVE` ↔ `PLASMA` ↔ `STAR`) |
+| **Visualizer Mode** | OK / SEL (Short) | Toggle Play / Pause |
+| **Visualizer Mode** | UP / DOWN (Hold >450ms) | Digital Volume Up / Down |
+| **Visualizer Mode** | CANCEL (Short / Hold) | Return to Main Menu (Playback continues in background) |
 | **Any Screen** | CANCEL (Hold >450ms) | Global escape to Main Menu |
 
 ---
@@ -121,7 +125,8 @@ Q-Tune leverages the ESP32-S3 dual-core LX7 processor to guarantee stutter-free 
 - **Core 0 (Audio Engine Task)**: Dedicated FreeRTOS background task continuously streams audio samples to I2S DMA with zero starvation.
 - **Core 1 (UI & Peripherals)**: Handles OLED rendering, button debouncing, LED animations, and battery monitoring.
 - **Multi-Core SPI Mutex**: Thread-safe hardware arbitration (`spiBusMutex`) prevents bus contention between the SPI microSD card and SPI OLED display.
-- **Digital Volume Scaling**: Non-linear quadratic perceptual volume curve (`(vol / 100)^2 * 256`) applied using fast fixed-point arithmetic.
+- **Lock-Free Visualizer Tap**: Real-time 512-sample circular ring buffer passes live decoded 16-bit PCM WAV audio from Core 0 directly to Core 1 without taking locks or interrupting DMA transmission.
+- **Digital Volume Scaling**: Non-linear quadratic perceptual volume curve (`(vol / 100)^2 * 256`) applied using fast fixed-point arithmetic. Pre-attenuation audio taps ensure visualizers stay vibrant regardless of listening volume.
 
 ---
 

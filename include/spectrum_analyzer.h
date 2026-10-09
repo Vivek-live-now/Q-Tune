@@ -20,18 +20,47 @@ public:
     bool start();
     void stop();
     bool isRunning() const { return active; }
+
+    // Live WAV decoding stream input (Thread-safe, non-blocking tap called by AudioPlayer)
+    void feedSamples(const int16_t *samples, size_t count, uint8_t channels = 1);
+    void sampleAudioStream();
+    void clearSamples();
+
+    // Hardware microphone sampling (Retained for Diagnostics hardware test)
     void sampleMicrophone();
+
+    // Preset management & rendering
+    void render();
     void render(VisualizerPreset preset);
     void nextPreset();
+    void previousPreset();
+    VisualizerPreset getPreset() const { return currentPreset; }
+    void setPreset(VisualizerPreset preset) { currentPreset = preset; }
+    const char* getPresetName() const;
+
+    // Mini spectrum equalizer renderer for player screen HUD
+    void renderMiniBars(U8G2 &u8g2, int x, int y, int width, int height);
+
     float getPeakLevel() const { return peakLevel; }
     float getRMSLevel() const { return rmsLevel; }
+    const uint8_t* getBands() const { return bands; }
 
 private:
     static const size_t SAMPLE_SIZE = 128;
-    int32_t micBuffer[SAMPLE_SIZE];
+    static const size_t RING_BUFFER_SIZE = 512;
+
+    int32_t micBuffer[SAMPLE_SIZE]; // Working buffer for FFT / Waveform
+    int16_t ringBuffer[RING_BUFFER_SIZE]; // Lock-free circular sample tap from AudioPlayer
+    volatile size_t ringHead;
+    unsigned long lastSampleFeedMs;
+
     uint8_t bands[16];
+    uint8_t peakHold[16];
+    uint8_t peakDecayTimer[16];
+
     VisualizerPreset currentPreset;
     bool active;
+    bool micHardwareInitialized;
     float peakLevel;
     float rmsLevel;
 

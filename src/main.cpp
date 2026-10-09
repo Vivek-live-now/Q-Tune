@@ -70,9 +70,10 @@ void updateMainMenu() {
                 break;
             case 1:
                 currentMode = MODE_VISUALIZER;
-                audioPlayer.stopAudioTask();
-                audioPlayer.stop();
                 spectrumAnalyzer.start();
+                if (!audioPlayer.isPlaying() && !audioPlayer.isPaused()) {
+                    uiPlayer.playNextTrack();
+                }
                 break;
             case 2:
                 currentMode = MODE_DIAGNOSTICS;
@@ -86,16 +87,36 @@ void updateMainMenu() {
 }
 
 void updateVisualizerMode() {
-    spectrumAnalyzer.sampleMicrophone();
-    spectrumAnalyzer.render(PRESET_BAR_SPECTRUM);
+    spectrumAnalyzer.sampleAudioStream();
+    spectrumAnalyzer.render();
 
     ButtonEvent evt = buttonManager.update();
     if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
         spectrumAnalyzer.stop();
-        audioPlayer.begin();
         currentMode = MODE_MAIN_MENU;
     } else if (evt == BTN_EVENT_DN_PRESS) {
         spectrumAnalyzer.nextPreset();
+        ledManager.triggerPulse(CRGB::Magenta, 1, 80);
+    } else if (evt == BTN_EVENT_UP_PRESS) {
+        spectrumAnalyzer.previousPreset();
+        ledManager.triggerPulse(CRGB::Magenta, 1, 80);
+    } else if (evt == BTN_EVENT_SEL_PRESS) {
+        if (audioPlayer.isPlaying()) {
+            audioPlayer.pause();
+            ledManager.setColor(CRGB::Orange);
+        } else if (audioPlayer.isPaused()) {
+            audioPlayer.resume();
+            ledManager.setMode(LedMode::BREATHING);
+        } else {
+            uiPlayer.playNextTrack();
+            ledManager.setMode(LedMode::BREATHING);
+        }
+    } else if (evt == BTN_EVENT_UP_HOLD) {
+        audioPlayer.volumeUp(5);
+        ledManager.triggerPulse(CRGB::Green, 1, 60);
+    } else if (evt == BTN_EVENT_DN_HOLD) {
+        audioPlayer.volumeDown(5);
+        ledManager.triggerPulse(CRGB::Red, 1, 60);
     }
 }
 

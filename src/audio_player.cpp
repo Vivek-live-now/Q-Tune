@@ -1,8 +1,9 @@
 #include "audio_player.h"
+#include "spectrum_analyzer.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
-    bytesPlayed(0), totalDataBytes(0), dataOffset(44),
+    bytesPlayed(0), totalDataBytes(0), dataOffset(44), currentTrackPath(""),
     currentVolume(80), volumeScale(163),
     audioTaskHandle(NULL), taskRunning(false) {}
 
@@ -143,6 +144,7 @@ bool AudioPlayer::playFile(const String &path) {
 
     setupI2S(currentWavHeader.sampleRate, currentWavHeader.numChannels, currentWavHeader.bitsPerSample);
 
+    currentTrackPath = path;
     playing = true;
     paused = false;
     return true;
@@ -175,6 +177,7 @@ void AudioPlayer::update() {
 
         if (bytesRead > 0) {
             int samples = bytesRead / sizeof(int16_t);
+            spectrumAnalyzer.feedSamples(monoBuf, samples, 1);
             for (int i = 0; i < samples; i++) {
                 int16_t sample = monoBuf[i];
                 if (volumeScale < 256) {
@@ -212,6 +215,9 @@ void AudioPlayer::update() {
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (bytesRead > 0) {
+            int frameCount = bytesRead / (sizeof(int16_t) * 2);
+            spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
+
             if (volumeScale < 256) {
                 int16_t *samples = (int16_t*)buffer;
                 int sampleCount = bytesRead / sizeof(int16_t);
@@ -240,6 +246,7 @@ void AudioPlayer::resume() {
 void AudioPlayer::stop() {
     playing = false;
     paused = false;
+    currentTrackPath = "";
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     if (wavFile) {
         wavFile.close();
@@ -247,6 +254,7 @@ void AudioPlayer::stop() {
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     bytesPlayed = 0;
     i2s_zero_dma_buffer(I2S_NUM);
+    spectrumAnalyzer.clearSamples();
 }
 
 bool AudioPlayer::isPlaying() const {
@@ -285,6 +293,7 @@ void AudioPlayer::playTestTone(uint16_t frequencyHz, uint16_t durationMs) {
         }
         size_t bytesWritten = 0;
         i2s_write(I2S_NUM, toneBuffer, chunkSamples * 4, &bytesWritten, portMAX_DELAY);
+        spectrumAnalyzer.feedSamples(toneBuffer, chunkSamples, 2);
         samplesGenerated += chunkSamples;
     }
     i2s_zero_dma_buffer(I2S_NUM);
@@ -358,6 +367,19 @@ void AudioPlayer::stopAudioTask() {
 
 bool AudioPlayer::isAudioTaskRunning() const {
     return taskRunning && (audioTaskHandle != NULL);
+}
+
+String AudioPlayer::getCurrentTrackPath() const {
+    return currentTrackPath;
+}
+
+String AudioPlayer::getCurrentTrackName() const {
+    if (currentTrackPath.length() == 0) return "";
+    int lastSlash = currentTrackPath.lastIndexOf('/');
+    if (lastSlash >= 0) {
+        return currentTrackPath.substring(lastSlash + 1);
+    }
+    return currentTrackPath;
 }
 
 AudioPlayer audioPlayer;

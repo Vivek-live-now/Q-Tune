@@ -1,6 +1,7 @@
 #include "ui_player.h"
 #include "led_manager.h"
 #include "battery.h"
+#include "spectrum_analyzer.h"
 
 UIPlayer::UIPlayer() :
     currentTrackIndex(0),
@@ -216,6 +217,10 @@ void UIPlayer::renderPlayer() {
     char timeBuf[32];
     snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
     u8g2.drawStr(0, 47, timeBuf);
+
+    // Mini Spectrum Visualizer (Live WAV decoding tap)
+    spectrumAnalyzer.sampleAudioStream();
+    spectrumAnalyzer.renderMiniBars(u8g2, 92, 28, 34, 18);
 
     // Progress bar
     u8g2.drawFrame(0, 53, 128, 7);

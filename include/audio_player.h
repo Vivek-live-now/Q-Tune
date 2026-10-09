@@ -53,6 +53,10 @@ public:
     void stopAudioTask();
     bool isAudioTaskRunning() const;
 
+    // Track metadata
+    String getCurrentTrackPath() const;
+    String getCurrentTrackName() const;
+
 private:
     bool initialized;
     volatile bool playing;
@@ -63,6 +67,7 @@ private:
     uint32_t bytesPlayed;
     uint32_t totalDataBytes;
     uint32_t dataOffset;
+    String currentTrackPath;
 
     // Digital Volume Scaling (Quadratic perceptual curve)
     uint8_t currentVolume;
