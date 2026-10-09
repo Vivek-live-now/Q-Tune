@@ -606,7 +606,7 @@ void WiFiStreamer::renderUI() {
     u8g2.drawStr(2, 54, dispArtist.c_str());
 
     // Mini spectrum visualizer bar at the bottom
-    spectrumAnalyzer.renderMiniHUD(2, 57, 124, 7);
+    spectrumAnalyzer.renderMiniBars(u8g2, 2, 57, 124, 7);
 
     display.sendBuffer();
 }
