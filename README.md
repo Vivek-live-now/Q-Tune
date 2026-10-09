@@ -91,8 +91,49 @@ On startup, Q-Tune launches into the **Unified Home Menu**, providing instant ac
 
 1. **Music Player**: Full standalone playback engine with track listing, status, live 8-band mini-equalizer HUD, progress bar, digital volume, and repeat/shuffle modes.
 2. **Spectrum Visualizer**: Real-time live WAV stream visualizer (16-Band Spectrum with Peak-Hold caps, Oscilloscope Waveform, MilkDrop Plasma, Starfield) reacting directly to live decoded WAV audio playing from SD card.
-3. **Hardware Diagnostics**: 10-point interactive diagnostic suite (including dedicated INMP441 MEMS microphone hardware test) with return-to-menu navigation.
-4. **System Info**: Live VBAT voltage, battery %, CPU frequency profile, volume %, and SD mount status.
+3. **RGB Light Effects**: Dedicated music-reactive lighting engine with 6 real-time audio-driven modes, base color selection, brightness control, sensitivity tuning, and test pulse.
+4. **Hardware Diagnostics**: 10-point interactive diagnostic suite (including dedicated INMP441 MEMS microphone hardware test) with return-to-menu navigation.
+5. **System Info**: Live VBAT voltage, battery %, CPU frequency profile, volume %, and SD mount status.
+
+---
+
+## Music-Reactive RGB Lighting Engine
+
+Q-Tune features an advanced audio-reactive lighting subsystem driving the onboard WS2812 NeoPixel (GPIO 48) at 50 FPS (~20ms), fed directly by the Core 0 lock-free PCM audio tap and 16-band FFT engine:
+
+### 1. Music-Reactive Modes
+- **BASS PULSE (`REACT_BASS_PULSE`)**: Taps sub-bass and kick drum energy (bands 0–2). Delivers instant transient attack on drum kicks followed by smooth, organic exponential decay. User-selected base color scales with beat energy.
+- **ENERGY VU (`REACT_ENERGY_VU`)**: Real-time loudness VU meter mapping RMS audio power to a dynamic color gradient:
+  - Quiet ($0\%-35\%$): Cyan $\to$ Forest Green
+  - Moderate ($35\%-70\%$): Green $\to$ Amber / Yellow
+  - Peak ($70\%-100\%$): Amber $\to$ Deep Crimson Red
+- **SPECTRUM HUE (`REACT_SPECTRUM_HUE`)**: Real-time harmonic frequency centroid mapping:
+  - Bass-dominant (0–250 Hz) $\to$ Warm Red / Orange
+  - Mid-dominant (250–2000 Hz) $\to$ Emerald Green / Gold
+  - Treble-dominant (2000+ Hz) $\to$ Cyan / Electric Blue / Violet
+  - Smooth hue interpolation tracks melodic changes while overall brightness tracks audio power.
+- **RAINBOW FLOW (`REACT_RAINBOW_FLOW`)**: Continuous 360° rainbow color wheel. High-frequency percussion and hi-hats dynamically accelerate wheel spin speed, while bass kicks pulse brightness.
+- **FIRE FLAME (`REACT_FIRE`)**: Realistic campfire / ember simulation. Natural red/amber flame micro-flickering that surges into intense gold/white flares on audio transients.
+- **DISCO STROBE (`REACT_DISCO_FLASH`)**: High-energy dance club strobe. Detects sudden bass transient deltas ($>7$ dB jumps) to trigger rapid flashes that shift to contrasting complementary hues via golden-ratio angle stepping ($+77^\circ$).
+
+### 2. Resting Ambient & Playback Lifecycle
+- When music is paused, stopped, or silent, the reactive modes smoothly transition to a dim, soothing resting breath ($14-46$ brightness, $0.24$ Hz) to conserve power while indicating the player is alive.
+- User-selected lighting mode persists across track changes, pauses, and resumes via dedicated playback lifecycle hooks (`onPlaybackStart`, `onPlaybackPause`, `onPlaybackResume`, `onPlaybackStop`).
+
+### 3. Non-Reactive Modes & Hardware Safety
+- **BREATHING**: Soothing 0.5 Hz rhythmic pulsing of the chosen color.
+- **RAINBOW WHEEL**: Smooth autonomous color wheel cycling.
+- **SOLID COLOR**: Constant static illumination from the 8-color palette.
+- **OFF**: Full LED sleep (0 current draw).
+- **CRITICAL BATTERY OVERRIDE**: Battery sentry ($V_{\text{BAT}} \le 10\%$) immediately overrides any active lighting with a sharp Red warning strobe.
+
+### 4. Interactive Configuration Menu
+Accessible directly from Main Menu item `3. RGB Light Effects`:
+- **Mode**: Cycle across all 6 reactive and 4 classic modes with live preview.
+- **Color**: Cycle through 8 vibrant hues (`CYAN`, `BLUE`, `GREEN`, `YELLOW`, `ORANGE`, `RED`, `MAGENTA`, `WHITE`).
+- **Brightness**: 5-step digital dimming (`10%`, `24%`, `47%`, `71%`, `100%`).
+- **Sensitivity**: 3-stage gain multiplier (`LOW` $0.7\times$, `NORM` $1.0\times$, `HIGH` $1.45\times$) for quiet acoustic or compressed EDM tracks.
+- **Test Pulse**: Trigger white verification double-flash.
 
 ---
 

@@ -18,6 +18,7 @@ enum AppMode {
     MODE_MAIN_MENU,
     MODE_PLAYER,
     MODE_VISUALIZER,
+    MODE_RGB_EFFECTS,
     MODE_DIAGNOSTICS,
     MODE_SYSTEM_INFO
 };
@@ -25,12 +26,13 @@ enum AppMode {
 AppMode currentMode = MODE_MAIN_MENU;
 int menuSelection = 0;
 int menuScrollOffset = 0;
-const int MAIN_MENU_COUNT = 4;
+const int MAIN_MENU_COUNT = 5;
 const char* menuLabels[] = {
     "1. Music Player",
     "2. Spectrum Visualizer",
-    "3. Diagnostics",
-    "4. System Info"
+    "3. RGB Light Effects",
+    "4. Diagnostics",
+    "5. System Info"
 };
 
 void renderMainMenu() {
@@ -41,8 +43,9 @@ void renderMainMenu() {
     String vals[MAIN_MENU_COUNT];
     vals[0] = audioPlayer.isPlaying() ? "[PLAY]" : (audioPlayer.isPaused() ? "[PAUS]" : "[IDLE]");
     vals[1] = String("[") + spectrumAnalyzer.getPresetName() + "]";
-    vals[2] = "[10]";
-    vals[3] = "[INFO]";
+    vals[2] = String("[") + ledManager.getShortModeName() + "]";
+    vals[3] = "[10]";
+    vals[4] = "[INFO]";
 
     display.drawStandardMenu("Q-TUNES", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -72,16 +75,83 @@ void updateMainMenu() {
                 }
                 break;
             case 2:
+                currentMode = MODE_RGB_EFFECTS;
+                break;
+            case 3:
                 currentMode = MODE_DIAGNOSTICS;
                 diagnostics.begin();
                 break;
-            case 3:
+            case 4:
                 currentMode = MODE_SYSTEM_INFO;
                 break;
         }
     } else if (evt == BTN_EVENT_CANCEL_HOLD) {
         ledManager.triggerPulse(CRGB::Red, 2, 100);
         powerManager.safeShutdown("USER POWER OFF");
+    }
+}
+
+int rgbMenuSelection = 0;
+int rgbMenuScrollOffset = 0;
+const int RGB_MENU_COUNT = 6;
+const char* rgbMenuLabels[] = {
+    "Mode",
+    "Color",
+    "Brightness",
+    "Sensitivity",
+    "Test Pulse",
+    "Back to Menu"
+};
+
+void updateRgbEffectsMode() {
+    display.clear();
+    char batBuf[16];
+    snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
+
+    char brBuf[12];
+    snprintf(brBuf, sizeof(brBuf), "%d%%", (ledManager.getBrightness() * 100) / 255);
+
+    String vals[RGB_MENU_COUNT];
+    vals[0] = String("[") + ledManager.getModeName() + "]";
+    vals[1] = String("[") + ledManager.getColorName() + "]";
+    vals[2] = String("[") + brBuf + "]";
+    vals[3] = String("[") + ledManager.getSensitivityName() + "]";
+    vals[4] = "[PULSE]";
+    vals[5] = "[EXIT]";
+
+    display.drawStandardMenu("RGB LIGHTS", rgbMenuLabels, RGB_MENU_COUNT, rgbMenuSelection, rgbMenuScrollOffset, vals, batBuf);
+    display.sendBuffer();
+
+    ButtonEvent evt = buttonManager.update();
+    if (evt == BTN_EVENT_UP_PRESS) {
+        Display::navigateMenu(rgbMenuSelection, rgbMenuScrollOffset, RGB_MENU_COUNT, -1);
+        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+    } else if (evt == BTN_EVENT_DN_PRESS) {
+        Display::navigateMenu(rgbMenuSelection, rgbMenuScrollOffset, RGB_MENU_COUNT, +1);
+        ledManager.triggerPulse(CRGB::Blue, 1, 40);
+    } else if (evt == BTN_EVENT_SEL_PRESS) {
+        switch (rgbMenuSelection) {
+            case 0:
+                ledManager.cycleMode();
+                break;
+            case 1:
+                ledManager.cycleColor();
+                break;
+            case 2:
+                ledManager.cycleBrightness();
+                break;
+            case 3:
+                ledManager.cycleSensitivity();
+                break;
+            case 4:
+                ledManager.triggerPulse(CRGB::White, 2, 70);
+                break;
+            case 5:
+                currentMode = MODE_MAIN_MENU;
+                break;
+        }
+    } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+        currentMode = MODE_MAIN_MENU;
     }
 }
 
@@ -102,13 +172,13 @@ void updateVisualizerMode() {
     } else if (evt == BTN_EVENT_SEL_PRESS) {
         if (audioPlayer.isPlaying()) {
             audioPlayer.pause();
-            ledManager.setColor(CRGB::Orange);
+            ledManager.onPlaybackPause();
         } else if (audioPlayer.isPaused()) {
             audioPlayer.resume();
-            ledManager.setMode(LedMode::BREATHING);
+            ledManager.onPlaybackResume();
         } else {
             uiPlayer.playNextTrack();
-            ledManager.setMode(LedMode::BREATHING);
+            ledManager.onPlaybackStart();
         }
     } else if (evt == BTN_EVENT_UP_HOLD) {
         audioPlayer.volumeUp(5);
@@ -189,6 +259,9 @@ void loop() {
             break;
         case MODE_VISUALIZER:
             updateVisualizerMode();
+            break;
+        case MODE_RGB_EFFECTS:
+            updateRgbEffectsMode();
             break;
         case MODE_DIAGNOSTICS:
             if (!diagnostics.runMenu()) {

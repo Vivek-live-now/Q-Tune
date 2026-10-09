@@ -266,7 +266,7 @@ def test_simd_accel_engine():
     print("  [PASS] 1024-byte OLED framebuffer SIMD invert and XOR operations verified.")
 
 def test_led_manager_modes():
-    print("\n--- 7. Non-Blocking FastLED Engine Test ---")
+    print("\n--- 7. Non-Blocking FastLED & Music-Reactive Lighting Engine Test ---")
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     led_h = os.path.join(base_dir, "include", "led_manager.h")
     led_cpp = os.path.join(base_dir, "src", "led_manager.cpp")
@@ -282,7 +282,26 @@ def test_led_manager_modes():
     assert "void loop();" in h_src
     assert "triggerPulse" in h_src
     assert "bat_pct <= 10" in cpp_src
-    print("  [PASS] FastLED non-blocking loop, beat pulse, and low battery override verified.")
+
+    # Music-reactive lighting modes verification
+    assert "REACT_BASS_PULSE" in h_src
+    assert "REACT_ENERGY_VU" in h_src
+    assert "REACT_SPECTRUM_HUE" in h_src
+    assert "REACT_RAINBOW_FLOW" in h_src
+    assert "REACT_FIRE" in h_src
+    assert "REACT_DISCO_FLASH" in h_src
+
+    # Interactive controls & lifecycle verification
+    assert "cycleMode" in h_src
+    assert "cycleColor" in h_src
+    assert "cycleBrightness" in h_src
+    assert "cycleSensitivity" in h_src
+    assert "onPlaybackStart" in h_src
+    assert "onPlaybackResume" in h_src
+    assert "onPlaybackPause" in h_src
+    assert "onPlaybackStop" in h_src
+    assert "updateReactiveModes" in cpp_src
+    print("  [PASS] FastLED non-blocking loop, 6 music-reactive modes, UI controls, and battery override verified.")
 
 def test_inmp441_microphone_pipeline():
     print("\n--- 8. INMP441 MEMS Microphone & Spectrum Analyzer Pipeline Test ---")
@@ -433,6 +452,7 @@ def test_app_shell_and_mode_switching():
         assert "MODE_MAIN_MENU" in m_text
         assert "MODE_PLAYER" in m_text
         assert "MODE_VISUALIZER" in m_text
+        assert "MODE_RGB_EFFECTS" in m_text
         assert "MODE_DIAGNOSTICS" in m_text
         assert "MODE_SYSTEM_INFO" in m_text
         assert "updateMainMenu()" in m_text

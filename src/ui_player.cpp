@@ -105,7 +105,7 @@ bool UIPlayer::update() {
             } else if (!trackList.empty()) {
                 inListMode = false;
                 audioPlayer.playFile(trackList[currentTrackIndex]);
-                ledManager.setMode(LedMode::BREATHING);
+                ledManager.onPlaybackStart();
             } else {
                 refreshTrackList();
             }
@@ -118,13 +118,13 @@ bool UIPlayer::update() {
         if (evt == BTN_EVENT_SEL_PRESS) {
             if (audioPlayer.isPlaying()) {
                 audioPlayer.pause();
-                ledManager.setColor(CRGB::Orange);
+                ledManager.onPlaybackPause();
             } else if (audioPlayer.isPaused()) {
                 audioPlayer.resume();
-                ledManager.setMode(LedMode::BREATHING);
+                ledManager.onPlaybackResume();
             } else {
                 audioPlayer.playFile(trackList[currentTrackIndex]);
-                ledManager.setMode(LedMode::BREATHING);
+                ledManager.onPlaybackStart();
             }
         } else if (evt == BTN_EVENT_OK_HOLD) {
             cyclePlaybackMode();
@@ -143,7 +143,7 @@ bool UIPlayer::update() {
             showVolumeOverlay();
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             inListMode = true;
-            ledManager.off();
+            ledManager.onPlaybackStop();
         }
 
         renderPlayer();
