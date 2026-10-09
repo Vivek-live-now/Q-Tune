@@ -161,6 +161,7 @@ bool AudioPlayer::playFile(const String &path) {
         currentTrackPath = path;
         playing = true;
         paused = false;
+        sdManager.addRecentTrack(path);
         return true;
     } else if (fmt == AUDIO_FORMAT_MP3) {
         if (!mp3Decoder.open(wavFile)) {
@@ -179,6 +180,7 @@ bool AudioPlayer::playFile(const String &path) {
         currentTrackPath = path;
         playing = true;
         paused = false;
+        sdManager.addRecentTrack(path);
         return true;
     } else if (fmt == AUDIO_FORMAT_M4A || fmt == AUDIO_FORMAT_AAC) {
         if (!m4aDecoder.open(wavFile)) {
@@ -197,6 +199,7 @@ bool AudioPlayer::playFile(const String &path) {
         currentTrackPath = path;
         playing = true;
         paused = false;
+        sdManager.addRecentTrack(path);
         return true;
     }
 
@@ -214,6 +217,7 @@ bool AudioPlayer::playFile(const String &path) {
         currentTrackPath = path;
         playing = true;
         paused = false;
+        sdManager.addRecentTrack(path);
         return true;
     }
 
@@ -250,6 +254,7 @@ bool AudioPlayer::playFile(const String &path) {
     currentTrackPath = path;
     playing = true;
     paused = false;
+    sdManager.addRecentTrack(path);
     return true;
 }
 
@@ -747,6 +752,30 @@ const char* AudioPlayer::getFormatName() const {
         case 4: return "M4A";
         default: return "PCM";
     }
+}
+
+uint32_t AudioPlayer::getSampleRate() const {
+    return currentSampleRate > 0 ? currentSampleRate : 44100;
+}
+
+uint16_t AudioPlayer::getChannels() const {
+    return currentChannels > 0 ? currentChannels : 2;
+}
+
+uint16_t AudioPlayer::getBitsPerSample() const {
+    return currentBitsPerSample > 0 ? currentBitsPerSample : 16;
+}
+
+uint32_t AudioPlayer::getTotalBytes() const {
+    return totalDataBytes;
+}
+
+uint32_t AudioPlayer::getBitrateKbps() const {
+    uint32_t durMs = getDurationMs();
+    if (durMs > 0 && totalDataBytes > 0) {
+        return (uint32_t)(((uint64_t)totalDataBytes * 8ULL) / durMs);
+    }
+    return (getSampleRate() * getChannels() * getBitsPerSample()) / 1000;
 }
 
 AudioPlayer audioPlayer;

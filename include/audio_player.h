@@ -76,6 +76,11 @@ public:
     bool isMP3() const;
     bool isM4A() const;
     const char* getFormatName() const;
+    uint32_t getSampleRate() const;
+    uint16_t getChannels() const;
+    uint16_t getBitsPerSample() const;
+    uint32_t getTotalBytes() const;
+    uint32_t getBitrateKbps() const;
     void closeFiles();
 
 private:

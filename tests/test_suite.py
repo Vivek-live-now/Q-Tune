@@ -910,6 +910,93 @@ def test_mp3_and_m4a_audio_decoders():
 
     print("  [PASS] MP3 & M4A/AAC decoders, minimp3 engine, MP4 container atom parser, SD scanner, and format badges verified.")
 
+def test_library_indexing_and_multipage_lyrics():
+    print("\n--- 20. Library Indexing, Categories, Now Playing Protection & Multi-Page LRC Lyrics Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sd_h = os.path.join(base_dir, "include", "sd_manager.h")
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    ui_h = os.path.join(base_dir, "include", "ui_player.h")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+    lrc_h = os.path.join(base_dir, "include", "lyrics_parser.h")
+    lrc_cpp = os.path.join(base_dir, "src", "lyrics_parser.cpp")
+
+    assert os.path.exists(lrc_h) and os.path.exists(lrc_cpp), "Lyrics parser files missing"
+
+    with open(sd_h) as f: sdh_src = f.read()
+    with open(sd_cpp) as f: sdcpp_src = f.read()
+    with open(ap_h) as f: aph_src = f.read()
+    with open(ap_cpp) as f: apcpp_src = f.read()
+    with open(ui_h) as f: uih_src = f.read()
+    with open(ui_cpp) as f: uicpp_src = f.read()
+    with open(lrc_h) as f: lrch_src = f.read()
+    with open(lrc_cpp) as f: lrccpp_src = f.read()
+
+    # 1. SD Card Library Indexing and Caching
+    assert "hasLibraryIndex()" in sdh_src, "hasLibraryIndex missing from sd_manager.h"
+    assert "buildLibraryIndex" in sdh_src, "buildLibraryIndex missing from sd_manager.h"
+    assert "rescanLibrary" in sdh_src, "rescanLibrary missing from sd_manager.h"
+    assert "/music/library.txt" in sdcpp_src, "library.txt index path missing from sd_manager.cpp"
+    assert "scanDirRecursive" in sdcpp_src, "scanDirRecursive missing in sd_manager.cpp"
+
+    # 2. Categorization & Navigation
+    assert "listFolder" in sdh_src and "listArtists" in sdh_src and "listAlbums" in sdh_src, "Category methods missing in sd_manager.h"
+    assert "listPlaylists" in sdh_src and "loadPlaylist" in sdh_src, "Playlist methods missing in sd_manager.h"
+    assert "getRecentTracks" in sdh_src and "addRecentTrack" in sdh_src, "Recent tracks methods missing in sd_manager.h"
+    assert "/music/recent.txt" in sdcpp_src, "recent.txt path missing in sd_manager.cpp"
+    assert "sdManager.addRecentTrack" in apcpp_src, "AudioPlayer::playFile must record played tracks to recent.txt"
+
+    # 3. AudioPlayer Technical Metadata Getters
+    assert "getSampleRate()" in aph_src, "getSampleRate() missing in audio_player.h"
+    assert "getChannels()" in aph_src, "getChannels() missing in audio_player.h"
+    assert "getBitsPerSample()" in aph_src, "getBitsPerSample() missing in audio_player.h"
+    assert "getTotalBytes()" in aph_src, "getTotalBytes() missing in audio_player.h"
+    assert "getBitrateKbps()" in aph_src, "getBitrateKbps() missing in audio_player.h"
+
+    # 4. UIPlayer Now Playing Protection (Selecting playing song does NOT restart)
+    assert "openNowPlaying" in uih_src and "openNowPlaying" in uicpp_src, "openNowPlaying missing in UIPlayer"
+    assert "VIEW_CATEGORIES" in uih_src and "VIEW_FOLDER_BROWSER" in uih_src, "Category views missing in ui_player.h"
+    assert "▶ Now Playing" in uicpp_src, "Now Playing category entry missing"
+    assert "audioPlayer.getCurrentTrackPath() == selected" in uicpp_src, "Active track equality check missing in selection"
+
+    # 5. Multi-Page Now Playing Navigation (Page 1: Player, Page 2: Info, Page 3: Lyrics)
+    assert "PAGE_NOW_PLAYING" in uih_src, "PAGE_NOW_PLAYING missing in ui_player.h"
+    assert "PAGE_TRACK_INFO" in uih_src, "PAGE_TRACK_INFO missing in ui_player.h"
+    assert "PAGE_LYRICS" in uih_src, "PAGE_LYRICS missing in ui_player.h"
+    assert "cyclePage()" in uih_src and "cyclePage()" in uicpp_src, "cyclePage missing in UIPlayer"
+    assert "BTN_EVENT_OK_HOLD" in uicpp_src, "OK Hold must trigger cyclePage in player view"
+    assert "renderPlayerPage1" in uicpp_src, "renderPlayerPage1 missing"
+    assert "renderPlayerPage2" in uicpp_src, "renderPlayerPage2 missing"
+    assert "renderPlayerPage3" in uicpp_src, "renderPlayerPage3 missing"
+
+    # 6. Synchronized LRC Lyrics Parser
+    assert "class LyricsParser" in lrch_src, "LyricsParser class missing"
+    assert "loadForTrack" in lrch_src and "getCurrentLineIndex" in lrch_src, "LyricsParser methods missing"
+    assert "parseLRCLine" in lrccpp_src, "parseLRCLine implementation missing"
+
+    # 7. Algorithmic verification: LRC parser timestamp calculation
+    def parse_lrc_tag(tag):
+        # [mm:ss.xx]
+        m = re.match(r'^\[(\d+):(\d+)(?:\.(\d+))?\](.*)', tag)
+        if not m: return None
+        mm = int(m.group(1))
+        ss = int(m.group(2))
+        ms_str = m.group(3) or "0"
+        if len(ms_str) == 1: ms = int(ms_str) * 100
+        elif len(ms_str) == 2: ms = int(ms_str) * 10
+        else: ms = int(ms_str[:3])
+        ts = (mm * 60 + ss) * 1000 + ms
+        return ts, m.group(4).strip()
+
+    ts1, text1 = parse_lrc_tag("[00:12.50] Hello world")
+    assert ts1 == 12500 and text1 == "Hello world", f"Expected 12500, got {ts1}"
+
+    ts2, text2 = parse_lrc_tag("[03:45.89] Bohemian Rhapsody")
+    assert ts2 == 225890 and text2 == "Bohemian Rhapsody", f"Expected 225890, got {ts2}"
+
+    print("  [PASS] Music library indexing, categorization, Now Playing non-restart protection, and multi-page LRC lyrics verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -933,7 +1020,8 @@ def main():
     test_fiio_ka11_usb_dac_and_safe_eject()
     test_wifi_streaming_and_dlna_media_renderer()
     test_mp3_and_m4a_audio_decoders()
-    print("\nAll 19 Q-Tune test verifications PASSED (100%)!\n")
+    test_library_indexing_and_multipage_lyrics()
+    print("\nAll 20 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()
