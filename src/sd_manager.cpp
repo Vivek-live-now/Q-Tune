@@ -1,9 +1,19 @@
 #include "sd_manager.h"
 #include "audio_player.h"
 
+#if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+#include <driver/gpio.h>
+#endif
+
 SDManager::SDManager() : mounted(false), safeToRemove(true) {}
 
 bool SDManager::begin() {
+#if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+    // Release any deep-sleep hardware pad holds so SD_CS can toggle freely
+    gpio_hold_dis((gpio_num_t)SD_CS);
+    gpio_deep_sleep_hold_dis();
+#endif
+
     if (spiBusMutex != NULL) {
         xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     }

@@ -677,6 +677,9 @@ def test_sd_safety_mechanisms():
     assert "sdManager.unmount();" in pmcpp_src, "safeShutdown must invoke sdManager.unmount()"
     assert "gpio_hold_en((gpio_num_t)SD_CS);" in pmcpp_src, "Deep sleep must hold SD_CS HIGH"
     assert "gpio_deep_sleep_hold_en();" in pmcpp_src, "Deep sleep must enable GPIO hold"
+    assert "gpio_hold_dis((gpio_num_t)SD_CS);" in pmcpp_src, "PowerManager must release SD_CS hold on boot"
+    assert "gpio_deep_sleep_hold_dis();" in pmcpp_src, "PowerManager must disable deep sleep hold on boot"
+    assert "digitalRead(BTN_CANCEL) == LOW" in pmcpp_src, "enterDeepSleep must wait for CANCEL button release"
 
     # 3. AudioPlayer I/O Watchdog & Safe File Handles
     assert "consecutiveReadErrors" in aph_src, "AudioPlayer must track consecutive read errors"

@@ -9,6 +9,7 @@
 #include <esp_sleep.h>
 #include <esp_pm.h>
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
 #endif
 
 PowerManager powerManager;
@@ -19,6 +20,11 @@ PowerManager::PowerManager() :
     lowVoltageHitCount(0) {}
 
 void PowerManager::begin() {
+#if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+    // Release any deep-sleep GPIO pad holds so SD_CS and all pins can be toggled
+    gpio_hold_dis((gpio_num_t)SD_CS);
+    gpio_deep_sleep_hold_dis();
+#endif
     applyCpuFrequency();
 }
 
@@ -95,6 +101,18 @@ void PowerManager::enterDeepSleep() {
     // Clear and turn off display
     display.clear();
     display.sendBuffer();
+    display.getU8g2().setPowerSave(1);
+
+    // Ensure CANCEL button is physically released before arming wakeup (prevents instant reboot loop)
+    uint32_t waitStart = millis();
+    while (digitalRead(BTN_CANCEL) == LOW && (millis() - waitStart < 5000)) {
+        delay(25);
+    }
+    delay(150); // Debounce mechanical release
+
+    // Maintain RTC pull-up on wake pin so it does not float during deep sleep
+    rtc_gpio_pullup_en((gpio_num_t)BTN_CANCEL);
+    rtc_gpio_pulldown_dis((gpio_num_t)BTN_CANCEL);
 
     esp_sleep_enable_ext0_wakeup((gpio_num_t)BTN_CANCEL, 0); // Wake on CANCEL press (RTC_GPIO16)
     esp_deep_sleep_start();

@@ -166,6 +166,7 @@ Portable audio players risk microSD filesystem corruption from sudden power cuto
 1. **Graceful Power-Down & Sleep Unmount Protocol**:
    - Calling `powerManager.safeShutdown()` halts active audio streams, closes file handles, takes the SPI bus mutex, and invokes `SD.end()`.
    - Forces `SD_CS` (GPIO 8) to `HIGH` (deselected) and locks it during ESP32-S3 deep sleep using `gpio_hold_en((gpio_num_t)SD_CS)` and `gpio_deep_sleep_hold_en()`. This prevents floating lines from causing spurious SPI clocking or card controller wear-leveling corruption while sleeping.
+   - Waits for mechanical CANCEL button release before entering sleep to prevent instant reboot loops, and unlocks the hardware hold latch on boot via `gpio_hold_dis((gpio_num_t)SD_CS)` and `gpio_deep_sleep_hold_dis()` so the card remounts seamlessly upon wake-up.
 
 2. **Critical Low-Battery Auto-Shutdown Sentry**:
    - High volume playback with the MAX98357A amplifier can trigger brownout voltage sag when the LiPo battery is nearly exhausted.
@@ -177,7 +178,7 @@ Portable audio players risk microSD filesystem corruption from sudden power cuto
    - Re-inserting the card and pressing Select remounts the filesystem and rescans the playlist without requiring an ESP32 reboot.
 
 4. **Hot-Unplug & I/O Read Error Watchdog**:
-   - If the microSD card is removed during active playback or suffers read timeouts, the audio engine detects consecutive read failures (`consecutiveReadErrors >= 3`), immediately aborts playback, releases the SPI mutex, closes handles, and triggers `sdManager.notifyCardRemoved()`.
+   - If the microSD card is removed during active playback or suffers read timeouts, the audio engine detects consecutive read failures (`consecutiveReadErrors >= 15`), immediately aborts playback, releases the SPI mutex, closes handles, and triggers `sdManager.notifyCardRemoved()`.
 
 5. **Mutual Bus Exclusion & Read-Only Guarantees**:
    - Both `OLED_CS` and `SD_CS` are mutually de-asserted (HIGH) before alternate bus transfers begin over the shared SPI bus (GPIO 5, 7).
