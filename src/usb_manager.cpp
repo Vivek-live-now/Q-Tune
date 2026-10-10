@@ -30,7 +30,8 @@ void USBManager::parkHostBus() {
 }
 
 bool USBManager::begin() {
-    configureHostPins();
+    // Note: Do NOT configure host pull-downs here at boot; GPIO 19 & 20 are used
+    // by native USB Serial CDC. Host pins are configured only upon explicit mount().
     hardwareInitialized = true;
     state = USBAudioState::DISCONNECTED;
     stateChangeTime = millis();

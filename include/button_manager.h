@@ -39,7 +39,7 @@ private:
     Button btnOk;
     Button btnDn;
     Button btnCancel;
-    const unsigned long debounceDelay = 50;
+    const unsigned long debounceDelay = 20;
     const unsigned long holdThreshold = 650;
     const unsigned long repeatInterval = 150;
 

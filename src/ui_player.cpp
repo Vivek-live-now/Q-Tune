@@ -264,7 +264,12 @@ bool UIPlayer::update() {
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             return false; // Exit to Main Menu
         }
-        renderCategories();
+        static unsigned long lastCatRender = 0;
+        unsigned long now = millis();
+        if (evt != BTN_EVENT_NONE || (now - lastCatRender >= 250)) {
+            lastCatRender = now;
+            renderCategories();
+        }
 
     } else if (currentView == VIEW_PLAYER_SETTINGS) {
         // --- Customization Settings Menu ---
@@ -287,7 +292,12 @@ bool UIPlayer::update() {
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             currentView = VIEW_CATEGORIES;
         }
-        renderPlayerSettings();
+        static unsigned long lastSetRender = 0;
+        unsigned long nowSettings = millis();
+        if (evt != BTN_EVENT_NONE || (nowSettings - lastSetRender >= 250)) {
+            lastSetRender = nowSettings;
+            renderPlayerSettings();
+        }
 
     } else if (currentView == VIEW_TRACK_LIST) {
         // --- Track List View ---
@@ -331,7 +341,12 @@ bool UIPlayer::update() {
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             currentView = VIEW_CATEGORIES;
         }
-        renderTrackList();
+        static unsigned long lastTrkRender = 0;
+        unsigned long nowTrk = millis();
+        if (evt != BTN_EVENT_NONE || (nowTrk - lastTrkRender >= 250)) {
+            lastTrkRender = nowTrk;
+            renderTrackList();
+        }
 
     } else if (currentView == VIEW_FOLDER_BROWSER) {
         // --- Hierarchical Folder Browser View ---
@@ -393,7 +408,12 @@ bool UIPlayer::update() {
                 currentView = VIEW_CATEGORIES;
             }
         }
-        renderFolderBrowser();
+        static unsigned long lastFldRender = 0;
+        unsigned long nowFld = millis();
+        if (evt != BTN_EVENT_NONE || (nowFld - lastFldRender >= 250)) {
+            lastFldRender = nowFld;
+            renderFolderBrowser();
+        }
 
     } else {
         // --- Now Playing Multi-Page View (VIEW_PLAYER) ---
@@ -438,7 +458,12 @@ bool UIPlayer::update() {
             }
         }
 
-        renderPlayer();
+        static unsigned long lastPlyRender = 0;
+        unsigned long nowPly = millis();
+        if (evt != BTN_EVENT_NONE || (nowPly - lastPlyRender >= 33)) {
+            lastPlyRender = nowPly;
+            renderPlayer();
+        }
     }
     return true;
 }

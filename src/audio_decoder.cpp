@@ -45,6 +45,13 @@ int AACFlushCodec(HAACDecoder hAACDecoder);
 }
 #endif
 
+#ifndef ERR_AAC_NONE
+#define ERR_AAC_NONE 0
+#endif
+#ifndef ERR_AAC_INDATA_UNDERFLOW
+#define ERR_AAC_INDATA_UNDERFLOW -1
+#endif
+
 extern SemaphoreHandle_t spiBusMutex;
 
 static size_t wav_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
@@ -562,7 +569,17 @@ bool M4ADecoder::parseM4AAtoms(File &file) {
         memcpy(atomType, &hdr[4], 4);
         atomType[4] = '\0';
 
-        if (atomSize < 8) break;
+        if (atomSize == 0) {
+            // Atom extends to end of file
+            atomSize = file.size() - curPos;
+        } else if (atomSize == 1) {
+            // 64-bit large size
+            uint8_t largeHdr[8];
+            if (file.read(largeHdr, 8) != 8) break;
+            atomSize = ((uint32_t)largeHdr[4] << 24) | ((uint32_t)largeHdr[5] << 16) | ((uint32_t)largeHdr[6] << 8) | (uint32_t)largeHdr[7];
+        } else if (atomSize < 8) {
+            break;
+        }
 
         if (strcmp(atomType, "ftyp") == 0) {
             foundFtyp = true;
@@ -684,12 +701,17 @@ bool M4ADecoder::open(File &file) {
         inputBufferLen = srcFile.read(inputBuffer, sizeof(inputBuffer));
         inputBufferPos = 0;
 
-        AACFrameInfo info;
-        memset(&info, 0, sizeof(info));
-        info.nChans = channels;
-        info.sampRateCore = sampleRate;
-        info.profile = 1; // AAC_PROFILE_LC
-        AACSetRawBlockParams((HAACDecoder)pAacHandle, 0, &info);
+        if (inputBufferLen >= 4 && inputBuffer[0] == 0xFF && (inputBuffer[1] & 0xF0) == 0xF0) {
+            isRawADTS = true;
+        } else {
+            isRawADTS = false;
+            AACFrameInfo info;
+            memset(&info, 0, sizeof(info));
+            info.nChans = channels;
+            info.sampRateCore = sampleRate;
+            info.profile = 1; // AAC_PROFILE_LC
+            AACSetRawBlockParams((HAACDecoder)pAacHandle, 0, &info);
+        }
     }
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return ok;
@@ -753,8 +775,34 @@ int M4ADecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
                     if (frameInfo.sampRateOut > 0) sampleRate = frameInfo.sampRateOut;
                     if (frameInfo.nChans > 0) channels = frameInfo.nChans;
                 }
+            } else if (err == ERR_AAC_INDATA_UNDERFLOW) {
+                // Buffer needs more data to complete frame decoding
+                if (srcFile.available() > 0) {
+                    size_t rem = inputBufferLen - inputBufferPos;
+                    if (rem > 0) {
+                        memmove(inputBuffer, inputBuffer + inputBufferPos, rem);
+                    }
+                    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                    int bRead = srcFile.read(inputBuffer + rem, sizeof(inputBuffer) - rem);
+                    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+                    inputBufferLen = rem + ((bRead > 0) ? bRead : 0);
+                    inputBufferPos = 0;
+                    if (bRead > 0) {
+                        continue; // Retry with refilled buffer
+                    }
+                }
+                break; // True EOF
             } else {
-                inputBufferPos++;
+                if (isRawADTS) {
+                    int nextSync = AACFindSyncWord(inputBuffer + inputBufferPos + 1, (int)(inputBufferLen - inputBufferPos - 1));
+                    if (nextSync >= 0) {
+                        inputBufferPos += 1 + nextSync;
+                    } else {
+                        inputBufferPos = inputBufferLen;
+                    }
+                } else {
+                    inputBufferPos++;
+                }
             }
         }
     }

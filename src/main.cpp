@@ -57,8 +57,16 @@ void renderMainMenu() {
 }
 
 void updateMainMenu() {
-    renderMainMenu();
+    static unsigned long lastMainRender = 0;
+    static int lastSel = -1, lastOff = -1;
     ButtonEvent evt = buttonManager.update();
+    unsigned long now = millis();
+    if (evt != BTN_EVENT_NONE || menuSelection != lastSel || menuScrollOffset != lastOff || (now - lastMainRender >= 300)) {
+        lastMainRender = now;
+        lastSel = menuSelection;
+        lastOff = menuScrollOffset;
+        renderMainMenu();
+    }
     if (evt == BTN_EVENT_UP_PRESS) {
         Display::navigateMenu(menuSelection, menuScrollOffset, MAIN_MENU_COUNT, -1);
         ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
@@ -117,28 +125,35 @@ const char* rgbMenuLabels[] = {
 };
 
 void updateRgbEffectsMode() {
-    display.clear();
-    char batBuf[16];
-    snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
-
-    char brBuf[12];
-    snprintf(brBuf, sizeof(brBuf), "%d%%", (ledManager.getBrightness() * 100) / 255);
-
-    String vals[RGB_MENU_COUNT];
-    vals[0] = String("[") + ledManager.getEnabledName() + "]";
-    vals[1] = String("[") + ledManager.getModeName() + "]";
-    vals[2] = String("[") + ledManager.getColorName() + "]";
-    vals[3] = String("[") + brBuf + "]";
-    vals[4] = String("[") + ledManager.getSensitivityName() + "]";
-    vals[5] = String("[") + ledManager.getButtonFeedbackName() + "]";
-    vals[6] = String("[") + ledManager.getTurnOffOnCompleteName() + "]";
-    vals[7] = "[PULSE]";
-    vals[8] = "[EXIT]";
-
-    display.drawStandardMenu("RGB LIGHTS", rgbMenuLabels, RGB_MENU_COUNT, rgbMenuSelection, rgbMenuScrollOffset, vals, batBuf);
-    display.sendBuffer();
-
+    static unsigned long lastRgbRender = 0;
+    static int lastSel = -1;
     ButtonEvent evt = buttonManager.update();
+    unsigned long now = millis();
+    if (evt != BTN_EVENT_NONE || rgbMenuSelection != lastSel || (now - lastRgbRender >= 250)) {
+        lastRgbRender = now;
+        lastSel = rgbMenuSelection;
+
+        display.clear();
+        char batBuf[16];
+        snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
+
+        char brBuf[12];
+        snprintf(brBuf, sizeof(brBuf), "%d%%", (ledManager.getBrightness() * 100) / 255);
+
+        String vals[RGB_MENU_COUNT];
+        vals[0] = String("[") + ledManager.getEnabledName() + "]";
+        vals[1] = String("[") + ledManager.getModeName() + "]";
+        vals[2] = String("[") + ledManager.getColorName() + "]";
+        vals[3] = String("[") + brBuf + "]";
+        vals[4] = String("[") + ledManager.getSensitivityName() + "]";
+        vals[5] = String("[") + ledManager.getButtonFeedbackName() + "]";
+        vals[6] = String("[") + ledManager.getTurnOffOnCompleteName() + "]";
+        vals[7] = "[PULSE]";
+        vals[8] = "[EXIT]";
+
+        display.drawStandardMenu("RGB LIGHTS", rgbMenuLabels, RGB_MENU_COUNT, rgbMenuSelection, rgbMenuScrollOffset, vals, batBuf);
+        display.sendBuffer();
+    }
     if (evt == BTN_EVENT_UP_PRESS) {
         Display::navigateMenu(rgbMenuSelection, rgbMenuScrollOffset, RGB_MENU_COUNT, -1);
         ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
@@ -183,8 +198,13 @@ void updateRgbEffectsMode() {
 }
 
 void updateVisualizerMode() {
-    spectrumAnalyzer.sampleAudioStream();
-    spectrumAnalyzer.render();
+    static unsigned long lastVisRender = 0;
+    unsigned long now = millis();
+    if (now - lastVisRender >= 33) {
+        lastVisRender = now;
+        spectrumAnalyzer.sampleAudioStream();
+        spectrumAnalyzer.render();
+    }
 
     ButtonEvent evt = buttonManager.update();
     if (evt != BTN_EVENT_NONE) {
@@ -224,28 +244,33 @@ void updateVisualizerMode() {
 }
 
 void updateSystemInfoMode() {
-    display.clear();
-    display.drawTopStatusBar("SYSTEM INFO", battery.getPercentage());
-    U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_6x10_tr);
-
-    char buf[32];
-    snprintf(buf, sizeof(buf), "VBAT: %.2fV (%d%%)", battery.getVoltage(), battery.getPercentage());
-    u8g2.drawStr(4, 23, buf);
-
-    snprintf(buf, sizeof(buf), "CPU:  %d MHz", (int)powerManager.getTargetCpuFreqMhz());
-    u8g2.drawStr(4, 35, buf);
-
-    snprintf(buf, sizeof(buf), "VOL:  %d%%", audioPlayer.getVolume());
-    u8g2.drawStr(4, 47, buf);
-
-    const char* sdStatusStr = sdManager.isMounted() ? "MOUNTED (OK)" : (sdManager.isSafeToRemove() ? "EJECTED (SAFE)" : "UNMOUNTED");
-    snprintf(buf, sizeof(buf), "SD: %s", sdStatusStr);
-    u8g2.drawStr(4, 59, buf);
-
-    display.sendBuffer();
-
+    static unsigned long lastSysRender = 0;
     ButtonEvent evt = buttonManager.update();
+    unsigned long now = millis();
+    if (evt != BTN_EVENT_NONE || (now - lastSysRender >= 500)) {
+        lastSysRender = now;
+        display.clear();
+        display.drawTopStatusBar("SYSTEM INFO", battery.getPercentage());
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+
+        char buf[32];
+        snprintf(buf, sizeof(buf), "VBAT: %.2fV (%d%%)", battery.getVoltage(), battery.getPercentage());
+        u8g2.drawStr(4, 23, buf);
+
+        snprintf(buf, sizeof(buf), "CPU:  %d MHz", (int)powerManager.getTargetCpuFreqMhz());
+        u8g2.drawStr(4, 35, buf);
+
+        snprintf(buf, sizeof(buf), "VOL:  %d%%", audioPlayer.getVolume());
+        u8g2.drawStr(4, 47, buf);
+
+        const char* sdStatusStr = sdManager.isMounted() ? "MOUNTED (OK)" : (sdManager.isExFAT() ? "64GB+ (exFAT)" : (sdManager.isSafeToRemove() ? "EJECTED (SAFE)" : "UNMOUNTED"));
+        snprintf(buf, sizeof(buf), "SD: %s", sdStatusStr);
+        u8g2.drawStr(4, 59, buf);
+
+        display.sendBuffer();
+    }
+
     if (evt == BTN_EVENT_SEL_PRESS) {
         if (sdManager.isMounted()) {
             sdManager.unmount();
@@ -315,5 +340,5 @@ void loop() {
             updateSystemInfoMode();
             break;
     }
-    delay(10);
+    delay(2);
 }

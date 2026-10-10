@@ -786,12 +786,18 @@ def test_fiio_ka11_usb_dac_and_safe_eject():
     assert "USB_HOST_DM" in hw_src and "19" in hw_src, "USB_HOST_DM must be defined on GPIO 19"
     assert "USB_HOST_DP" in hw_src and "20" in hw_src, "USB_HOST_DP must be defined on GPIO 20"
 
+    pio_ini = os.path.join(base_dir, "platformio.ini")
+    with open(pio_ini) as f: ini_src = f.read()
+    assert "-DARDUINO_USB_CDC_ON_BOOT=1" in ini_src, "platformio.ini must enable ARDUINO_USB_CDC_ON_BOOT"
+    assert "-DARDUINO_USB_MODE=1" in ini_src, "platformio.ini must set ARDUINO_USB_MODE"
+
     # 2. USBManager Safe Mount & Safe Eject Protocol
     assert "mount()" in usbh_src and "safeEject()" in usbh_src, "USBManager must expose mount() and safeEject()"
     assert "isMounted()" in usbh_src and "isSafeToEject()" in usbh_src, "USBManager must expose safe state queries"
     assert "SAFE_TO_EJECT" in usbh_src, "USBAudioState must contain SAFE_TO_EJECT"
     assert "parkHostBus();" in usbcpp_src, "safeEject must park and tristate USB bus lines"
     assert "audioPlayer.setOutputMode(OUTPUT_MODE_SPEAKER_I2S);" in usbcpp_src, "safeEject must fall back to speaker"
+    assert "configureHostPins();" not in usbcpp_src.split("bool USBManager::begin()")[1].split("return true;")[0], "begin() must leave GPIO 19/20 intact for USB CDC Serial"
 
     # 3. Audio Router & Stream Output
     assert "OUTPUT_MODE_SPEAKER_I2S" in aph_src, "Missing OUTPUT_MODE_SPEAKER_I2S"
@@ -1128,6 +1134,7 @@ def test_mp3_zero_stack_helix_aac_and_sdxc_exfat():
     assert "AACFreeDecoder" in dcpp_src, "Missing AACFreeDecoder in audio_decoder.cpp"
     assert "AACGetLastFrameInfo" in dcpp_src, "Missing AACGetLastFrameInfo in audio_decoder.cpp"
     assert "AACSetRawBlockParams" in dcpp_src, "Missing AACSetRawBlockParams in audio_decoder.cpp"
+    assert "ERR_AAC_INDATA_UNDERFLOW" in dcpp_src, "Missing ERR_AAC_INDATA_UNDERFLOW handling in audio_decoder.cpp"
 
     # 3. 64GB+ SDXC 400kHz Clock & exFAT Card Detection
     assert "400000" in sdcpp_src, "SDManager must include 400kHz initialization for SDXC compliance"
@@ -1136,6 +1143,7 @@ def test_mp3_zero_stack_helix_aac_and_sdxc_exfat():
     assert "getCardCapacityMB()" in sdh_src, "Missing getCardCapacityMB() in sd_manager.h"
     assert "probeCardDetails" in sdcpp_src, "Missing probeCardDetails in sd_manager.cpp"
     assert "EXFAT" in sdcpp_src, "Missing EXFAT signature check in sd_manager.cpp"
+    assert "acmd41" in sdcpp_src.lower() or "0x69" in sdcpp_src, "Missing ACMD41 SPI initialization in sd_manager.cpp"
     assert "SD: 64GB+ (exFAT)" in ui_src, "UI must display helpful exFAT card guidance"
 
     print("  [PASS] MP3 zero-stack scratch buffer, Helix AAC fixed-point engine, and 64GB+ SDXC exFAT detection verified.")

@@ -105,51 +105,131 @@ void SDManager::probeCardDetails() {
     }
 
     // Direct SPI probing for unmounted / exFAT SDXC cards
+    digitalWrite(SD_CS, HIGH);
+    for (int i = 0; i < 10; i++) SPI.transfer(0xFF); // 80 clock cycles to wake SD controller
     digitalWrite(SD_CS, LOW);
-    // Send CMD0 to test presence
+
+    // 1. Send CMD0 to place card into SPI IDLE state
     uint8_t cmd0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
     for (int i = 0; i < 6; i++) SPI.transfer(cmd0[i]);
     uint8_t r1 = 0xFF;
-    for (int i = 0; i < 10 && (r1 == 0xFF); i++) r1 = SPI.transfer(0xFF);
+    for (int i = 0; i < 200 && (r1 == 0xFF); i++) r1 = SPI.transfer(0xFF);
 
-    if (r1 == 0x01 || r1 == 0x00) {
-        // Card responded to CMD0!
-        // Check CMD8 (Voltage & High Capacity Check)
+    if (r1 == 0x01) {
+        // Card is in IDLE state.
+        // 2. Send CMD8 (SEND_IF_COND) to verify SDv2 voltage & high capacity support
         uint8_t cmd8[] = {0x48, 0x00, 0x00, 0x01, 0xAA, 0x87};
         for (int i = 0; i < 6; i++) SPI.transfer(cmd8[i]);
         uint8_t r7 = 0xFF;
-        for (int i = 0; i < 10 && (r7 == 0xFF); i++) r7 = SPI.transfer(0xFF);
+        for (int i = 0; i < 100 && (r7 == 0xFF); i++) r7 = SPI.transfer(0xFF);
+        bool isV2 = false;
         if (r7 == 0x01) {
             uint8_t r7_bytes[4];
             for (int i = 0; i < 4; i++) r7_bytes[i] = SPI.transfer(0xFF);
             if (r7_bytes[2] == 0x01 && r7_bytes[3] == 0xAA) {
+                isV2 = true;
                 cardIsSDXC = true;
                 cardTypeName = "SDXC (64GB+)";
                 cardCapacityMB = 64000;
             }
         }
 
-        // Read Sector 0 / VBR via CMD17 to check for "EXFAT" signature
-        uint8_t cmd17[] = {0x51, 0x00, 0x00, 0x00, 0x00, 0xFF};
-        for (int i = 0; i < 6; i++) SPI.transfer(cmd17[i]);
-        uint8_t r17 = 0xFF;
-        for (int i = 0; i < 10 && (r17 == 0xFF); i++) r17 = SPI.transfer(0xFF);
-        if (r17 == 0x00) {
-            // Wait for start block token 0xFE
-            uint8_t token = 0xFF;
-            for (int i = 0; i < 2000 && (token != 0xFE); i++) token = SPI.transfer(0xFF);
-            if (token == 0xFE) {
-                uint8_t sector[512];
-                for (int i = 0; i < 512; i++) sector[i] = SPI.transfer(0xFF);
-                SPI.transfer(0xFF); SPI.transfer(0xFF); // CRC
-                // Check if sector 0 has "EXFAT   " at offset 3
-                if (sector[3] == 'E' && sector[4] == 'X' && sector[5] == 'F' &&
-                    sector[6] == 'A' && sector[7] == 'T') {
-                    cardIsExFAT = true;
-                    filesystemName = "exFAT";
-                } else if (sector[450] == 0x07) { // MBR partition type 0x07 = exFAT
-                    cardIsExFAT = true;
-                    filesystemName = "exFAT";
+        // 3. ACMD41 initialization loop (CMD55 + ACMD41 with HCS=1) to leave IDLE state
+        uint32_t startMs = millis();
+        bool ready = false;
+        while ((millis() - startMs < 1000) && !ready) {
+            // CMD55 (APP_CMD)
+            uint8_t cmd55[] = {0x77, 0x00, 0x00, 0x00, 0x00, 0x65};
+            for (int i = 0; i < 6; i++) SPI.transfer(cmd55[i]);
+            uint8_t r55 = 0xFF;
+            for (int i = 0; i < 20 && (r55 == 0xFF); i++) r55 = SPI.transfer(0xFF);
+
+            // ACMD41 with HCS (bit 30 = 0x40) for SDHC/SDXC
+            uint8_t acmd41[] = {0x69, (uint8_t)(isV2 ? 0x40 : 0x00), 0x00, 0x00, 0x00, 0x77};
+            for (int i = 0; i < 6; i++) SPI.transfer(acmd41[i]);
+            uint8_t r41 = 0xFF;
+            for (int i = 0; i < 50 && (r41 == 0xFF); i++) r41 = SPI.transfer(0xFF);
+
+            if (r41 == 0x00) {
+                ready = true;
+                break;
+            }
+            delay(10);
+        }
+
+        if (ready) {
+            // 4. Send CMD58 (READ_OCR) to verify Card Capacity Status (CCS)
+            uint8_t cmd58[] = {0x7A, 0x00, 0x00, 0x00, 0x00, 0xFD};
+            for (int i = 0; i < 6; i++) SPI.transfer(cmd58[i]);
+            uint8_t r58 = 0xFF;
+            for (int i = 0; i < 20 && (r58 == 0xFF); i++) r58 = SPI.transfer(0xFF);
+            if (r58 == 0x00) {
+                uint8_t ocr[4];
+                for (int i = 0; i < 4; i++) ocr[i] = SPI.transfer(0xFF);
+                if (ocr[0] & 0x40) {
+                    cardIsSDXC = true;
+                    cardTypeName = "SDXC (64GB+)";
+                    cardCapacityMB = 64000;
+                }
+            }
+
+            // 5. Read Sector 0 via CMD17 (READ_SINGLE_BLOCK) to inspect filesystem signature
+            uint8_t cmd17[] = {0x51, 0x00, 0x00, 0x00, 0x00, 0xFF};
+            for (int i = 0; i < 6; i++) SPI.transfer(cmd17[i]);
+            uint8_t r17 = 0xFF;
+            for (int i = 0; i < 50 && (r17 == 0xFF); i++) r17 = SPI.transfer(0xFF);
+            if (r17 == 0x00) {
+                uint8_t token = 0xFF;
+                for (int i = 0; i < 5000 && (token != 0xFE); i++) token = SPI.transfer(0xFF);
+                if (token == 0xFE) {
+                    uint8_t sector[512];
+                    for (int i = 0; i < 512; i++) sector[i] = SPI.transfer(0xFF);
+                    SPI.transfer(0xFF); SPI.transfer(0xFF); // CRC
+
+                    // Check for "EXFAT   " at offset 3 (Superfloppy VBR)
+                    if (memcmp(&sector[3], "EXFAT   ", 8) == 0) {
+                        cardIsExFAT = true;
+                        filesystemName = "exFAT";
+                        cardIsSDXC = true;
+                        cardTypeName = "SDXC (64GB+)";
+                        if (cardCapacityMB < 64000) cardCapacityMB = 64000;
+                    } else if (sector[450] == 0x07) {
+                        // MBR Partition Type 0x07 = exFAT / NTFS
+                        cardIsExFAT = true;
+                        filesystemName = "exFAT";
+                        cardIsSDXC = true;
+                        cardTypeName = "SDXC (64GB+)";
+                        if (cardCapacityMB < 64000) cardCapacityMB = 64000;
+
+                        uint32_t partLba = sector[454] | ((uint32_t)sector[455] << 8) |
+                                           ((uint32_t)sector[456] << 16) | ((uint32_t)sector[457] << 24);
+                        if (partLba > 0) {
+                            uint8_t cmd17_part[] = {
+                                0x51,
+                                (uint8_t)(partLba >> 24),
+                                (uint8_t)(partLba >> 16),
+                                (uint8_t)(partLba >> 8),
+                                (uint8_t)(partLba),
+                                0xFF
+                            };
+                            for (int i = 0; i < 6; i++) SPI.transfer(cmd17_part[i]);
+                            uint8_t r17p = 0xFF;
+                            for (int i = 0; i < 50 && (r17p == 0xFF); i++) r17p = SPI.transfer(0xFF);
+                            if (r17p == 0x00) {
+                                uint8_t tok2 = 0xFF;
+                                for (int i = 0; i < 5000 && (tok2 != 0xFE); i++) tok2 = SPI.transfer(0xFF);
+                                if (tok2 == 0xFE) {
+                                    uint8_t partSec[512];
+                                    for (int i = 0; i < 512; i++) partSec[i] = SPI.transfer(0xFF);
+                                    SPI.transfer(0xFF); SPI.transfer(0xFF);
+                                    if (memcmp(&partSec[3], "EXFAT   ", 8) == 0) {
+                                        cardIsExFAT = true;
+                                        filesystemName = "exFAT";
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
