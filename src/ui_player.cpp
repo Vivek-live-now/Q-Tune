@@ -22,7 +22,7 @@ UIPlayer::UIPlayer() :
     settingsScrollOffset(0) {}
 
 void UIPlayer::begin() {
-    if (!sdManager.isMounted() && !sdManager.isExFAT()) sdManager.begin();
+    if (!sdManager.isMounted() && !sdManager.isExFAT() && !sdManager.isGPT()) sdManager.begin();
     playerConfig.begin();
 
     // If already playing or paused, jump straight to Now Playing view without restarting!
@@ -65,7 +65,7 @@ void UIPlayer::cyclePage() {
 }
 
 void UIPlayer::refreshTrackList() {
-    if (!sdManager.isMounted() && !sdManager.isExFAT()) sdManager.begin();
+    if (!sdManager.isMounted() && !sdManager.isExFAT() && !sdManager.isGPT()) sdManager.begin();
     trackList = sdManager.listMusicFiles();
     if (currentTrackIndex >= (int)trackList.size()) {
         currentTrackIndex = 0;
@@ -544,7 +544,12 @@ void UIPlayer::renderTrackList() {
         display.drawTopStatusBar("Q-TUNES MUSIC", battery.getPercentage());
         U8G2 &u8g2 = display.getU8g2();
         u8g2.setFont(u8g2_font_6x10_tr);
-        if (sdManager.isExFAT()) {
+        if (sdManager.isGPT()) {
+            u8g2.drawStr(10, 24, "SD: GPT Partition");
+            u8g2.drawStr(10, 36, "Convert to MBR");
+            u8g2.drawStr(10, 48, "in PartitionWizard");
+            u8g2.drawStr(10, 60, "CANCEL: Main Menu");
+        } else if (sdManager.isExFAT()) {
             u8g2.drawStr(10, 24, "SD: 64GB+ (exFAT)");
             u8g2.drawStr(10, 36, "Format as FAT32");
             u8g2.drawStr(10, 48, "for Q-Tune playback");
@@ -592,7 +597,12 @@ void UIPlayer::renderFolderBrowser() {
         display.drawTopStatusBar("FOLDER BROWSER", battery.getPercentage());
         U8G2 &u8g2 = display.getU8g2();
         u8g2.setFont(u8g2_font_6x10_tr);
-        if (sdManager.isExFAT()) {
+        if (sdManager.isGPT()) {
+            u8g2.drawStr(10, 24, "SD: GPT Partition");
+            u8g2.drawStr(10, 36, "Convert to MBR");
+            u8g2.drawStr(10, 48, "in PartitionWizard");
+            u8g2.drawStr(10, 60, "CANCEL: Categories");
+        } else if (sdManager.isExFAT()) {
             u8g2.drawStr(10, 24, "SD: 64GB+ (exFAT)");
             u8g2.drawStr(10, 36, "Format as FAT32");
             u8g2.drawStr(10, 48, "for Q-Tune playback");

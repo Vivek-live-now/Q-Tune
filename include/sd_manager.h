@@ -32,9 +32,10 @@ public:
     std::vector<String> getRecentTracks();
     void addRecentTrack(const String &trackPath);
 
-    // High-Capacity SDXC (64GB+) & exFAT Detection
+    // High-Capacity SDXC (64GB+), exFAT & GPT Detection
     bool isSDXC() const;
     bool isExFAT() const;
+    bool isGPT() const;
     uint32_t getCardCapacityMB() const;
     const char* getCardTypeName() const;
     const char* getFilesystemName() const;
@@ -44,6 +45,7 @@ private:
     bool safeToRemove;
     bool cardIsSDXC;
     bool cardIsExFAT;
+    bool cardIsGPT;
     uint32_t cardCapacityMB;
     String cardTypeName;
     String filesystemName;

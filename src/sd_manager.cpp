@@ -7,7 +7,7 @@
 
 SDManager::SDManager() :
     mounted(false), safeToRemove(true),
-    cardIsSDXC(false), cardIsExFAT(false), cardCapacityMB(0),
+    cardIsSDXC(false), cardIsExFAT(false), cardIsGPT(false), cardCapacityMB(0),
     cardTypeName("None"), filesystemName("None") {}
 
 bool SDManager::begin() {
@@ -32,6 +32,7 @@ bool SDManager::begin() {
     mounted = false;
     cardIsSDXC = false;
     cardIsExFAT = false;
+    cardIsGPT = false;
     delay(50);
 
     // Re-initialize SPI hardware bus on shared pins
@@ -216,9 +217,19 @@ void SDManager::probeCardDetails() {
                                                ((uint32_t)sector[pOffset + 10] << 16) |
                                                ((uint32_t)sector[pOffset + 11] << 24);
 
-                            if (pType == 0x07 || pType == 0xEE) {
-                                // MBR Type 0x07 = exFAT/NTFS, Type 0xEE = GPT Protective MBR
+                            if (pType == 0xEE) {
+                                // MBR Type 0xEE = GPT Protective MBR (GUID Partition Table)
+                                cardIsGPT = true;
+                                cardIsExFAT = false;
+                                filesystemName = "GPT";
+                                cardIsSDXC = true;
+                                cardTypeName = "SDXC (64GB+)";
+                                if (cardCapacityMB < 64000) cardCapacityMB = 64000;
+                                break;
+                            } else if (pType == 0x07) {
+                                // MBR Type 0x07 = exFAT / NTFS
                                 cardIsExFAT = true;
+                                cardIsGPT = false;
                                 filesystemName = "exFAT";
                                 cardIsSDXC = true;
                                 cardTypeName = "SDXC (64GB+)";
@@ -256,7 +267,13 @@ void SDManager::probeCardDetails() {
     for (int i = 0; i < 8; i++) SPI.transfer(0xFF);
     SPI.endTransaction();
 
-    if (cardIsExFAT) {
+    if (cardIsGPT) {
+        Serial.println("\n[SD] ========================================================");
+        Serial.println("[SD] SDXC (64GB+) GPT-Partitioned Card Detected!");
+        Serial.println("[SD] Note: ESP32 hardware FatFs requires MBR partition table (not GPT).");
+        Serial.println("[SD] Please convert disk from GPT to MBR in MiniTool Partition Wizard.");
+        Serial.println("[SD] ========================================================\n");
+    } else if (cardIsExFAT) {
         Serial.println("\n[SD] ========================================================");
         Serial.println("[SD] SDXC (64GB+) exFAT Card Detected!");
         Serial.println("[SD] Note: ESP32 hardware FatFs requires FAT32 for playback.");
@@ -267,6 +284,7 @@ void SDManager::probeCardDetails() {
 
 bool SDManager::isSDXC() const { return cardIsSDXC; }
 bool SDManager::isExFAT() const { return cardIsExFAT; }
+bool SDManager::isGPT() const { return cardIsGPT; }
 uint32_t SDManager::getCardCapacityMB() const { return cardCapacityMB; }
 const char* SDManager::getCardTypeName() const { return cardTypeName.c_str(); }
 const char* SDManager::getFilesystemName() const { return filesystemName.c_str(); }

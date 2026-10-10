@@ -264,7 +264,7 @@ void updateSystemInfoMode() {
         snprintf(buf, sizeof(buf), "VOL:  %d%%", audioPlayer.getVolume());
         u8g2.drawStr(4, 47, buf);
 
-        const char* sdStatusStr = sdManager.isMounted() ? "MOUNTED (OK)" : (sdManager.isExFAT() ? "64GB+ (exFAT)" : (sdManager.isSafeToRemove() ? "EJECTED (SAFE)" : "UNMOUNTED"));
+        const char* sdStatusStr = sdManager.isMounted() ? "MOUNTED (OK)" : (sdManager.isGPT() ? "64GB+ (GPT)" : (sdManager.isExFAT() ? "64GB+ (exFAT)" : (sdManager.isSafeToRemove() ? "EJECTED (SAFE)" : "UNMOUNTED")));
         snprintf(buf, sizeof(buf), "SD: %s", sdStatusStr);
         u8g2.drawStr(4, 59, buf);
 
@@ -279,7 +279,7 @@ void updateSystemInfoMode() {
             sdManager.remount();
             if (sdManager.isMounted()) {
                 ledManager.triggerButtonPulse(CRGB::Green, 2, 80);
-            } else if (sdManager.isExFAT()) {
+            } else if (sdManager.isExFAT() || sdManager.isGPT()) {
                 ledManager.triggerButtonPulse(CRGB::Orange, 2, 80);
             } else {
                 ledManager.triggerButtonPulse(CRGB::Red, 2, 80);
