@@ -292,6 +292,10 @@ void updateSystemInfoMode() {
 
 void setup() {
     Serial.begin(115200);
+    delay(400);
+    Serial.println("\n========================================");
+    Serial.println("         Q-TUNE HI-FI AUDIO SYSTEM       ");
+    Serial.println("========================================");
 
     // Initialize FreeRTOS shared SPI mutex before any subsystem begins
     spiBusMutex = xSemaphoreCreateMutex();
@@ -302,6 +306,11 @@ void setup() {
     battery.begin();
     ledManager.begin();
     sdManager.begin();
+    Serial.printf("[SD] Mounted: %s | Card: %s | FS: %s | %u MB\n",
+                  sdManager.isMounted() ? "YES" : "NO",
+                  sdManager.getCardTypeName(),
+                  sdManager.getFilesystemName(),
+                  (unsigned int)sdManager.getCardCapacityMB());
     audioPlayer.begin();
     spectrumAnalyzer.begin();
 
@@ -309,6 +318,7 @@ void setup() {
     uiPlayer.begin();
     usbManager.begin();
     wifiStreamer.begin();
+    Serial.println("[SYSTEM] Boot sequence complete. Entering main loop.\n");
 }
 
 void loop() {
