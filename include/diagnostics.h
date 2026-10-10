@@ -16,10 +16,13 @@ public:
     void begin();
     bool runMenu();
 
+public:
+    void testVocalReactiveCheck();
+
 private:
     int selectedIndex;
     int scrollOffset;
-    static const int TOTAL_TESTS = 12;
+    static const int TOTAL_TESTS = 13;
     void renderMenu();
     void executeTest(int index);
 

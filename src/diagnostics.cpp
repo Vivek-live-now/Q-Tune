@@ -13,7 +13,8 @@ static const char* testNames[] = {
     "9. I2S Audio Test",
     "10. INMP441 Mic Test",
     "11. FiiO KA11 USB DAC",
-    "12. Return to Menu"
+    "12. Vocal Reactive Check",
+    "13. Return to Menu"
 };
 
 Diagnostics::Diagnostics() : selectedIndex(0), scrollOffset(0) {}
@@ -43,7 +44,7 @@ bool Diagnostics::runMenu() {
         ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_SEL_PRESS) {
-        if (selectedIndex == 11) {
+        if (selectedIndex == 12) {
             return false; // Return to Menu
         }
         executeTest(selectedIndex);
@@ -67,6 +68,7 @@ void Diagnostics::executeTest(int index) {
         case 8: testI2SAudio(); break;
         case 9: testINMP441Mic(); break;
         case 10: testFiiOKA11USB(); break;
+        case 11: testVocalReactiveCheck(); break;
     }
 }
 
@@ -331,3 +333,100 @@ void Diagnostics::testFiiOKA11USB() {
 }
 
 Diagnostics diagnostics;
+
+void Diagnostics::testVocalReactiveCheck() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+
+    bool prevEnabled = ledManager.isEnabled();
+    LedMode prevMode = ledManager.getUserMode();
+    ledManager.setEnabled(true);
+    ledManager.setMode(LedMode::REACT_VOCAL_LIGHTNING);
+
+    bool useMicrophone = !audioPlayer.isPlaying();
+    if (useMicrophone) {
+        audioPlayer.stopAudioTask();
+        audioPlayer.stop();
+        spectrumAnalyzer.start();
+    }
+
+    while (true) {
+        if (useMicrophone) {
+            spectrumAnalyzer.sampleMicrophone();
+        } else {
+            spectrumAnalyzer.sampleAudioStream();
+        }
+
+        ledManager.loop();
+
+        float pitch = spectrumAnalyzer.getVoicePitch();
+        float conf = spectrumAnalyzer.getVoiceConfidence();
+        const uint8_t* bands = spectrumAnalyzer.getBands();
+        float vocalCore = (bands[1] * 0.9f + bands[2] * 1.5f + bands[3] * 1.6f + bands[4] * 1.4f + bands[5] * 0.9f);
+        float highSizzle = (bands[7] * 0.8f + bands[8] * 1.0f + bands[9] * 1.0f + bands[10] * 0.7f);
+        float flank = (bands[0] * 1.4f + highSizzle * 0.9f) + 1.5f;
+        float vocalDominance = vocalCore / flank;
+
+        float pitchGate = constrain((conf - 0.22f) / 0.24f, 0.0f, 1.0f);
+        float formantGate = constrain((vocalDominance - 0.40f) / 0.38f, 0.0f, 1.0f);
+        float gateScore = pitchGate * (0.35f + 0.65f * formantGate);
+        bool gateOpen = gateScore > 0.08f;
+
+        display.clear();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(0, 10, "VOCAL REACTIVE CHECK");
+        u8g2.drawHLine(0, 12, 128);
+
+        char buf[32];
+        if (pitch > 60.0f) {
+            snprintf(buf, sizeof(buf), "Pitch: %.0f Hz", pitch);
+        } else {
+            snprintf(buf, sizeof(buf), "Pitch: --- Hz (SILENT)");
+        }
+        u8g2.drawStr(0, 23, buf);
+
+        snprintf(buf, sizeof(buf), "Conf:  %d%%", (int)(conf * 100.0f));
+        u8g2.drawStr(0, 33, buf);
+        int barW = (int)(conf * 45.0f);
+        u8g2.drawFrame(75, 26, 48, 7);
+        if (barW > 0) u8g2.drawBox(76, 27, barW, 5);
+
+        int vocalPct = (int)constrain((vocalCore / 35.0f) * 100.0f, 0.0f, 100.0f);
+        snprintf(buf, sizeof(buf), "Form:  %d%%", vocalPct);
+        u8g2.drawStr(0, 43, buf);
+        int formW = (int)((vocalPct / 100.0f) * 45.0f);
+        u8g2.drawFrame(75, 36, 48, 7);
+        if (formW > 0) u8g2.drawBox(76, 37, formW, 5);
+
+        snprintf(buf, sizeof(buf), "Gate: %s | %s", gateOpen ? "OPEN " : "CLOSED", ledManager.getSensitivityName());
+        u8g2.drawStr(0, 53, buf);
+
+        u8g2.drawStr(0, 63, "UP/DN:Sens OK:Mic CANCEL");
+        display.sendBuffer();
+
+        ButtonEvent evt = buttonManager.update();
+        if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) break;
+        if (evt == BTN_EVENT_UP_PRESS || evt == BTN_EVENT_DN_PRESS) {
+            ledManager.cycleSensitivity();
+        } else if (evt == BTN_EVENT_SEL_PRESS) {
+            if (useMicrophone) {
+                spectrumAnalyzer.stop();
+                audioPlayer.begin();
+                useMicrophone = false;
+            } else {
+                audioPlayer.stopAudioTask();
+                audioPlayer.stop();
+                spectrumAnalyzer.start();
+                useMicrophone = true;
+            }
+        }
+        delay(25);
+    }
+
+    if (useMicrophone) {
+        spectrumAnalyzer.stop();
+        audioPlayer.begin();
+    }
+    ledManager.setUserMode(prevMode);
+    ledManager.setEnabled(prevEnabled);
+}

@@ -487,12 +487,15 @@ void SpectrumAnalyzer::detectVoicePitch() {
 
     if (energy0 < 1000.0f) {
         // Below acoustic noise floor
-        voiceConfidence = voiceConfidence * 0.75f;
+        voiceConfidence = voiceConfidence * 0.70f;
+        if (voiceConfidence < 0.05f) voicePitch = 0.0f;
         return;
     }
 
     float bestCorr = -1.0f;
     size_t bestLag = 0;
+    float sumCorr = 0.0f;
+    size_t lagCount = 0;
 
     for (size_t lag = MIN_LAG; lag <= MAX_LAG; lag++) {
         float num = 0.0f;
@@ -506,6 +509,8 @@ void SpectrumAnalyzer::detectVoicePitch() {
 
         float denom = sqrtf(energy0 * energyLag) + 1.0f;
         float normCorr = num / denom;
+        sumCorr += fabsf(normCorr);
+        lagCount++;
 
         if (normCorr > bestCorr) {
             bestCorr = normCorr;
@@ -513,8 +518,11 @@ void SpectrumAnalyzer::detectVoicePitch() {
         }
     }
 
+    float avgCorr = (lagCount > 0) ? (sumCorr / (float)lagCount) : 0.1f;
+    float peakProminence = bestCorr / (avgCorr + 0.02f);
+
     float refinedLag = (float)bestLag;
-    if (bestLag > MIN_LAG && bestLag < MAX_LAG && bestCorr > 0.16f) {
+    if (bestLag > MIN_LAG && bestLag < MAX_LAG && bestCorr > 0.22f) {
         // Parabolic interpolation for fine sub-sample pitch resolution
         auto getCorr = [&](size_t l) -> float {
             float num = 0.0f, el = 0.0f;
@@ -536,17 +544,23 @@ void SpectrumAnalyzer::detectVoicePitch() {
         }
     }
 
-    if (refinedLag >= (float)MIN_LAG && bestCorr > 0.16f) {
+    // Require strong correlation & distinct peak prominence to reject instrumental solos
+    float reqCorr = (voiceConfidence > 0.30f) ? 0.22f : 0.28f;
+    if (refinedLag >= (float)MIN_LAG && bestCorr >= reqCorr && peakProminence >= 1.25f) {
         float rawPitch = 11025.0f / refinedLag;
-        // Smooth pitch tracking
+        // Smooth pitch tracking across vocal octaves
         if (voiceConfidence > 0.20f && voicePitch > 60.0f) {
-            voicePitch += (rawPitch - voicePitch) * 0.45f;
+            voicePitch += (rawPitch - voicePitch) * 0.35f;
         } else {
             voicePitch = rawPitch;
         }
-        voiceConfidence += (constrain(bestCorr, 0.0f, 1.0f) - voiceConfidence) * 0.50f;
+        float confTarget = constrain(bestCorr * (peakProminence / 2.0f), 0.0f, 1.0f);
+        voiceConfidence += (confTarget - voiceConfidence) * 0.35f;
     } else {
-        voiceConfidence = voiceConfidence * 0.80f;
+        voiceConfidence = voiceConfidence * 0.78f;
+        if (voiceConfidence < 0.05f) {
+            voicePitch = 0.0f;
+        }
     }
 }
 

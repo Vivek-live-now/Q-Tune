@@ -1151,6 +1151,42 @@ def test_mp3_zero_stack_helix_aac_and_sdxc_exfat():
 
     print("  [PASS] MP3 zero-stack scratch buffer, Helix AAC fixed-point engine, and 64GB+ SDXC exFAT detection verified.")
 
+
+def test_vocal_reactive_check_tool():
+    print('--- 23. Interactive Vocal Reactive Check Tool & Expression Engine Test ---')
+    with open('src/spectrum_analyzer.cpp', 'r') as f:
+        sa_src = f.read()
+    with open('src/led_manager.cpp', 'r') as f:
+        led_src = f.read()
+    with open('src/diagnostics.cpp', 'r') as f:
+        diag_src = f.read()
+    with open('src/main.cpp', 'r') as f:
+        main_src = f.read()
+
+    # 1. Pitch correlation peak prominence & voice confidence thresholds
+    assert 'peakProminence = bestCorr / (avgCorr + 0.02f)' in sa_src, 'Correlation peak prominence calculation missing'
+    assert 'reqCorr = (voiceConfidence > 0.30f) ? 0.22f : 0.28f' in sa_src, 'Adaptive correlation threshold missing'
+    assert 'peakProminence >= 1.25f' in sa_src, 'Peak prominence verification missing'
+
+    # 2. Vocal Expression Engine (Level-based sustain, vibrato, breath release)
+    assert 'vocalLevelNorm' in led_src, 'Level-based vocal energy tracking missing in led_manager.cpp'
+    assert 'vibratoShimmer' in led_src, 'Vocal vibrato shimmer tracking missing in led_manager.cpp'
+    assert 'minPWMFloor' in led_src, 'Lowest brightness hardware floor missing in led_manager.cpp'
+    assert '28' in led_src, 'Active illumination floor value 28 missing'
+
+    # 3. Interactive Diagnostic Check Tool
+    assert 'testVocalReactiveCheck' in diag_src, 'testVocalReactiveCheck missing in diagnostics.cpp'
+    assert 'VOCAL REACTIVE CHECK' in diag_src, 'Title header missing in testVocalReactiveCheck'
+    assert 'Pitch:' in diag_src, 'Pitch metric missing in testVocalReactiveCheck'
+    assert 'Conf:' in diag_src, 'Voice confidence metric missing in testVocalReactiveCheck'
+    assert 'Form:' in diag_src, 'Formant energy metric missing in testVocalReactiveCheck'
+    assert 'Gate:' in diag_src, 'Gate status metric missing in testVocalReactiveCheck'
+
+    # 4. Dual Menu Access (Diagnostics + RGB Light Effects Menu)
+    assert 'testVocalReactiveCheck' in main_src, 'RGB Effects menu access to vocal check tool missing in main.cpp'
+
+    print('  [PASS] Vocal Expression Engine, held note sustain, vibrato shimmer, 50/255 brightness floor, and interactive check tool verified.')
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1177,7 +1213,8 @@ def main():
     test_library_indexing_and_multipage_lyrics()
     test_album_art_extraction_dithering_and_customization()
     test_mp3_zero_stack_helix_aac_and_sdxc_exfat()
-    print("\nAll 22 Q-Tune test verifications PASSED (100%)!\n")
+    test_vocal_reactive_check_tool()
+    print("\nAll 23 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

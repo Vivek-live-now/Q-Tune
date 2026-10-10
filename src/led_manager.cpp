@@ -166,7 +166,7 @@ const char* LEDManager::getModeName() const {
     switch (m) {
         case LedMode::REACT_BASS_PULSE:       return "BASS PULSE";
         case LedMode::REACT_VOCAL_LIGHTNING:  return "VOCAL LIGHTNING";
-        case LedMode::REACT_ENERGY_VU:        return "ENERGY VU";
+case LedMode::REACT_ENERGY_VU:        return "ENERGY VU";
         case LedMode::REACT_SPECTRUM_HUE:     return "SPECTRUM HUE";
         case LedMode::REACT_RAINBOW_FLOW:     return "RAINBOW FLOW";
         case LedMode::REACT_FIRE:             return "FIRE FLAME";
@@ -493,68 +493,50 @@ void LEDManager::updateReactiveModes(float dt) {
     if (total_max < 8.0f) total_max = 8.0f;
     float harmonicNorm = constrain((totalHarmonics / total_max) * sens, 0.0f, 1.0f);
 
-    // 4. Vocal Formant Extraction (~500 Hz to 2.5 kHz) & Percussion Ducking Discrimination
+    // 4. Vocal Formant Extraction (~300 Hz to 2.5 kHz) & Percussion/Instrumental Rejection
     // Human vowel formants F1 (300-900 Hz, Bands 1-2) and F2 (900-2500 Hz, Bands 2-5).
-    // Bands 6, 7, 8 (3 kHz - 6.2 kHz) are strictly excluded to reject snare snap and cymbals.
     float vocalCore = (bands[1] * 0.9f + bands[2] * 1.5f + bands[3] * 1.6f + bands[4] * 1.4f + bands[5] * 0.9f);
 
-    // Percussion Discrimination:
-    // a) Kick drum transient punch ducking
+    // Kick drum transient punch ducking mask
     float drumPunchMask = punchNorm * 0.65f;
 
-    // b) High-frequency percussion sizzle (snare wire snap, crash/hi-hat cymbals in 4-10 kHz)
+    // High-frequency percussion sizzle (snare wire snap, crash/hi-hat cymbals in 4-10 kHz)
     float highSizzle = (bands[7] * 0.8f + bands[8] * 1.0f + bands[9] * 1.0f + bands[10] * 0.7f);
     float snareRatio = (vocalCore > 1.0f) ? (highSizzle / vocalCore) : 0.0f;
-    float snareMask = 0.0f;
-    if (snareRatio > 0.85f) {
-        snareMask = constrain((snareRatio - 0.85f) * 1.2f, 0.0f, 0.75f);
-    }
+    float snareMask = (snareRatio > 0.85f) ? constrain((snareRatio - 0.85f) * 1.2f, 0.0f, 0.75f) : 0.0f;
 
-    // c) Mid-band Formant Dominance Ratio (vocal body vs extreme low-bass and high-treble flanks)
-    float flankEnergy = (bands[0] * 1.2f + highSizzle * 0.8f) + 2.0f;
+    // Mid-band Formant Dominance Ratio (vocal body vs extreme low-bass and high-treble flanks)
+    float flankEnergy = (bands[0] * 1.4f + highSizzle * 0.9f) + 1.5f;
     float vocalDominance = vocalCore / flankEnergy;
-    float dominanceGate = constrain((vocalDominance - 0.35f) / 0.45f, 0.15f, 1.0f);
+    float dominanceGate = constrain((vocalDominance - 0.32f) / 0.40f, 0.10f, 1.0f);
 
-    // Duck percussion transients and scale by vocal dominance
-    float totalInhibition = constrain(drumPunchMask + snareMask, 0.0f, 0.85f);
-    float cleanVocal = vocalCore * (1.0f - totalInhibition) * dominanceGate;
+    float cleanVocal = vocalCore * (1.0f - snareMask - drumPunchMask * 0.4f) * dominanceGate;
 
-    // 5. True Voice Pitch & Periodicity Voicing Gate
+    // 5. True Voice Pitch & Periodicity Voicing Gate (Strictly require periodicity & formant dominance)
     float voicePitch = spectrumAnalyzer.getVoicePitch();
     float voiceConfidence = spectrumAnalyzer.getVoiceConfidence();
 
-    // Fallback pitch from vocal formant centroid if voice pitch tracking is below vocal fundamental
-    // but strong mid-band vocal formant resonance is present (Bands 1-5 cover 689 Hz - 3100 Hz formants)
-    if (voicePitch < 70.0f && vocalCore > 3.0f) {
-        float centroid = (bands[1] * 120.0f + bands[2] * 180.0f + bands[3] * 250.0f + bands[4] * 330.0f + bands[5] * 420.0f) / (vocalCore + 0.1f);
-        voicePitch = constrain(centroid, 80.0f, 600.0f);
-        if (voiceConfidence < 0.22f) voiceConfidence = 0.22f;
+    // Strict Voicing Gate: No artificial fallbacks that trigger on instrumental solos!
+    float pitchPeriodicityGate = constrain((voiceConfidence - 0.22f) / 0.24f, 0.0f, 1.0f);
+    float formantVoicingGate = constrain((vocalDominance - 0.40f) / 0.38f, 0.0f, 1.0f);
+    float voicePitchGate = pitchPeriodicityGate * (0.35f + 0.65f * formantVoicingGate);
+
+    // Soft-knee noise floor gate
+    if (cleanVocal < 5.0f) {
+        cleanVocal = (cleanVocal * cleanVocal) / 5.0f;
     }
 
-    // Voice pitch gate: active when vocal periodicity is detected or strong vocal formant dominance is present
-    float pitchPeriodicityGate = constrain((voiceConfidence - 0.14f) / 0.22f, 0.0f, 1.0f);
-    float formantVoicingGate = constrain((vocalDominance - 0.28f) / 0.35f, 0.0f, 1.0f);
-    float voicePitchGate = constrain(pitchPeriodicityGate * 0.75f + formantVoicingGate * 0.55f, 0.0f, 1.0f);
-    cleanVocal *= (0.25f + 0.75f * voicePitchGate);
-
-    // Soft-knee noise floor gate to suppress low-level instrumental bleed and room noise
-    if (cleanVocal < 6.0f) {
-        cleanVocal = (cleanVocal * cleanVocal) / 6.0f;
-    }
-
-    // Dynamic vocal baseline tracker (tau ~ 0.40s)
-    vocal_avg += (cleanVocal - vocal_avg) * (dt * 2.5f);
-    float vocalDiff = cleanVocal - vocal_avg;
-    if (vocalDiff < 0.0f) vocalDiff = 0.0f;
-
-    // Dynamic AGC tracker with adaptive headroom (floor at 10.0f)
-    if (vocalDiff > vocal_max) {
-        vocal_max = vocalDiff;
+    // Level-based Vocal Headroom Tracker (Slow decay tau ~2.5s so sustained held notes don't fade!)
+    if (cleanVocal > vocal_max) {
+        vocal_max = cleanVocal;
     } else {
-        vocal_max -= dt * (vocal_max * 0.35f);
+        vocal_max -= dt * (vocal_max * 0.15f);
     }
-    if (vocal_max < 10.0f) vocal_max = 10.0f;
-    float vocalPunch = constrain((vocalDiff / vocal_max) * sens * (0.3f + 0.7f * voicePitchGate), 0.0f, 1.0f);
+    if (vocal_max < 12.0f) vocal_max = 12.0f;
+
+    // Absolute Vocal Level (Maintains bright, steady glow during held notes!)
+    float vocalLevelNorm = constrain((cleanVocal / vocal_max) * sens * (0.25f + 0.75f * voicePitchGate), 0.0f, 1.0f);
+    float vocalPunch = vocalLevelNorm;
 
     switch (current_mode) {
         case LedMode::REACT_BASS_PULSE: {
@@ -576,75 +558,81 @@ void LEDManager::updateReactiveModes(float dt) {
         }
 
         case LedMode::REACT_VOCAL_LIGHTNING: {
-            // Strictly react to voice pitch and vocal delivery: extinguish when no vocals
-            if (voicePitchGate < 0.10f || voicePitch < 70.0f || vocalPunch < 0.03f) {
-                lightning_intensity -= dt * 6.5f;
+            // Expression Engine for Singer Vocal Performance (Unwavering sustained notes, smooth melody transitions, vibrato & organic breath release)
+            static float last_voice_pitch = 180.0f;
+            if (voicePitchGate < 0.06f || voicePitch < 70.0f || vocalLevelNorm < 0.02f) {
+                // Natural organic breath release on phrase endings (~450ms release)
+                lightning_intensity -= dt * 2.2f;
                 if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
-                if (lightning_intensity <= 0.01f) {
+                if (lightning_intensity <= 0.005f) {
                     leds[0] = CRGB::Black;
                     break;
                 }
             } else {
-                // Active Voice Pitch! Explosive lightning attack on vocal delivery
-                if (vocalPunch > lightning_intensity) {
-                    lightning_intensity += (vocalPunch - lightning_intensity) * (dt * 28.0f);
+                // Smooth, responsive attack and unwavering sustain during held vocal notes
+                if (vocalLevelNorm > lightning_intensity) {
+                    lightning_intensity += (vocalLevelNorm - lightning_intensity) * (dt * 18.0f);
                 } else {
-                    lightning_intensity -= dt * 4.2f;
-                    if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
+                    // Soft decay follows vocal dynamics without dropping out during held notes
+                    lightning_intensity += (vocalLevelNorm - lightning_intensity) * (dt * 4.5f);
                 }
             }
 
-            if (lightning_intensity <= 0.01f) {
+            if (lightning_intensity <= 0.005f) {
                 leds[0] = CRGB::Black;
                 break;
             }
 
-            // Human singing pitch normalization across vocal octaves (80 Hz to 650 Hz):
-            float clampedPitch = constrain(voicePitch, 80.0f, 650.0f);
-            float pitchNorm = constrain(log2f(clampedPitch / 80.0f) / log2f(650.0f / 80.0f), 0.0f, 1.0f);
+            // Human singing pitch normalization across vocal octaves (85 Hz to 650 Hz):
+            float clampedPitch = constrain((voicePitch > 60.0f ? voicePitch : last_voice_pitch), 85.0f, 650.0f);
+            if (voicePitch > 60.0f) last_voice_pitch = voicePitch;
+            float pitchNorm = constrain(log2f(clampedPitch / 85.0f) / log2f(650.0f / 85.0f), 0.0f, 1.0f);
 
-            // Dynamic lightning brightness curve (zero resting aura - black when not singing)
-            float vocalCurve = lightning_intensity * lightning_intensity;
-            uint8_t vocalBright = (uint8_t)constrain((int)(vocalCurve * 255.0f), 0, 255);
+            // Vocal Vibrato Shimmer (~5-7 Hz micro-pitch variation tracking):
+            anim_phase += dt * 2.0f * (float)M_PI * 6.0f;
+            if (anim_phase > 2.0f * (float)M_PI) anim_phase -= 2.0f * (float)M_PI;
+            float vibratoShimmer = 1.0f + 0.06f * sinf(anim_phase) * constrain(voiceConfidence, 0.3f, 1.0f);
 
-            // Electrical micro-crackle jitter proportional to pitch
-            float crackle = 0.88f + 0.12f * ((rand() % 100) / 100.0f);
-            vocalBright = (uint8_t)(vocalBright * crackle);
+            // CRITICAL Hardware Safety (Level 50/255 Lowest Brightness):
+            // Use soft-knee/linear scaling and active illumination floor (>= 28 PWM counts)
+            // so FastLED at 50/255 setting preserves at least 3-6 PWM counts without blackout!
+            uint8_t minPWMFloor = (voicePitchGate > 0.05f && lightning_intensity > 0.02f) ? 28 : 0;
+            float vocalCurve = lightning_intensity * vibratoShimmer;
+            uint8_t vocalBright = (uint8_t)constrain((int)(vocalCurve * 227.0f) + minPWMFloor, 0, 255);
 
-            // Determine Lightning Hue and Saturation based on User Color Palette Option
+            // Determine Vocal Melody Hue & Saturation based on pitch spectrum or user palette
             bool isPitchMode = (color_index == 8); // "PTCH" dynamic pitch spectrum
             uint8_t pitchHue, pitchSat;
 
             if (isPitchMode) {
-                // Dynamic pitch spectrum: deep blue (low notes) -> electric cyan -> violet -> magenta
-                if (pitchNorm < 0.5f) {
-                    pitchHue = (uint8_t)(165.0f - (pitchNorm / 0.5f) * 35.0f);
+                // Vocal Melody Spectrum:
+                // Low Notes (85-180Hz, Amber/Gold) -> Mid Notes (180-320Hz, Emerald/Gold) ->
+                // Mid-High (320-500Hz, Electric Cyan/Blue) -> High Notes (500-650+Hz, Deep Violet/Magenta)
+                if (pitchNorm < 0.25f) {
+                    pitchHue = (uint8_t)(20.0f + (pitchNorm / 0.25f) * 20.0f); // Amber / Gold (20 -> 40)
+                    pitchSat = 240;
+                } else if (pitchNorm < 0.50f) {
+                    pitchHue = (uint8_t)(40.0f + ((pitchNorm - 0.25f) / 0.25f) * 50.0f); // Gold -> Emerald (40 -> 90)
+                    pitchSat = 230;
+                } else if (pitchNorm < 0.75f) {
+                    pitchHue = (uint8_t)(90.0f + ((pitchNorm - 0.50f) / 0.25f) * 75.0f); // Emerald -> Cyan/Blue (90 -> 165)
+                    pitchSat = 220;
                 } else {
-                    pitchHue = (uint8_t)(130.0f + ((pitchNorm - 0.5f) / 0.5f) * 105.0f);
+                    pitchHue = (uint8_t)(165.0f + ((pitchNorm - 0.75f) / 0.25f) * 65.0f); // Cyan/Blue -> Violet/Magenta (165 -> 230)
+                    pitchSat = 210;
                 }
-                pitchSat = (uint8_t)constrain(255.0f - pitchNorm * 90.0f, 120.0f, 255.0f);
             } else {
-                // Use user-selected palette color with pitch-modulated hue shift (+/- 25 deg)
+                // User-selected palette color: smoothly modulate hue around chosen color (+/- 30 deg)
                 CHSV baseHsv = rgb2hsv_approximate(current_color);
                 pitchHue = baseHsv.hue;
                 pitchSat = baseHsv.sat;
 
                 if (pitchSat > 20) {
-                    // Modulate hue dynamically around chosen color based on vocal pitch
-                    int16_t shifted = (int16_t)baseHsv.hue + (int16_t)((pitchNorm - 0.5f) * 36.0f);
+                    int16_t shifted = (int16_t)baseHsv.hue + (int16_t)((pitchNorm - 0.5f) * 40.0f);
                     if (shifted < 0) shifted += 256;
                     if (shifted >= 256) shifted -= 256;
                     pitchHue = (uint8_t)shifted;
-                    pitchSat = (uint8_t)constrain(baseHsv.sat - (int)(pitchNorm * 80.0f), 100, 255);
-                } else {
-                    // White palette: pure incandescent lightning with subtle ionization
-                    pitchSat = (uint8_t)constrain((fabsf(pitchNorm - 0.5f) * 30.0f), 0.0f, 30.0f);
                 }
-            }
-
-            // Instant blinding white strike on powerful vocal transients
-            if (vocalPunch > 0.65f) {
-                pitchSat = (uint8_t)(pitchSat * 0.35f);
             }
 
             leds[0] = CHSV(pitchHue, pitchSat, vocalBright);

@@ -111,13 +111,14 @@ void updateMainMenu() {
 
 int rgbMenuSelection = 0;
 int rgbMenuScrollOffset = 0;
-const int RGB_MENU_COUNT = 9;
+const int RGB_MENU_COUNT = 10;
 const char* rgbMenuLabels[] = {
     "Reactive Lights",
     "Mode",
     "Color",
     "Brightness",
     "Sensitivity",
+    "Vocal Check Tool",
     "Button Lights",
     "Off on Finish",
     "Test Pulse",
@@ -146,10 +147,11 @@ void updateRgbEffectsMode() {
         vals[2] = String("[") + ledManager.getColorName() + "]";
         vals[3] = String("[") + brBuf + "]";
         vals[4] = String("[") + ledManager.getSensitivityName() + "]";
-        vals[5] = String("[") + ledManager.getButtonFeedbackName() + "]";
-        vals[6] = String("[") + ledManager.getTurnOffOnCompleteName() + "]";
-        vals[7] = "[PULSE]";
-        vals[8] = "[EXIT]";
+        vals[5] = "[TOOL]";
+        vals[6] = String("[") + ledManager.getButtonFeedbackName() + "]";
+        vals[7] = String("[") + ledManager.getTurnOffOnCompleteName() + "]";
+        vals[8] = "[PULSE]";
+        vals[9] = "[EXIT]";
 
         display.drawStandardMenu("RGB LIGHTS", rgbMenuLabels, RGB_MENU_COUNT, rgbMenuSelection, rgbMenuScrollOffset, vals, batBuf);
         display.sendBuffer();
@@ -178,15 +180,18 @@ void updateRgbEffectsMode() {
                 ledManager.cycleSensitivity();
                 break;
             case 5:
-                ledManager.toggleButtonFeedback();
+                diagnostics.testVocalReactiveCheck();
                 break;
             case 6:
-                ledManager.toggleTurnOffOnComplete();
+                ledManager.toggleButtonFeedback();
                 break;
             case 7:
-                ledManager.triggerPulse(CRGB::White, 2, 70);
+                ledManager.toggleTurnOffOnComplete();
                 break;
             case 8:
+                ledManager.triggerPulse(CRGB::White, 2, 70);
+                break;
+            case 9:
                 ledManager.setMenuPreview(false);
                 currentMode = MODE_MAIN_MENU;
                 break;
