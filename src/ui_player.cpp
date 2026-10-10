@@ -502,9 +502,16 @@ void UIPlayer::renderTrackList() {
         display.drawTopStatusBar("Q-TUNES MUSIC", battery.getPercentage());
         U8G2 &u8g2 = display.getU8g2();
         u8g2.setFont(u8g2_font_6x10_tr);
-        u8g2.drawStr(10, 26, "SD Not Mounted");
-        u8g2.drawStr(10, 40, "SEL: Mount SD Card");
-        u8g2.drawStr(10, 54, "CANCEL: Main Menu");
+        if (sdManager.isExFAT()) {
+            u8g2.drawStr(10, 24, "SD: 64GB+ (exFAT)");
+            u8g2.drawStr(10, 36, "Format as FAT32");
+            u8g2.drawStr(10, 48, "for Q-Tune playback");
+            u8g2.drawStr(10, 60, "CANCEL: Main Menu");
+        } else {
+            u8g2.drawStr(10, 26, "SD Not Mounted");
+            u8g2.drawStr(10, 40, "SEL: Mount SD Card");
+            u8g2.drawStr(10, 54, "CANCEL: Main Menu");
+        }
     } else if (trackList.empty()) {
         display.drawTopStatusBar(currentCategoryTitle.c_str(), battery.getPercentage());
         U8G2 &u8g2 = display.getU8g2();

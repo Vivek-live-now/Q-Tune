@@ -32,9 +32,22 @@ public:
     std::vector<String> getRecentTracks();
     void addRecentTrack(const String &trackPath);
 
+    // High-Capacity SDXC (64GB+) & exFAT Detection
+    bool isSDXC() const;
+    bool isExFAT() const;
+    uint32_t getCardCapacityMB() const;
+    const char* getCardTypeName() const;
+    const char* getFilesystemName() const;
+
 private:
     bool mounted;
     bool safeToRemove;
+    bool cardIsSDXC;
+    bool cardIsExFAT;
+    uint32_t cardCapacityMB;
+    String cardTypeName;
+    String filesystemName;
+    void probeCardDetails();
     void scanDirRecursive(File &dir, const String &currentPath, File &indexFile, int &count, void (*progressCallback)(int));
 };
 

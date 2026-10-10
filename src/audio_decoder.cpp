@@ -15,6 +15,36 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3.h"
 
+#if __has_include(<libhelix-aac/aacdec.h>)
+#include <libhelix-aac/aacdec.h>
+#elif __has_include("libhelix-aac/aacdec.h")
+#include "libhelix-aac/aacdec.h"
+#elif __has_include("aacdec.h")
+#include "aacdec.h"
+#else
+extern "C" {
+typedef void *HAACDecoder;
+typedef struct _AACFrameInfo {
+    int bitRate;
+    int nChans;
+    int sampRateCore;
+    int sampRateOut;
+    int bitsPerSample;
+    int outputSamps;
+    int profile;
+    int tnsUsed;
+    int pnsUsed;
+} AACFrameInfo;
+HAACDecoder AACInitDecoder(void);
+void AACFreeDecoder(HAACDecoder hAACDecoder);
+int AACDecode(HAACDecoder hAACDecoder, unsigned char **inbuf, int *bytesLeft, short *outbuf);
+int AACFindSyncWord(unsigned char *buf, int nBytes);
+void AACGetLastFrameInfo(HAACDecoder hAACDecoder, AACFrameInfo *aacFrameInfo);
+int AACSetRawBlockParams(HAACDecoder hAACDecoder, int copyLast, AACFrameInfo *aacFrameInfo);
+int AACFlushCodec(HAACDecoder hAACDecoder);
+}
+#endif
+
 extern SemaphoreHandle_t spiBusMutex;
 
 static size_t wav_read_cb(void* pUserData, void* pBufferOut, size_t bytesToRead) {
@@ -270,7 +300,7 @@ uint32_t FLACDecoder::getTotalBytes() const { return totalBytes; }
 // ============================================================================
 
 MP3Decoder::MP3Decoder() :
-    pMp3Handle(nullptr), sampleRate(44100), channels(2), bitsPerSample(16),
+    pMp3Handle(nullptr), pScratch(nullptr), sampleRate(44100), channels(2), bitsPerSample(16),
     totalBytes(0), bytesReadSoFar(0), dataStartOffset(0),
     inputBufferLen(0), inputBufferPos(0),
     pcmBufferLen(0), pcmBufferPos(0) {
@@ -278,6 +308,7 @@ MP3Decoder::MP3Decoder() :
     if (pMp3Handle) {
         mp3dec_init((mp3dec_t*)pMp3Handle);
     }
+    pScratch = malloc(sizeof(mp3dec_scratch_t));
 }
 
 MP3Decoder::~MP3Decoder() {
@@ -285,6 +316,10 @@ MP3Decoder::~MP3Decoder() {
     if (pMp3Handle) {
         free(pMp3Handle);
         pMp3Handle = nullptr;
+    }
+    if (pScratch) {
+        free(pScratch);
+        pScratch = nullptr;
     }
 }
 
@@ -319,6 +354,10 @@ bool MP3Decoder::open(File &file) {
         pMp3Handle = malloc(sizeof(mp3dec_t));
         if (!pMp3Handle) return false;
     }
+    if (!pScratch) {
+        pScratch = malloc(sizeof(mp3dec_scratch_t));
+        if (!pScratch) return false;
+    }
     mp3dec_init((mp3dec_t*)pMp3Handle);
 
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
@@ -343,19 +382,18 @@ bool MP3Decoder::open(File &file) {
     if (inputBufferLen < 4) return false;
 
     mp3dec_frame_info_t info;
-    int samples = mp3dec_decode_frame((mp3dec_t*)pMp3Handle,
-                                      inputBuffer + inputBufferPos,
-                                      inputBufferLen - inputBufferPos,
-                                      pcmBuffer,
-                                      &info);
-
-    if (samples <= 0 && info.frame_bytes > 0) {
-        inputBufferPos += info.frame_bytes;
-        samples = mp3dec_decode_frame((mp3dec_t*)pMp3Handle,
-                                      inputBuffer + inputBufferPos,
-                                      inputBufferLen - inputBufferPos,
-                                      pcmBuffer,
-                                      &info);
+    int samples = 0;
+    for (int attempt = 0; attempt < 16 && (inputBufferLen - inputBufferPos) >= 4; attempt++) {
+        samples = mp3dec_decode_frame_scratch((mp3dec_t*)pMp3Handle,
+                                              inputBuffer + inputBufferPos,
+                                              inputBufferLen - inputBufferPos,
+                                              pcmBuffer,
+                                              &info,
+                                              pScratch);
+        if (info.hz > 0 && samples > 0) {
+            break;
+        }
+        inputBufferPos += (info.frame_bytes > 0) ? info.frame_bytes : 1;
     }
 
     if (info.hz > 0) {
@@ -381,7 +419,7 @@ bool MP3Decoder::open(File &file) {
 }
 
 int MP3Decoder::readSamples(uint8_t *buffer, size_t maxBytes) {
-    if (!srcFile || !pMp3Handle || buffer == nullptr || maxBytes == 0) return 0;
+    if (!srcFile || !pMp3Handle || !pScratch || buffer == nullptr || maxBytes == 0) return 0;
 
     size_t bytesWritten = 0;
     int16_t *outPtr = (int16_t*)buffer;
@@ -415,11 +453,12 @@ int MP3Decoder::readSamples(uint8_t *buffer, size_t maxBytes) {
             }
 
             mp3dec_frame_info_t info;
-            int samples = mp3dec_decode_frame((mp3dec_t*)pMp3Handle,
-                                              inputBuffer + inputBufferPos,
-                                              inputBufferLen - inputBufferPos,
-                                              pcmBuffer,
-                                              &info);
+            int samples = mp3dec_decode_frame_scratch((mp3dec_t*)pMp3Handle,
+                                                      inputBuffer + inputBufferPos,
+                                                      inputBufferLen - inputBufferPos,
+                                                      pcmBuffer,
+                                                      &info,
+                                                      pScratch);
 
             inputBufferPos += (info.frame_bytes > 0) ? info.frame_bytes : 1;
 
@@ -444,16 +483,24 @@ uint32_t MP3Decoder::getTotalBytes() const { return totalBytes; }
 // ============================================================================
 
 M4ADecoder::M4ADecoder() :
-    isRawADTS(false), sampleRate(44100), channels(2), bitsPerSample(16),
+    pAacHandle(nullptr), isRawADTS(false), sampleRate(44100), channels(2), bitsPerSample(16),
     totalBytes(0), bytesReadSoFar(0), mdatOffset(0), mdatSize(0), currentFilePos(0),
     inputBufferLen(0), inputBufferPos(0), pcmBufferLen(0), pcmBufferPos(0) {
+    pAacHandle = AACInitDecoder();
 }
 
 M4ADecoder::~M4ADecoder() {
     close();
+    if (pAacHandle) {
+        AACFreeDecoder((HAACDecoder)pAacHandle);
+        pAacHandle = nullptr;
+    }
 }
 
 void M4ADecoder::close() {
+    if (pAacHandle) {
+        AACFlushCodec((HAACDecoder)pAacHandle);
+    }
     if (srcFile) {
         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         srcFile.close();
@@ -597,6 +644,11 @@ bool M4ADecoder::open(File &file) {
     srcFile = file;
     if (!srcFile || srcFile.size() < 64) return false;
 
+    if (!pAacHandle) {
+        pAacHandle = AACInitDecoder();
+        if (!pAacHandle) return false;
+    }
+
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     srcFile.seek(0);
     uint8_t initHdr[8];
@@ -615,6 +667,8 @@ bool M4ADecoder::open(File &file) {
         bitsPerSample = 16;
         totalBytes = srcFile.size() * 6;
         srcFile.seek(0);
+        inputBufferLen = srcFile.read(inputBuffer, sizeof(inputBuffer));
+        inputBufferPos = 0;
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
         return true;
     }
@@ -627,13 +681,22 @@ bool M4ADecoder::open(File &file) {
         } else {
             srcFile.seek(0);
         }
+        inputBufferLen = srcFile.read(inputBuffer, sizeof(inputBuffer));
+        inputBufferPos = 0;
+
+        AACFrameInfo info;
+        memset(&info, 0, sizeof(info));
+        info.nChans = channels;
+        info.sampRateCore = sampleRate;
+        info.profile = 1; // AAC_PROFILE_LC
+        AACSetRawBlockParams((HAACDecoder)pAacHandle, 0, &info);
     }
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return ok;
 }
 
 int M4ADecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
-    if (!srcFile || buffer == nullptr || maxBytes == 0) return 0;
+    if (!srcFile || !pAacHandle || buffer == nullptr || maxBytes == 0) return 0;
 
     size_t bytesWritten = 0;
     int16_t *outPtr = (int16_t*)buffer;
@@ -649,16 +712,50 @@ int M4ADecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
             samplesNeeded -= toCopy;
             bytesWritten += toCopy * sizeof(int16_t);
         } else {
-            // Read next chunk from file
-            if (srcFile.available() <= 0) break;
+            // Refill input buffer from file if low
+            size_t unparsed = inputBufferLen - inputBufferPos;
+            if (unparsed < 1600 && srcFile.available() > 0) {
+                if (unparsed > 0) {
+                    memmove(inputBuffer, inputBuffer + inputBufferPos, unparsed);
+                }
+                if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+                int bytesRead = srcFile.read(inputBuffer + unparsed, sizeof(inputBuffer) - unparsed);
+                if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+                inputBufferLen = unparsed + ((bytesRead > 0) ? bytesRead : 0);
+                inputBufferPos = 0;
+            }
 
-            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-            int n = srcFile.read((uint8_t*)pcmBuffer, sizeof(pcmBuffer));
-            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+            if (inputBufferPos >= inputBufferLen) {
+                break; // EOF
+            }
 
-            if (n <= 0) break;
-            pcmBufferLen = n / sizeof(int16_t);
-            pcmBufferPos = 0;
+            if (isRawADTS) {
+                int syncOffset = AACFindSyncWord(inputBuffer + inputBufferPos, (int)(inputBufferLen - inputBufferPos));
+                if (syncOffset < 0) {
+                    inputBufferPos = inputBufferLen;
+                    continue;
+                }
+                inputBufferPos += syncOffset;
+            }
+
+            unsigned char *inPtr = inputBuffer + inputBufferPos;
+            int bytesLeft = (int)(inputBufferLen - inputBufferPos);
+            if (bytesLeft < 7) break;
+
+            int err = AACDecode((HAACDecoder)pAacHandle, &inPtr, &bytesLeft, (short*)pcmBuffer);
+            if (err == 0) {
+                inputBufferPos = inPtr - inputBuffer;
+                AACFrameInfo frameInfo;
+                AACGetLastFrameInfo((HAACDecoder)pAacHandle, &frameInfo);
+                if (frameInfo.outputSamps > 0) {
+                    pcmBufferLen = frameInfo.outputSamps;
+                    pcmBufferPos = 0;
+                    if (frameInfo.sampRateOut > 0) sampleRate = frameInfo.sampRateOut;
+                    if (frameInfo.nChans > 0) channels = frameInfo.nChans;
+                }
+            } else {
+                inputBufferPos++;
+            }
         }
     }
 

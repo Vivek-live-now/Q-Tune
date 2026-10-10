@@ -63,6 +63,11 @@ public:
     float getBassLevel() const { return bassLevel; }
     const uint8_t* getBands() const { return bands; }
 
+    // Top status bar auto-hide management (5-second timeout for full-screen view)
+    void wakeTopBar(unsigned long durationMs = 5000);
+    bool isTopBarVisible() const;
+    void resetTopBar();
+
 private:
     static const size_t SAMPLE_SIZE = 128;
     static const size_t RING_BUFFER_SIZE = 512;
@@ -86,6 +91,8 @@ private:
     float bassLevel;
     float bassFilterState1;
     float bassFilterState2;
+    unsigned long topBarExpiryMs;
+    unsigned long sensToastExpiryMs;
 
     void processFFT();
     void drawBars();

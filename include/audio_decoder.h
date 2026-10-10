@@ -63,6 +63,7 @@ public:
 private:
     File srcFile;
     void* pMp3Handle;
+    void* pScratch;
     uint32_t sampleRate;
     uint16_t channels;
     uint16_t bitsPerSample;
@@ -117,6 +118,7 @@ public:
 
 private:
     File srcFile;
+    void* pAacHandle;
     bool isRawADTS;
     uint32_t sampleRate;
     uint16_t channels;

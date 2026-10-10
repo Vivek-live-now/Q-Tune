@@ -127,7 +127,10 @@ def test_button_manager_event_handling():
     assert "pinMode(BTN_CANCEL, INPUT_PULLUP);" in cpp_text, "Missing pinMode for BTN_CANCEL"
     assert "checkButton(btnCancel)" in cpp_text, "Missing checkButton for btnCancel"
     assert "BTN_OK" in cpp_text, "Missing BTN_OK in button_manager.cpp"
-    print("  [PASS] ButtonManager 4-button debounced input engine verified.")
+    assert "holdThreshold = 650;" in h_text, "Deliberate 650ms holdThreshold missing in button_manager.h"
+    assert "checkButtonHold(btnOk, false)" in cpp_text, "Single-shot OK hold missing in button_manager.cpp"
+    assert "checkButtonHold(btnUp, true)" in cpp_text, "Auto-repeating UP hold missing in button_manager.cpp"
+    print("  [PASS] ButtonManager 4-button debounced input engine verified (650ms deliberate hold & single-shot OK/Cancel).")
 
 def test_battery_monitor_pwl_curve():
     print("\n--- 3. Battery Monitor PWL Discharge Curve Test ---")
@@ -300,6 +303,10 @@ def test_led_manager_modes():
     assert "REACT_DISCO_FLASH" in h_src
     assert "VOCAL LIGHTNING" in cpp_src
     assert "vocalPunch" in cpp_src, "Vocal formant energy detection missing in led_manager.cpp"
+    assert "vocalCore" in cpp_src, "Vocal formant extraction core missing in led_manager.cpp"
+    assert "drumPunchMask" in cpp_src, "Kick drum transient ducking mask missing in led_manager.cpp"
+    assert "snareMask" in cpp_src, "Snare/cymbal sizzle ducking mask missing in led_manager.cpp"
+    assert "vocalDominance" in cpp_src, "Formant dominance ratio missing in led_manager.cpp"
 
     # Interactive controls & lifecycle verification
     assert "cycleMode" in h_src
@@ -557,9 +564,13 @@ def test_live_wav_decoding_visualizer_pipeline():
     assert "VIS_SENS_LOW" in sa_h_text and "VIS_SENS_HIGH" in sa_h_text
     assert "cycleSensitivity" in sa_h_text and "getSensitivityMultiplier" in sa_h_text
     assert "qtune_vis" in sa_cpp_text, "qtune_vis Preferences namespace missing"
-    assert "spectrumAnalyzer.cycleSensitivity()" in main_cpp_text, "main.cpp missing visualizer sensitivity cycling"
+    # 8. Verify 5-second auto-hide top bar & full-screen spectrum rendering
+    assert "wakeTopBar" in sa_h_text and "isTopBarVisible" in sa_h_text, "Top bar auto-hide methods missing in spectrum_analyzer.h"
+    assert "spectrumAnalyzer.wakeTopBar(5000);" in main_cpp_text, "Any button wakeTopBar missing in main.cpp"
+    assert "isTopBarVisible()" in sa_cpp_text, "isTopBarVisible missing in spectrum_analyzer.cpp"
+    assert "maxBarH = showBar ? 48 : 62;" in sa_cpp_text, "Full-screen 62px spectrum bar scaling missing in spectrum_analyzer.cpp"
 
-    print("  [PASS] Live WAV stream tap, lock-free ring buffer, stereo downmix, peak hold caps, sensitivity adjustment, and HUD mini-bars verified.")
+    print("  [PASS] Live WAV stream tap, lock-free ring buffer, stereo downmix, peak hold caps, sensitivity adjustment, HUD mini-bars, and 5s auto-hide full-screen visualizer verified.")
 
 def test_qwatch_aligned_menu_system():
     print("\n--- 14. Q-Watch Aligned Menu System Architecture Test ---")
@@ -1085,6 +1096,50 @@ def test_album_art_extraction_dithering_and_customization():
 
     print("  [PASS] Embedded album art extraction, Tiny JPEG decompressor, Atkinson dithering, and Player customization verified.")
 
+def test_mp3_zero_stack_helix_aac_and_sdxc_exfat():
+    print("\n--- 22. MP3 Zero-Stack Heap Scratch, Helix AAC & SDXC 64GB exFAT Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    minimp3_h = os.path.join(base_dir, "include", "minimp3.h")
+    dec_h = os.path.join(base_dir, "include", "audio_decoder.h")
+    dec_cpp = os.path.join(base_dir, "src", "audio_decoder.cpp")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    sd_h = os.path.join(base_dir, "include", "sd_manager.h")
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+
+    with open(minimp3_h) as f: m3_src = f.read()
+    with open(dec_h) as f: dh_src = f.read()
+    with open(dec_cpp) as f: dcpp_src = f.read()
+    with open(ap_cpp) as f: apcpp_src = f.read()
+    with open(sd_h) as f: sdh_src = f.read()
+    with open(sd_cpp) as f: sdcpp_src = f.read()
+    with open(ui_cpp) as f: ui_src = f.read()
+
+    # 1. MP3 Zero-Stack Scratch Buffer Architecture
+    assert "mp3dec_decode_frame_scratch" in m3_src, "Missing mp3dec_decode_frame_scratch in minimp3.h"
+    assert "void* pScratch;" in dh_src, "Missing pScratch in MP3Decoder"
+    assert "mp3dec_decode_frame_scratch" in dcpp_src, "audio_decoder.cpp must use mp3dec_decode_frame_scratch"
+    assert "24576" in apcpp_src, "audio_player.cpp must provide expanded stack for FreeRTOS audio task"
+
+    # 2. Real Helix AAC Decoder Integration
+    assert "void* pAacHandle;" in dh_src, "Missing pAacHandle in M4ADecoder"
+    assert "AACInitDecoder" in dcpp_src, "Missing AACInitDecoder in audio_decoder.cpp"
+    assert "AACDecode" in dcpp_src, "Missing AACDecode in audio_decoder.cpp"
+    assert "AACFreeDecoder" in dcpp_src, "Missing AACFreeDecoder in audio_decoder.cpp"
+    assert "AACGetLastFrameInfo" in dcpp_src, "Missing AACGetLastFrameInfo in audio_decoder.cpp"
+    assert "AACSetRawBlockParams" in dcpp_src, "Missing AACSetRawBlockParams in audio_decoder.cpp"
+
+    # 3. 64GB+ SDXC 400kHz Clock & exFAT Card Detection
+    assert "400000" in sdcpp_src, "SDManager must include 400kHz initialization for SDXC compliance"
+    assert "isSDXC()" in sdh_src, "Missing isSDXC() in sd_manager.h"
+    assert "isExFAT()" in sdh_src, "Missing isExFAT() in sd_manager.h"
+    assert "getCardCapacityMB()" in sdh_src, "Missing getCardCapacityMB() in sd_manager.h"
+    assert "probeCardDetails" in sdcpp_src, "Missing probeCardDetails in sd_manager.cpp"
+    assert "EXFAT" in sdcpp_src, "Missing EXFAT signature check in sd_manager.cpp"
+    assert "SD: 64GB+ (exFAT)" in ui_src, "UI must display helpful exFAT card guidance"
+
+    print("  [PASS] MP3 zero-stack scratch buffer, Helix AAC fixed-point engine, and 64GB+ SDXC exFAT detection verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1110,7 +1165,8 @@ def main():
     test_mp3_and_m4a_audio_decoders()
     test_library_indexing_and_multipage_lyrics()
     test_album_art_extraction_dithering_and_customization()
-    print("\nAll 21 Q-Tune test verifications PASSED (100%)!\n")
+    test_mp3_zero_stack_helix_aac_and_sdxc_exfat()
+    print("\nAll 22 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

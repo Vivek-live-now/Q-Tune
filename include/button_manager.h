@@ -40,11 +40,11 @@ private:
     Button btnDn;
     Button btnCancel;
     const unsigned long debounceDelay = 50;
-    const unsigned long holdThreshold = 450;
+    const unsigned long holdThreshold = 650;
     const unsigned long repeatInterval = 150;
 
     bool checkButton(Button &btn);
-    bool checkButtonHold(Button &btn);
+    bool checkButtonHold(Button &btn, bool autoRepeat = false);
 };
 
 extern ButtonManager buttonManager;

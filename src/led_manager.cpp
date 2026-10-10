@@ -64,7 +64,7 @@ LEDManager::LEDManager() :
     rms_max(15.0f),
     total_max(15.0f),
     vocal_avg(5.0f),
-    vocal_max(15.0f),
+    vocal_max(25.0f),
     lightning_intensity(0.0f),
     last_lightning_time(0),
     lightning_burst_count(0)
@@ -469,18 +469,49 @@ void LEDManager::updateReactiveModes(float dt) {
     if (total_max < 8.0f) total_max = 8.0f;
     float harmonicNorm = constrain((totalHarmonics / total_max) * sens, 0.0f, 1.0f);
 
-    // 4. Vocal Frequency Range & Formant Extraction (~300 Hz to 2.5 kHz)
-    float vocalInst = (bands[3] * 1.0f + bands[4] * 1.3f + bands[5] * 1.5f + bands[6] * 1.5f + bands[7] * 1.2f + bands[8] * 1.0f);
-    vocal_avg += (vocalInst - vocal_avg) * (dt * 3.0f);
-    float vocalDiff = vocalInst - vocal_avg;
+    // 4. Vocal Formant Extraction (~500 Hz to 2.5 kHz) & Percussion Ducking Discrimination
+    // Human vowel formants F1 (300-900 Hz, Bands 1-2) and F2 (900-2500 Hz, Bands 2-5).
+    // Bands 6, 7, 8 (3 kHz - 6.2 kHz) are strictly excluded to reject snare snap and cymbals.
+    float vocalCore = (bands[1] * 0.9f + bands[2] * 1.5f + bands[3] * 1.6f + bands[4] * 1.4f + bands[5] * 0.9f);
+
+    // Percussion Discrimination:
+    // a) Kick drum transient punch ducking
+    float drumPunchMask = punchNorm * 0.65f;
+
+    // b) High-frequency percussion sizzle (snare wire snap, crash/hi-hat cymbals in 4-10 kHz)
+    float highSizzle = (bands[7] * 0.8f + bands[8] * 1.0f + bands[9] * 1.0f + bands[10] * 0.7f);
+    float snareRatio = (vocalCore > 1.0f) ? (highSizzle / vocalCore) : 0.0f;
+    float snareMask = 0.0f;
+    if (snareRatio > 0.85f) {
+        snareMask = constrain((snareRatio - 0.85f) * 1.2f, 0.0f, 0.75f);
+    }
+
+    // c) Mid-band Formant Dominance Ratio (vocal body vs extreme low-bass and high-treble flanks)
+    float flankEnergy = (bands[0] * 1.2f + highSizzle * 0.8f) + 2.0f;
+    float vocalDominance = vocalCore / flankEnergy;
+    float dominanceGate = constrain((vocalDominance - 0.35f) / 0.45f, 0.15f, 1.0f);
+
+    // Duck percussion transients and scale by vocal dominance
+    float totalInhibition = constrain(drumPunchMask + snareMask, 0.0f, 0.85f);
+    float cleanVocal = vocalCore * (1.0f - totalInhibition) * dominanceGate;
+
+    // Soft-knee noise floor gate to suppress low-level instrumental bleed and room noise
+    if (cleanVocal < 12.0f) {
+        cleanVocal = (cleanVocal * cleanVocal) / 12.0f;
+    }
+
+    // Dynamic vocal baseline tracker (tau ~ 0.40s)
+    vocal_avg += (cleanVocal - vocal_avg) * (dt * 2.5f);
+    float vocalDiff = cleanVocal - vocal_avg;
     if (vocalDiff < 0.0f) vocalDiff = 0.0f;
 
+    // Dynamic AGC tracker with elevated floor (24.0f) to avoid false-triggering on quiet passages
     if (vocalDiff > vocal_max) {
         vocal_max = vocalDiff;
     } else {
-        vocal_max -= dt * (vocal_max * 0.40f);
+        vocal_max -= dt * (vocal_max * 0.35f);
     }
-    if (vocal_max < 8.0f) vocal_max = 8.0f;
+    if (vocal_max < 24.0f) vocal_max = 24.0f;
     float vocalPunch = constrain((vocalDiff / vocal_max) * sens, 0.0f, 1.0f);
 
     switch (current_mode) {
@@ -513,9 +544,10 @@ void LEDManager::updateReactiveModes(float dt) {
                 if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
             }
 
-            // Quadratic response curve: gentle resting aura (value 10) to full vocal brilliance (255)
+            // Gentle resting aura when music is playing (dim background), blooming to brilliance on singing
+            uint8_t minAura = (energyNorm > 0.05f) ? 8 : 0;
             float vocalCurve = lightning_intensity * lightning_intensity * 0.75f + lightning_intensity * 0.25f;
-            uint8_t vocalBright = (uint8_t)constrain(10 + (int)(vocalCurve * 245.0f), 0, 255);
+            uint8_t vocalBright = (uint8_t)constrain((int)minAura + (int)(vocalCurve * (255 - minAura)), 0, 255);
 
             CRGB c = current_color;
             c.nscale8(vocalBright);

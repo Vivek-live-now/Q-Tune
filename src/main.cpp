@@ -187,6 +187,10 @@ void updateVisualizerMode() {
     spectrumAnalyzer.render();
 
     ButtonEvent evt = buttonManager.update();
+    if (evt != BTN_EVENT_NONE) {
+        spectrumAnalyzer.wakeTopBar(5000);
+    }
+
     if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
         spectrumAnalyzer.stop();
         currentMode = MODE_MAIN_MENU;

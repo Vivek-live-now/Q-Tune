@@ -80,7 +80,8 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 ## File System & Audio Format Requirements
 
 - **Directory:** `/music/`
-- **Supported Formats:** Extensible `AudioDecoder` framework for WAV, MP3, and FLAC files.
+- **Supported Formats:** Lossless WAV, FLAC, MP3 (powered by zero-stack heap scratch minimp3 engine), M4A, and AAC (powered by Helix fixed-point decoder).
+- **SD Card Support:** Supports SDSC, SDHC, and SDXC cards (up to 64GB+). Strictly negotiates at 400kHz SPI clock per SDXC specification. Includes hardware-level exFAT filesystem detection; for 64GB+ cards, format with FAT32 (using GUIFormat / Rufus) for full high-performance playback on ESP32.
 - **Sample Track Path:** `/music/song.wav`
 
 ---
@@ -148,15 +149,17 @@ Accessible directly from Main Menu item `3. RGB Light Effects`:
 | **Track List** | OK / SEL (Short) | Play selected track |
 | **Track List** | CANCEL (Short) | Return to Main Menu |
 | **Now Playing** | OK / SEL (Short) | Toggle Play / Pause |
-| **Now Playing** | OK / SEL (Hold >450ms) | Cycle Playback Mode (`[ALL]` → `[R-1]` → `[SHF]` → `[SGL]`) |
+| **Now Playing** | OK / SEL (Hold >650ms) | Cycle Page (Page 1: Player → Page 2: Track Info → Page 3: LRC Lyrics) |
 | **Now Playing** | UP / DOWN (Short) | Previous / Next track |
-| **Now Playing** | UP / DOWN (Hold >450ms) | Digital Volume Up / Down (with on-screen overlay) |
+| **Now Playing** | UP / DOWN (Hold >650ms) | Digital Volume Up / Down (with on-screen overlay) |
 | **Now Playing** | CANCEL (Short) | Return to Track List |
+| **Visualizer Mode** | Any Button | Reveal Top Status Bar (auto-hides after 5s for full-screen 128×64 visualizer) |
 | **Visualizer Mode** | UP / DOWN (Short) | Previous / Next visualizer preset (`BARS` ↔ `WAVE` ↔ `PLASMA` ↔ `STAR`) |
 | **Visualizer Mode** | OK / SEL (Short) | Toggle Play / Pause |
-| **Visualizer Mode** | UP / DOWN (Hold >450ms) | Digital Volume Up / Down |
+| **Visualizer Mode** | OK / SEL (Hold >650ms) | Cycle Visualizer Sensitivity (`LOW` → `NORMAL` → `HIGH`) |
+| **Visualizer Mode** | UP / DOWN (Hold >650ms) | Digital Volume Up / Down |
 | **Visualizer Mode** | CANCEL (Short / Hold) | Return to Main Menu (Playback continues in background) |
-| **Any Screen** | CANCEL (Hold >450ms) | Global escape to Main Menu |
+| **Any Screen** | CANCEL (Hold >650ms) | Global escape to Main Menu |
 
 ---
 

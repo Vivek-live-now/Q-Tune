@@ -698,7 +698,7 @@ void AudioPlayer::startAudioTask() {
         xTaskCreatePinnedToCore(
             audioTaskFunction,
             "QAudioTask",
-            16384,
+            24576,
             this,
             5,
             &audioTaskHandle,

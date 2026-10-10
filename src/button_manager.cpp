@@ -38,14 +38,14 @@ bool ButtonManager::checkButton(Button &btn) {
     return false;
 }
 
-bool ButtonManager::checkButtonHold(Button &btn) {
+bool ButtonManager::checkButtonHold(Button &btn, bool autoRepeat) {
     if (btn.currentState == LOW) {
         unsigned long now = millis();
         if (!btn.holdTriggered && (now - btn.pressStartTime >= holdThreshold)) {
             btn.holdTriggered = true;
             btn.lastRepeatTime = now;
             return true;
-        } else if (btn.holdTriggered && (now - btn.lastRepeatTime >= repeatInterval)) {
+        } else if (autoRepeat && btn.holdTriggered && (now - btn.lastRepeatTime >= repeatInterval)) {
             btn.lastRepeatTime = now;
             return true;
         }
@@ -54,11 +54,11 @@ bool ButtonManager::checkButtonHold(Button &btn) {
 }
 
 ButtonEvent ButtonManager::update() {
-    // Hold / repeat events
-    if (checkButtonHold(btnUp)) return BTN_EVENT_UP_HOLD;
-    if (checkButtonHold(btnDn)) return BTN_EVENT_DN_HOLD;
-    if (checkButtonHold(btnOk)) return BTN_EVENT_OK_HOLD;
-    if (checkButtonHold(btnCancel)) return BTN_EVENT_CANCEL_HOLD;
+    // Hold / repeat events (UP & DN auto-repeat for scrolling/volume; OK & CANCEL are deliberate single-shot)
+    if (checkButtonHold(btnUp, true)) return BTN_EVENT_UP_HOLD;
+    if (checkButtonHold(btnDn, true)) return BTN_EVENT_DN_HOLD;
+    if (checkButtonHold(btnOk, false)) return BTN_EVENT_OK_HOLD;
+    if (checkButtonHold(btnCancel, false)) return BTN_EVENT_CANCEL_HOLD;
 
     // Transition press events
     if (checkButton(btnUp)) return BTN_EVENT_UP_PRESS;

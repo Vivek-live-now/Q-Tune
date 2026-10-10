@@ -5,7 +5,10 @@
 #include <driver/gpio.h>
 #endif
 
-SDManager::SDManager() : mounted(false), safeToRemove(true) {}
+SDManager::SDManager() :
+    mounted(false), safeToRemove(true),
+    cardIsSDXC(false), cardIsExFAT(false), cardCapacityMB(0),
+    cardTypeName("None"), filesystemName("None") {}
 
 bool SDManager::begin() {
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
@@ -27,6 +30,8 @@ bool SDManager::begin() {
     // Always reset FATFS driver before re-initialization
     SD.end();
     mounted = false;
+    cardIsSDXC = false;
+    cardIsExFAT = false;
     delay(50);
 
     // Re-initialize SPI hardware bus on shared pins
@@ -40,9 +45,9 @@ bool SDManager::begin() {
     }
     delay(50);
 
-    // Multi-frequency retry loop: prioritize 4MHz for noise immunity on shared SPI bus
+    // Multi-frequency retry loop: strictly start with 400kHz per SDXC specification, then ramp up
     bool ok = false;
-    const uint32_t freqs[] = { 4000000, 8000000, 1000000 };
+    const uint32_t freqs[] = { 400000, 1000000, 4000000, 8000000 };
     for (int retry = 0; retry < 3 && !ok; retry++) {
         for (uint32_t freq : freqs) {
             if (SD.begin(SD_CS, SPI, freq)) {
@@ -63,6 +68,7 @@ bool SDManager::begin() {
     if (!ok) {
         mounted = false;
         safeToRemove = true;
+        probeCardDetails();
         pinMode(SD_CS, OUTPUT);
         digitalWrite(SD_CS, HIGH);
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -71,9 +77,92 @@ bool SDManager::begin() {
 
     mounted = true;
     safeToRemove = false;
+    probeCardDetails();
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return true;
 }
+
+void SDManager::probeCardDetails() {
+    if (mounted) {
+#if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+        uint8_t cType = SD.cardType();
+        cardCapacityMB = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
+        if (cardCapacityMB >= 60000 || cType == CARD_SDHC) {
+            if (cardCapacityMB >= 60000) {
+                cardIsSDXC = true;
+                cardTypeName = "SDXC (64GB+)";
+            } else {
+                cardIsSDXC = false;
+                cardTypeName = "SDHC";
+            }
+        } else {
+            cardIsSDXC = false;
+            cardTypeName = "SDSC";
+        }
+        filesystemName = "FAT32";
+#endif
+        return;
+    }
+
+    // Direct SPI probing for unmounted / exFAT SDXC cards
+    digitalWrite(SD_CS, LOW);
+    // Send CMD0 to test presence
+    uint8_t cmd0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
+    for (int i = 0; i < 6; i++) SPI.transfer(cmd0[i]);
+    uint8_t r1 = 0xFF;
+    for (int i = 0; i < 10 && (r1 == 0xFF); i++) r1 = SPI.transfer(0xFF);
+
+    if (r1 == 0x01 || r1 == 0x00) {
+        // Card responded to CMD0!
+        // Check CMD8 (Voltage & High Capacity Check)
+        uint8_t cmd8[] = {0x48, 0x00, 0x00, 0x01, 0xAA, 0x87};
+        for (int i = 0; i < 6; i++) SPI.transfer(cmd8[i]);
+        uint8_t r7 = 0xFF;
+        for (int i = 0; i < 10 && (r7 == 0xFF); i++) r7 = SPI.transfer(0xFF);
+        if (r7 == 0x01) {
+            uint8_t r7_bytes[4];
+            for (int i = 0; i < 4; i++) r7_bytes[i] = SPI.transfer(0xFF);
+            if (r7_bytes[2] == 0x01 && r7_bytes[3] == 0xAA) {
+                cardIsSDXC = true;
+                cardTypeName = "SDXC (64GB+)";
+                cardCapacityMB = 64000;
+            }
+        }
+
+        // Read Sector 0 / VBR via CMD17 to check for "EXFAT" signature
+        uint8_t cmd17[] = {0x51, 0x00, 0x00, 0x00, 0x00, 0xFF};
+        for (int i = 0; i < 6; i++) SPI.transfer(cmd17[i]);
+        uint8_t r17 = 0xFF;
+        for (int i = 0; i < 10 && (r17 == 0xFF); i++) r17 = SPI.transfer(0xFF);
+        if (r17 == 0x00) {
+            // Wait for start block token 0xFE
+            uint8_t token = 0xFF;
+            for (int i = 0; i < 2000 && (token != 0xFE); i++) token = SPI.transfer(0xFF);
+            if (token == 0xFE) {
+                uint8_t sector[512];
+                for (int i = 0; i < 512; i++) sector[i] = SPI.transfer(0xFF);
+                SPI.transfer(0xFF); SPI.transfer(0xFF); // CRC
+                // Check if sector 0 has "EXFAT   " at offset 3
+                if (sector[3] == 'E' && sector[4] == 'X' && sector[5] == 'F' &&
+                    sector[6] == 'A' && sector[7] == 'T') {
+                    cardIsExFAT = true;
+                    filesystemName = "exFAT";
+                } else if (sector[450] == 0x07) { // MBR partition type 0x07 = exFAT
+                    cardIsExFAT = true;
+                    filesystemName = "exFAT";
+                }
+            }
+        }
+    }
+    digitalWrite(SD_CS, HIGH);
+    for (int i = 0; i < 8; i++) SPI.transfer(0xFF);
+}
+
+bool SDManager::isSDXC() const { return cardIsSDXC; }
+bool SDManager::isExFAT() const { return cardIsExFAT; }
+uint32_t SDManager::getCardCapacityMB() const { return cardCapacityMB; }
+const char* SDManager::getCardTypeName() const { return cardTypeName.c_str(); }
+const char* SDManager::getFilesystemName() const { return filesystemName.c_str(); }
 
 bool SDManager::unmount() {
     if (!mounted && safeToRemove) return true;
