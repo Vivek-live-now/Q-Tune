@@ -48,21 +48,12 @@ bool SDManager::begin() {
     // Multi-frequency retry loop: strictly start with 400kHz per SDXC specification, then ramp up
     bool ok = false;
     const uint32_t freqs[] = { 400000, 1000000, 4000000, 8000000 };
-    for (int retry = 0; retry < 3 && !ok; retry++) {
-        for (uint32_t freq : freqs) {
-            if (SD.begin(SD_CS, SPI, freq)) {
-                ok = true;
-                break;
-            }
-            delay(25);
+    for (uint32_t freq : freqs) {
+        if (SD.begin(SD_CS, SPI, freq)) {
+            ok = true;
+            break;
         }
-        if (!ok) {
-            delay(50);
-            digitalWrite(SD_CS, HIGH);
-            for (int i = 0; i < 16; i++) {
-                SPI.transfer(0xFF);
-            }
-        }
+        delay(15);
     }
 
     if (!ok) {

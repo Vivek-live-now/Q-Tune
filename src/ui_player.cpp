@@ -22,7 +22,7 @@ UIPlayer::UIPlayer() :
     settingsScrollOffset(0) {}
 
 void UIPlayer::begin() {
-    if (!sdManager.isMounted()) sdManager.begin();
+    if (!sdManager.isMounted() && !sdManager.isExFAT()) sdManager.begin();
     playerConfig.begin();
 
     // If already playing or paused, jump straight to Now Playing view without restarting!
@@ -65,7 +65,7 @@ void UIPlayer::cyclePage() {
 }
 
 void UIPlayer::refreshTrackList() {
-    if (!sdManager.isMounted()) sdManager.begin();
+    if (!sdManager.isMounted() && !sdManager.isExFAT()) sdManager.begin();
     trackList = sdManager.listMusicFiles();
     if (currentTrackIndex >= (int)trackList.size()) {
         currentTrackIndex = 0;
