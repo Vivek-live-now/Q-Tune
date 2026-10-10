@@ -224,6 +224,26 @@ static drflac_bool32 flac_tell_cb(void* pUserData, drflac_int64* pCursor) {
     return DRFLAC_TRUE;
 }
 
+static void* flac_malloc_cb(size_t sz, void* pUserData) {
+    (void)pUserData;
+    if (psramFound()) {
+        void* p = ps_malloc(sz);
+        if (p) return p;
+    }
+    return malloc(sz);
+}
+
+static void* flac_realloc_cb(void* p, size_t sz, void* pUserData) {
+    (void)pUserData;
+    if (!p) return flac_malloc_cb(sz, pUserData);
+    return realloc(p, sz);
+}
+
+static void flac_free_cb(void* p, void* pUserData) {
+    (void)pUserData;
+    free(p);
+}
+
 FLACDecoder::FLACDecoder() :
     pFlacHandle(nullptr), sampleRate(44100), channels(2), bitsPerSample(16),
     totalBytes(0), bytesReadSoFar(0) {}
@@ -258,16 +278,17 @@ bool FLACDecoder::open(File &file) {
     srcFile = file;
     if (!srcFile || srcFile.size() < 42) return false;
 
-    // Verify 4-byte FLAC stream marker "fLaC"
-    uint8_t marker[4];
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
     srcFile.seek(0);
-    if (srcFile.read(marker, 4) != 4) return false;
-    if (marker[0] != 0x66 || marker[1] != 0x4C || marker[2] != 0x61 || marker[3] != 0x43) {
-        return false;
-    }
-    srcFile.seek(0);
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
-    drflac* pFlac = drflac_open(flac_read_cb, flac_seek_cb, flac_tell_cb, &srcFile, NULL);
+    drflac_allocation_callbacks allocCallbacks;
+    allocCallbacks.pUserData = nullptr;
+    allocCallbacks.onMalloc = flac_malloc_cb;
+    allocCallbacks.onRealloc = flac_realloc_cb;
+    allocCallbacks.onFree = flac_free_cb;
+
+    drflac* pFlac = drflac_open(flac_read_cb, flac_seek_cb, flac_tell_cb, &srcFile, &allocCallbacks);
     if (!pFlac) {
         srcFile = File();
         return false;
@@ -390,7 +411,23 @@ bool MP3Decoder::open(File &file) {
 
     mp3dec_frame_info_t info;
     int samples = 0;
-    for (int attempt = 0; attempt < 16 && (inputBufferLen - inputBufferPos) >= 4; attempt++) {
+    // Scan frames with dynamic refilling to handle large ID3 tags, Xing/Info headers, and 320kbps frames
+    for (int attempt = 0; attempt < 64; attempt++) {
+        size_t unparsed = inputBufferLen - inputBufferPos;
+        if (unparsed < 2304 && srcFile.available() > 0) {
+            if (unparsed > 0) {
+                memmove(inputBuffer, inputBuffer + inputBufferPos, unparsed);
+            }
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+            int bytesRead = srcFile.read(inputBuffer + unparsed, sizeof(inputBuffer) - unparsed);
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+            inputBufferLen = unparsed + ((bytesRead > 0) ? bytesRead : 0);
+            inputBufferPos = 0;
+            unparsed = inputBufferLen;
+        }
+
+        if (unparsed < 4) break;
+
         samples = mp3dec_decode_frame_scratch((mp3dec_t*)pMp3Handle,
                                               inputBuffer + inputBufferPos,
                                               inputBufferLen - inputBufferPos,
@@ -444,7 +481,9 @@ int MP3Decoder::readSamples(uint8_t *buffer, size_t maxBytes) {
         } else {
             // Need to decode next MP3 frame
             size_t unparsed = inputBufferLen - inputBufferPos;
-            if (unparsed < 1440 && srcFile.available() > 0) {
+            // Refill when buffer is below 2304 bytes (MAX_FREE_FORMAT_FRAME_SIZE) to guarantee
+            // that 320 kbps frames (1045 bytes + bit reservoir 511 bytes + next header 4 bytes) never underflow
+            if (unparsed < 2304 && srcFile.available() > 0) {
                 if (unparsed > 0) {
                     memmove(inputBuffer, inputBuffer + inputBufferPos, unparsed);
                 }
@@ -507,6 +546,8 @@ M4ADecoder::~M4ADecoder() {
 void M4ADecoder::close() {
     if (pAacHandle) {
         AACFlushCodec((HAACDecoder)pAacHandle);
+        AACFreeDecoder((HAACDecoder)pAacHandle);
+        pAacHandle = nullptr;
     }
     if (srcFile) {
         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
@@ -569,6 +610,7 @@ bool M4ADecoder::parseM4AAtoms(File &file) {
         memcpy(atomType, &hdr[4], 4);
         atomType[4] = '\0';
 
+        uint32_t headerLen = 8;
         if (atomSize == 0) {
             // Atom extends to end of file
             atomSize = file.size() - curPos;
@@ -577,6 +619,7 @@ bool M4ADecoder::parseM4AAtoms(File &file) {
             uint8_t largeHdr[8];
             if (file.read(largeHdr, 8) != 8) break;
             atomSize = ((uint32_t)largeHdr[4] << 24) | ((uint32_t)largeHdr[5] << 16) | ((uint32_t)largeHdr[6] << 8) | (uint32_t)largeHdr[7];
+            headerLen = 16;
         } else if (atomSize < 8) {
             break;
         }
@@ -585,8 +628,8 @@ bool M4ADecoder::parseM4AAtoms(File &file) {
             foundFtyp = true;
             file.seek(curPos + atomSize);
         } else if (strcmp(atomType, "mdat") == 0) {
-            mdatOffset = curPos + 8;
-            mdatSize = atomSize - 8;
+            mdatOffset = curPos + headerLen;
+            mdatSize = (atomSize > headerLen) ? (atomSize - headerLen) : 0;
             file.seek(curPos + atomSize);
         } else if (strcmp(atomType, "moov") == 0) {
             foundMoov = true;
@@ -623,12 +666,15 @@ bool M4ADecoder::parseM4AAtoms(File &file) {
                     uint8_t mp4aBuf[32];
                     if (file.read(mp4aBuf, sizeof(mp4aBuf)) >= 28) {
                         channels = ((uint16_t)mp4aBuf[16] << 8) | mp4aBuf[17];
-                        sampleRate = ((uint32_t)mp4aBuf[22] << 8) | mp4aBuf[23];
+                        sampleRate = ((uint32_t)mp4aBuf[24] << 8) | mp4aBuf[25];
                         if (sampleRate == 0) {
-                            sampleRate = ((uint32_t)mp4aBuf[24] << 8) | mp4aBuf[25];
+                            sampleRate = ((uint32_t)mp4aBuf[22] << 8) | mp4aBuf[23];
                         }
                     }
                     file.seek(subPos + subSize);
+                } else if (strcmp(subType, "stsd") == 0) {
+                    file.seek(subPos + 16);
+                    continue;
                 } else if (strcmp(subType, "trak") == 0 || strcmp(subType, "mdia") == 0 || strcmp(subType, "minf") == 0 || strcmp(subType, "stbl") == 0) {
                     continue;
                 } else {
@@ -736,7 +782,7 @@ int M4ADecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
         } else {
             // Refill input buffer from file if low
             size_t unparsed = inputBufferLen - inputBufferPos;
-            if (unparsed < 1600 && srcFile.available() > 0) {
+            if (unparsed < 2048 && srcFile.available() > 0) {
                 if (unparsed > 0) {
                     memmove(inputBuffer, inputBuffer + inputBufferPos, unparsed);
                 }
@@ -801,7 +847,15 @@ int M4ADecoder::readSamples(uint8_t *buffer, size_t maxBytes) {
                         inputBufferPos = inputBufferLen;
                     }
                 } else {
-                    inputBufferPos++;
+                    int nextSync = AACFindSyncWord(inputBuffer + inputBufferPos, (int)(inputBufferLen - inputBufferPos));
+                    if (nextSync == 0) {
+                        isRawADTS = true;
+                    } else if (nextSync > 0) {
+                        inputBufferPos += nextSync;
+                        isRawADTS = true;
+                    } else {
+                        inputBufferPos++;
+                    }
                 }
             }
         }

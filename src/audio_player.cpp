@@ -18,7 +18,7 @@ bool AudioPlayer::begin() {
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 8,
+        .dma_buf_count = 12,
         .dma_buf_len = 512,
         .use_apll = false,
         .tx_desc_auto_clear = true,
@@ -264,8 +264,8 @@ void AudioPlayer::update() {
     if (currentAudioType == 2 || currentAudioType == 3 || currentAudioType == 4) {
         // Multi-format stream decoding (FLAC = 2, MP3 = 3, M4A = 4)
         if (currentChannels == 1) {
-            int16_t monoBuf[256];
-            int16_t stereoBuf[512];
+            int16_t monoBuf[512];
+            int16_t stereoBuf[1024];
             int bytesToRead = sizeof(monoBuf);
 
             int bytesRead = 0;
@@ -294,8 +294,13 @@ void AudioPlayer::update() {
                 bytesPlayed += bytesRead;
             } else {
                 consecutiveReadErrors++;
-                bool fileEnded = (!wavFile || wavFile.available() == 0);
-                if (fileEnded || consecutiveReadErrors >= 100) {
+                bool streamAtEOF = false;
+                if (currentAudioType == 2) {
+                    streamAtEOF = (consecutiveReadErrors >= 3);
+                } else if (currentAudioType == 3 || currentAudioType == 4) {
+                    streamAtEOF = (consecutiveReadErrors >= 5 && (!wavFile || wavFile.available() == 0));
+                }
+                if (streamAtEOF || consecutiveReadErrors >= 100) {
                     bool cardGone = false;
                     if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
                         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
@@ -312,7 +317,7 @@ void AudioPlayer::update() {
                 }
             }
         } else {
-            uint8_t buffer[1024];
+            uint8_t buffer[2048];
             int bytesToRead = sizeof(buffer);
 
             int bytesRead = 0;
@@ -341,8 +346,13 @@ void AudioPlayer::update() {
                 bytesPlayed += bytesRead;
             } else {
                 consecutiveReadErrors++;
-                bool fileEnded = (!wavFile || wavFile.available() == 0);
-                if (fileEnded || consecutiveReadErrors >= 100) {
+                bool streamAtEOF = false;
+                if (currentAudioType == 2) {
+                    streamAtEOF = (consecutiveReadErrors >= 3);
+                } else if (currentAudioType == 3 || currentAudioType == 4) {
+                    streamAtEOF = (consecutiveReadErrors >= 5 && (!wavFile || wavFile.available() == 0));
+                }
+                if (streamAtEOF || consecutiveReadErrors >= 100) {
                     bool cardGone = false;
                     if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
                         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
@@ -364,17 +374,17 @@ void AudioPlayer::update() {
 
     if (currentChannels == 1) {
         // Expand Mono PCM to Stereo frames for MAX98357A I2S
-        int16_t monoBuf[256];
-        int16_t stereoBuf[512];
+        int16_t monoBuf[512];
+        int16_t stereoBuf[1024];
         int bytesToRead = sizeof(monoBuf);
-        if (bytesPlayed + bytesToRead > totalDataBytes) {
+        if (totalDataBytes > 0 && bytesPlayed + bytesToRead > totalDataBytes) {
             bytesToRead = totalDataBytes - bytesPlayed;
         }
 
         // Frame alignment: ensure bytesToRead is aligned to sample boundary (2 bytes)
         bytesToRead &= ~1;
 
-        if (bytesToRead <= 0) {
+        if (bytesToRead <= 0 && totalDataBytes > 0) {
             stop();
             trackFinished = true;
             return;
@@ -407,7 +417,8 @@ void AudioPlayer::update() {
             bytesPlayed += bytesRead;
         } else {
             consecutiveReadErrors++;
-            bool fileEnded = (!wavFile || wavFile.available() == 0 || bytesPlayed >= totalDataBytes);
+            bool fileEnded = (bytesPlayed >= totalDataBytes && totalDataBytes > 0) ||
+                             (consecutiveReadErrors >= 3 && (!wavFile || wavFile.available() == 0));
             if (fileEnded || consecutiveReadErrors >= 100) {
                 bool cardGone = false;
                 if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
@@ -426,16 +437,16 @@ void AudioPlayer::update() {
         }
     } else {
         // Direct Stereo PCM streaming
-        uint8_t buffer[1024];
+        uint8_t buffer[2048];
         int bytesToRead = sizeof(buffer);
-        if (bytesPlayed + bytesToRead > totalDataBytes) {
+        if (totalDataBytes > 0 && bytesPlayed + bytesToRead > totalDataBytes) {
             bytesToRead = totalDataBytes - bytesPlayed;
         }
 
         // Frame alignment: ensure bytesToRead is aligned to stereo frame boundary (4 bytes)
         bytesToRead &= ~3;
 
-        if (bytesToRead <= 0) {
+        if (bytesToRead <= 0 && totalDataBytes > 0) {
             stop();
             trackFinished = true;
             return;
@@ -468,7 +479,8 @@ void AudioPlayer::update() {
             bytesPlayed += bytesRead;
         } else {
             consecutiveReadErrors++;
-            bool fileEnded = (!wavFile || wavFile.available() == 0 || bytesPlayed >= totalDataBytes);
+            bool fileEnded = (bytesPlayed >= totalDataBytes && totalDataBytes > 0) ||
+                             (consecutiveReadErrors >= 3 && (!wavFile || wavFile.available() == 0));
             if (fileEnded || consecutiveReadErrors >= 100) {
                 bool cardGone = false;
                 if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
@@ -672,7 +684,13 @@ void AudioPlayer::audioTaskFunction(void *param) {
     while (player->taskRunning) {
         if (player->playing && !player->paused) {
             player->update();
-            vTaskDelay(pdMS_TO_TICKS(1));
+            if (!player->playing || player->paused) {
+                vTaskDelay(pdMS_TO_TICKS(15));
+            } else if (player->consecutiveReadErrors > 0) {
+                vTaskDelay(pdMS_TO_TICKS(2));
+            } else {
+                taskYIELD();
+            }
         } else {
             vTaskDelay(pdMS_TO_TICKS(15));
         }

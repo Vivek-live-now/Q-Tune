@@ -479,10 +479,12 @@ bool AlbumArtManager::loadForTrack(const String &audioPath) {
             } else if (lower.endsWith(".m4a") || lower.endsWith(".aac")) {
                 foundArt = findM4AArt(audioFile, artOffset, artSize);
             }
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
             if (foundArt) {
                 decodeJPEGFromStream(audioFile, artOffset, artSize, targetDim, dither);
             }
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
             audioFile.close();
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -494,11 +496,13 @@ bool AlbumArtManager::loadForTrack(const String &audioPath) {
         if (findFolderArt(audioPath, folderArtPath)) {
             if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
             File imgFile = SD.open(folderArtPath, FILE_READ);
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             if (imgFile) {
                 decodeJPEGFromStream(imgFile, 0, imgFile.size(), targetDim, dither);
+                if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
                 imgFile.close();
+                if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             }
-            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
         }
     }
 

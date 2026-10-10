@@ -46,9 +46,9 @@ bool SDManager::begin() {
     }
     delay(50);
 
-    // Multi-frequency retry loop: strictly start with 400kHz per SDXC specification, then ramp up
+    // Multi-frequency retry loop: prioritize high speed (10MHz/8MHz) for audio streaming bandwidth, down to 400kHz per SDXC specification
     bool ok = false;
-    const uint32_t freqs[] = { 400000, 1000000, 4000000, 8000000 };
+    const uint32_t freqs[] = { 10000000, 8000000, 4000000, 400000 };
     for (uint32_t freq : freqs) {
         if (SD.begin(SD_CS, SPI, freq)) {
             ok = true;
