@@ -350,6 +350,23 @@ bool UIPlayer::update() {
 
     } else if (currentView == VIEW_FOLDER_BROWSER) {
         // --- Hierarchical Folder Browser View ---
+        if (!sdManager.isMounted()) {
+            if (evt == BTN_EVENT_SEL_PRESS) {
+                sdManager.remount();
+                refreshCurrentFolder();
+                ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+            } else if (evt == BTN_EVENT_CANCEL_PRESS) {
+                currentView = VIEW_CATEGORIES;
+            }
+            static unsigned long lastFldRender = 0;
+            unsigned long nowFld = millis();
+            if (evt != BTN_EVENT_NONE || (nowFld - lastFldRender >= 250)) {
+                lastFldRender = nowFld;
+                renderFolderBrowser();
+            }
+            return true;
+        }
+
         bool hasParent = (currentFolderPath != "/music" && currentFolderPath != "/music/");
         int totalItems = (hasParent ? 1 : 0) + currentFolderDirs.size() + currentFolderFiles.size();
 
@@ -571,6 +588,24 @@ void UIPlayer::renderTrackList() {
 
 void UIPlayer::renderFolderBrowser() {
     display.clear();
+    if (!sdManager.isMounted()) {
+        display.drawTopStatusBar("FOLDER BROWSER", battery.getPercentage());
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        if (sdManager.isExFAT()) {
+            u8g2.drawStr(10, 24, "SD: 64GB+ (exFAT)");
+            u8g2.drawStr(10, 36, "Format as FAT32");
+            u8g2.drawStr(10, 48, "for Q-Tune playback");
+            u8g2.drawStr(10, 60, "CANCEL: Categories");
+        } else {
+            u8g2.drawStr(10, 26, "SD Not Mounted");
+            u8g2.drawStr(10, 40, "SEL: Mount SD Card");
+            u8g2.drawStr(10, 54, "CANCEL: Categories");
+        }
+        display.sendBuffer();
+        return;
+    }
+
     bool hasParent = (currentFolderPath != "/music" && currentFolderPath != "/music/");
     int totalItems = (hasParent ? 1 : 0) + currentFolderDirs.size() + currentFolderFiles.size();
 

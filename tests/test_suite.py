@@ -1,3 +1,6 @@
+def open_utf8(p, mode='r', **kw):
+    return open(p, mode, encoding='utf-8', errors='replace', **kw)
+
 #!/usr/bin/env python3
 """
 Q-Tune Verification Test Suite
@@ -11,7 +14,7 @@ import struct
 
 def parse_hw_config(filepath):
     pins = {}
-    with open(filepath, 'r') as f:
+    with open_utf8(filepath, 'r') as f:
         for line in f:
             m = re.match(r'^\s*#define\s+([A-Za-z0-9_]+)\s+([0-9]+)', line)
             if m:
@@ -113,9 +116,9 @@ def test_button_manager_event_handling():
     btn_h = os.path.join(base_dir, "include", "button_manager.h")
     btn_cpp = os.path.join(base_dir, "src", "button_manager.cpp")
 
-    with open(btn_h) as f:
+    with open_utf8(btn_h) as f:
         h_text = f.read()
-    with open(btn_cpp) as f:
+    with open_utf8(btn_cpp) as f:
         cpp_text = f.read()
 
     assert "BTN_EVENT_CANCEL_PRESS" in h_text, "Missing BTN_EVENT_CANCEL_PRESS"
@@ -216,7 +219,7 @@ def test_wav_header_parser():
     # Verify AudioPlayer source code has dynamic chunk parsing and mono expansion
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
-    with open(ap_cpp) as f:
+    with open_utf8(ap_cpp) as f:
         ap_src = f.read()
     assert "dataOffset" in ap_src, "AudioPlayer must track dataOffset"
     assert "monoBuf" in ap_src and "stereoBuf" in ap_src, "AudioPlayer must support mono-to-stereo expansion for MAX98357A"
@@ -240,7 +243,7 @@ def test_power_manager_scaling():
     assert os.path.exists(pm_h), "power_manager.h not found"
     assert os.path.exists(pm_cpp), "power_manager.cpp not found"
 
-    with open(pm_cpp) as f:
+    with open_utf8(pm_cpp) as f:
         src = f.read()
 
     assert "case PowerProfile::PERFORMANCE: return 240;" in src
@@ -281,9 +284,9 @@ def test_led_manager_modes():
     led_h = os.path.join(base_dir, "include", "led_manager.h")
     led_cpp = os.path.join(base_dir, "src", "led_manager.cpp")
 
-    with open(led_h) as f:
+    with open_utf8(led_h) as f:
         h_src = f.read()
-    with open(led_cpp) as f:
+    with open_utf8(led_cpp) as f:
         cpp_src = f.read()
 
     assert "BREATHING" in h_src
@@ -331,9 +334,9 @@ def test_led_manager_modes():
     assert "master_enabled" in cpp_src
     assert "button_feedback_enabled" in cpp_src
     assert "off_on_complete" in cpp_src
-    assert "Reactive Lights" in open(os.path.join(base_dir, "src", "main.cpp")).read()
-    assert "Button Lights" in open(os.path.join(base_dir, "src", "main.cpp")).read()
-    assert "Off on Finish" in open(os.path.join(base_dir, "src", "main.cpp")).read()
+    assert "Reactive Lights" in open_utf8(os.path.join(base_dir, "src", "main.cpp")).read()
+    assert "Button Lights" in open_utf8(os.path.join(base_dir, "src", "main.cpp")).read()
+    assert "Off on Finish" in open_utf8(os.path.join(base_dir, "src", "main.cpp")).read()
     print("  [PASS] FastLED non-blocking loop, 7 music-reactive modes (including Vocal Lightning), NVS settings persistence, master toggle, button feedback, and finish auto-off verified.")
 
 def test_inmp441_microphone_pipeline():
@@ -352,11 +355,11 @@ def test_inmp441_microphone_pipeline():
     assert pins['UART0_RX'] == 44, "UART0_RX should be GPIO 44 (freed for dedicated serial)"
     assert pins['I2S_MIC_DIN'] not in {0, 3, 45, 46}, "I2S_MIC_DIN cannot be strapping pin"
 
-    with open(spec_h) as f:
+    with open_utf8(spec_h) as f:
         sh_text = f.read()
-    with open(spec_cpp) as f:
+    with open_utf8(spec_cpp) as f:
         scpp_text = f.read()
-    with open(diag_cpp) as f:
+    with open_utf8(diag_cpp) as f:
         dcpp_text = f.read()
 
     # Lifecycle and telemetry methods
@@ -385,9 +388,9 @@ def test_digital_volume_control_and_scaling():
     ap_h = os.path.join(base_dir, "include", "audio_player.h")
     ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
 
-    with open(ap_h) as f:
+    with open_utf8(ap_h) as f:
         h_src = f.read()
-    with open(ap_cpp) as f:
+    with open_utf8(ap_cpp) as f:
         cpp_src = f.read()
 
     assert "void setVolume(uint8_t volume);" in h_src, "Missing setVolume in audio_player.h"
@@ -425,23 +428,23 @@ def test_freertos_audio_task_and_spi_mutex():
     sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
     main_cpp = os.path.join(base_dir, "src", "main.cpp")
 
-    with open(hw_h) as f:
+    with open_utf8(hw_h) as f:
         assert "extern SemaphoreHandle_t spiBusMutex;" in f.read()
-    with open(ap_h) as f:
+    with open_utf8(ap_h) as f:
         h_text = f.read()
         assert "startAudioTask()" in h_text
         assert "stopAudioTask()" in h_text
         assert "isAudioTaskRunning()" in h_text
-    with open(ap_cpp) as f:
+    with open_utf8(ap_cpp) as f:
         cpp_text = f.read()
         assert "xTaskCreatePinnedToCore" in cpp_text
         assert "xSemaphoreTake(spiBusMutex" in cpp_text
         assert "xSemaphoreGive(spiBusMutex" in cpp_text
-    with open(disp_cpp) as f:
+    with open_utf8(disp_cpp) as f:
         assert "xSemaphoreTake(spiBusMutex" in f.read()
-    with open(sd_cpp) as f:
+    with open_utf8(sd_cpp) as f:
         assert "xSemaphoreTake(spiBusMutex" in f.read()
-    with open(main_cpp) as f:
+    with open_utf8(main_cpp) as f:
         assert "xSemaphoreCreateMutex()" in f.read()
 
     print("  [PASS] FreeRTOS Core 0 background task and multi-core SPI mutex arbitration verified.")
@@ -453,12 +456,12 @@ def test_playback_modes_and_track_advance():
     ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
     ap_h = os.path.join(base_dir, "include", "audio_player.h")
 
-    with open(ap_h) as f:
+    with open_utf8(ap_h) as f:
         ap_text = f.read()
         assert "hasFinished()" in ap_text
         assert "clearFinished()" in ap_text
 
-    with open(ui_h) as f:
+    with open_utf8(ui_h) as f:
         h_text = f.read()
         assert "PLAY_MODE_ALL" in h_text
         assert "PLAY_MODE_REPEAT_ONE" in h_text
@@ -467,7 +470,7 @@ def test_playback_modes_and_track_advance():
         assert "playNextTrack()" in h_text
         assert "playPreviousTrack()" in h_text
 
-    with open(ui_cpp) as f:
+    with open_utf8(ui_cpp) as f:
         cpp_text = f.read()
         assert "playNextTrack" in cpp_text
         assert "audioPlayer.hasFinished()" in cpp_text
@@ -481,7 +484,7 @@ def test_app_shell_and_mode_switching():
     main_cpp = os.path.join(base_dir, "src", "main.cpp")
     diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
 
-    with open(main_cpp) as f:
+    with open_utf8(main_cpp) as f:
         m_text = f.read()
         assert "MODE_MAIN_MENU" in m_text
         assert "MODE_PLAYER" in m_text
@@ -492,7 +495,7 @@ def test_app_shell_and_mode_switching():
         assert "updateMainMenu()" in m_text
         assert "uiPlayer.update()" in m_text
 
-    with open(diag_cpp) as f:
+    with open_utf8(diag_cpp) as f:
         d_text = f.read()
         assert "Return to Menu" in d_text
         assert "bool Diagnostics::runMenu()" in d_text
@@ -509,17 +512,17 @@ def test_live_wav_decoding_visualizer_pipeline():
     ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
     main_cpp = os.path.join(base_dir, "src", "main.cpp")
 
-    with open(sa_h) as f:
+    with open_utf8(sa_h) as f:
         sa_h_text = f.read()
-    with open(sa_cpp) as f:
+    with open_utf8(sa_cpp) as f:
         sa_cpp_text = f.read()
-    with open(ap_h) as f:
+    with open_utf8(ap_h) as f:
         ap_h_text = f.read()
-    with open(ap_cpp) as f:
+    with open_utf8(ap_cpp) as f:
         ap_cpp_text = f.read()
-    with open(ui_cpp) as f:
+    with open_utf8(ui_cpp) as f:
         ui_cpp_text = f.read()
-    with open(main_cpp) as f:
+    with open_utf8(main_cpp) as f:
         main_cpp_text = f.read()
 
     # 1. Verify thread-safe lock-free sample tap declarations
@@ -581,15 +584,15 @@ def test_qwatch_aligned_menu_system():
     ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
     diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
 
-    with open(disp_h) as f:
+    with open_utf8(disp_h) as f:
         dh_text = f.read()
-    with open(disp_cpp) as f:
+    with open_utf8(disp_cpp) as f:
         dcpp_text = f.read()
-    with open(main_cpp) as f:
+    with open_utf8(main_cpp) as f:
         m_text = f.read()
-    with open(ui_cpp) as f:
+    with open_utf8(ui_cpp) as f:
         u_text = f.read()
-    with open(diag_cpp) as f:
+    with open_utf8(diag_cpp) as f:
         diag_text = f.read()
 
     # 1. Verify Display declarations match Q-Watch signatures
@@ -670,17 +673,17 @@ def test_flac_decoder_and_clean_naming():
     # 1. Verify dr_flac header presence
     assert os.path.exists(dr_flac_h), "dr_flac.h missing from include directory"
 
-    with open(dec_h) as f:
+    with open_utf8(dec_h) as f:
         dh_src = f.read()
-    with open(dec_cpp) as f:
+    with open_utf8(dec_cpp) as f:
         dcpp_src = f.read()
-    with open(ap_h) as f:
+    with open_utf8(ap_h) as f:
         aph_src = f.read()
-    with open(ap_cpp) as f:
+    with open_utf8(ap_cpp) as f:
         apcpp_src = f.read()
-    with open(main_cpp) as f:
+    with open_utf8(main_cpp) as f:
         main_src = f.read()
-    with open(readme_md) as f:
+    with open_utf8(readme_md) as f:
         readme_src = f.read()
 
     # 2. Verify FLAC Decoder integration
@@ -721,14 +724,14 @@ def test_sd_safety_mechanisms():
     main_cpp = os.path.join(base_dir, "src", "main.cpp")
     ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
 
-    with open(sd_h) as f: sdh_src = f.read()
-    with open(sd_cpp) as f: sdcpp_src = f.read()
-    with open(pm_h) as f: pmh_src = f.read()
-    with open(pm_cpp) as f: pmcpp_src = f.read()
-    with open(ap_h) as f: aph_src = f.read()
-    with open(ap_cpp) as f: apcpp_src = f.read()
-    with open(main_cpp) as f: main_src = f.read()
-    with open(ui_cpp) as f: ui_src = f.read()
+    with open_utf8(sd_h) as f: sdh_src = f.read()
+    with open_utf8(sd_cpp) as f: sdcpp_src = f.read()
+    with open_utf8(pm_h) as f: pmh_src = f.read()
+    with open_utf8(pm_cpp) as f: pmcpp_src = f.read()
+    with open_utf8(ap_h) as f: aph_src = f.read()
+    with open_utf8(ap_cpp) as f: apcpp_src = f.read()
+    with open_utf8(main_cpp) as f: main_src = f.read()
+    with open_utf8(ui_cpp) as f: ui_src = f.read()
 
     # 1. SDManager Unmount & Standby Protocol
     assert "bool unmount();" in sdh_src, "Missing unmount() declaration"
@@ -774,20 +777,20 @@ def test_fiio_ka11_usb_dac_and_safe_eject():
     diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
     ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
 
-    with open(hw_h) as f: hw_src = f.read()
-    with open(usb_h) as f: usbh_src = f.read()
-    with open(usb_cpp) as f: usbcpp_src = f.read()
-    with open(ap_h) as f: aph_src = f.read()
-    with open(ap_cpp) as f: apcpp_src = f.read()
-    with open(diag_cpp) as f: diag_src = f.read()
-    with open(ui_cpp) as f: ui_src = f.read()
+    with open_utf8(hw_h) as f: hw_src = f.read()
+    with open_utf8(usb_h) as f: usbh_src = f.read()
+    with open_utf8(usb_cpp) as f: usbcpp_src = f.read()
+    with open_utf8(ap_h) as f: aph_src = f.read()
+    with open_utf8(ap_cpp) as f: apcpp_src = f.read()
+    with open_utf8(diag_cpp) as f: diag_src = f.read()
+    with open_utf8(ui_cpp) as f: ui_src = f.read()
 
     # 1. Native USB-OTG Host Hardware Configuration
     assert "USB_HOST_DM" in hw_src and "19" in hw_src, "USB_HOST_DM must be defined on GPIO 19"
     assert "USB_HOST_DP" in hw_src and "20" in hw_src, "USB_HOST_DP must be defined on GPIO 20"
 
     pio_ini = os.path.join(base_dir, "platformio.ini")
-    with open(pio_ini) as f: ini_src = f.read()
+    with open_utf8(pio_ini) as f: ini_src = f.read()
     assert "-DARDUINO_USB_CDC_ON_BOOT=1" in ini_src, "platformio.ini must enable ARDUINO_USB_CDC_ON_BOOT"
     assert "-DARDUINO_USB_MODE=1" in ini_src, "platformio.ini must set ARDUINO_USB_MODE"
 
@@ -829,19 +832,19 @@ def test_wifi_streaming_and_dlna_media_renderer():
     assert os.path.exists(wifi_cpp), "wifi_streamer.cpp not found"
     assert os.path.exists(partitions_csv), "partitions.csv not found"
 
-    with open(wifi_h) as f:
+    with open_utf8(wifi_h) as f:
         wh_src = f.read()
-    with open(wifi_cpp) as f:
+    with open_utf8(wifi_cpp) as f:
         wcpp_src = f.read()
-    with open(ap_h) as f:
+    with open_utf8(ap_h) as f:
         aph_src = f.read()
-    with open(ap_cpp) as f:
+    with open_utf8(ap_cpp) as f:
         apcpp_src = f.read()
-    with open(main_cpp) as f:
+    with open_utf8(main_cpp) as f:
         main_src = f.read()
-    with open(partitions_csv) as f:
+    with open_utf8(partitions_csv) as f:
         part_src = f.read()
-    with open(pio_ini) as f:
+    with open_utf8(pio_ini) as f:
         ini_src = f.read()
 
     # 1. Verify Partition Table & PSRAM config
@@ -889,12 +892,12 @@ def test_mp3_and_m4a_audio_decoders():
     assert os.path.exists(dec_h), "audio_decoder.h missing"
     assert os.path.exists(dec_cpp), "audio_decoder.cpp missing"
 
-    with open(dec_h) as f: dh_src = f.read()
-    with open(dec_cpp) as f: dcpp_src = f.read()
-    with open(ap_h) as f: aph_src = f.read()
-    with open(ap_cpp) as f: apcpp_src = f.read()
-    with open(sd_cpp) as f: sdcpp_src = f.read()
-    with open(ui_cpp) as f: ui_src = f.read()
+    with open_utf8(dec_h) as f: dh_src = f.read()
+    with open_utf8(dec_cpp) as f: dcpp_src = f.read()
+    with open_utf8(ap_h) as f: aph_src = f.read()
+    with open_utf8(ap_cpp) as f: apcpp_src = f.read()
+    with open_utf8(sd_cpp) as f: sdcpp_src = f.read()
+    with open_utf8(ui_cpp) as f: ui_src = f.read()
 
     # 1. MP3 Decoder & minimp3 Engine Integration
     assert "class MP3Decoder : public AudioDecoder" in dh_src, "MP3Decoder class missing"
@@ -941,14 +944,14 @@ def test_library_indexing_and_multipage_lyrics():
 
     assert os.path.exists(lrc_h) and os.path.exists(lrc_cpp), "Lyrics parser files missing"
 
-    with open(sd_h) as f: sdh_src = f.read()
-    with open(sd_cpp) as f: sdcpp_src = f.read()
-    with open(ap_h) as f: aph_src = f.read()
-    with open(ap_cpp) as f: apcpp_src = f.read()
-    with open(ui_h) as f: uih_src = f.read()
-    with open(ui_cpp) as f: uicpp_src = f.read()
-    with open(lrc_h) as f: lrch_src = f.read()
-    with open(lrc_cpp) as f: lrccpp_src = f.read()
+    with open_utf8(sd_h) as f: sdh_src = f.read()
+    with open_utf8(sd_cpp) as f: sdcpp_src = f.read()
+    with open_utf8(ap_h) as f: aph_src = f.read()
+    with open_utf8(ap_cpp) as f: apcpp_src = f.read()
+    with open_utf8(ui_h) as f: uih_src = f.read()
+    with open_utf8(ui_cpp) as f: uicpp_src = f.read()
+    with open_utf8(lrc_h) as f: lrch_src = f.read()
+    with open_utf8(lrc_cpp) as f: lrccpp_src = f.read()
 
     # 1. SD Card Library Indexing and Caching
     assert "hasLibraryIndex()" in sdh_src, "hasLibraryIndex missing from sd_manager.h"
@@ -1031,13 +1034,13 @@ def test_album_art_extraction_dithering_and_customization():
     assert os.path.exists(art_h) and os.path.exists(art_cpp), "Album art manager files missing"
     assert os.path.exists(cfg_h) and os.path.exists(cfg_cpp), "Player config files missing"
 
-    with open(tjpgd_cnf) as f: cnf_src = f.read()
-    with open(art_h) as f: arth_src = f.read()
-    with open(art_cpp) as f: artcpp_src = f.read()
-    with open(cfg_h) as f: cfgh_src = f.read()
-    with open(cfg_cpp) as f: cfgcpp_src = f.read()
-    with open(ui_h) as f: uih_src = f.read()
-    with open(ui_cpp) as f: uicpp_src = f.read()
+    with open_utf8(tjpgd_cnf) as f: cnf_src = f.read()
+    with open_utf8(art_h) as f: arth_src = f.read()
+    with open_utf8(art_cpp) as f: artcpp_src = f.read()
+    with open_utf8(cfg_h) as f: cfgh_src = f.read()
+    with open_utf8(cfg_cpp) as f: cfgcpp_src = f.read()
+    with open_utf8(ui_h) as f: uih_src = f.read()
+    with open_utf8(ui_cpp) as f: uicpp_src = f.read()
 
     # 1. TJpgDec Configuration
     assert "JD_FORMAT\t\t2" in cnf_src, "TJpgDec must output 8-bit grayscale (JD_FORMAT 2)"
@@ -1113,13 +1116,13 @@ def test_mp3_zero_stack_helix_aac_and_sdxc_exfat():
     sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
     ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
 
-    with open(minimp3_h) as f: m3_src = f.read()
-    with open(dec_h) as f: dh_src = f.read()
-    with open(dec_cpp) as f: dcpp_src = f.read()
-    with open(ap_cpp) as f: apcpp_src = f.read()
-    with open(sd_h) as f: sdh_src = f.read()
-    with open(sd_cpp) as f: sdcpp_src = f.read()
-    with open(ui_cpp) as f: ui_src = f.read()
+    with open_utf8(minimp3_h) as f: m3_src = f.read()
+    with open_utf8(dec_h) as f: dh_src = f.read()
+    with open_utf8(dec_cpp) as f: dcpp_src = f.read()
+    with open_utf8(ap_cpp) as f: apcpp_src = f.read()
+    with open_utf8(sd_h) as f: sdh_src = f.read()
+    with open_utf8(sd_cpp) as f: sdcpp_src = f.read()
+    with open_utf8(ui_cpp) as f: ui_src = f.read()
 
     # 1. MP3 Zero-Stack Scratch Buffer Architecture
     assert "mp3dec_decode_frame_scratch" in m3_src, "Missing mp3dec_decode_frame_scratch in minimp3.h"

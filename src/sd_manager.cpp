@@ -104,24 +104,52 @@ void SDManager::probeCardDetails() {
         return;
     }
 
-    // Direct SPI probing for unmounted / exFAT SDXC cards
+    // Direct SPI probing for unmounted / exFAT SDXC cards per SD Physical Layer Specification
+    // Strictly clock at <= 400000 Hz (250kHz) during card identification and initialization
+    SPI.beginTransaction(SPISettings(250000, MSBFIRST, SPI_MODE0));
+
+    // Provide >= 80 clock cycles with CS HIGH to wake controller and synchronize SPI mode
+    pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
-    for (int i = 0; i < 10; i++) SPI.transfer(0xFF); // 80 clock cycles to wake SD controller
-    digitalWrite(SD_CS, LOW);
+    for (int i = 0; i < 20; i++) {
+        SPI.transfer(0xFF);
+    }
+    delay(5);
 
-    // 1. Send CMD0 to place card into SPI IDLE state
-    uint8_t cmd0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
-    for (int i = 0; i < 6; i++) SPI.transfer(cmd0[i]);
+    auto sendSdCmd = [](uint8_t cmd, uint32_t arg, uint8_t crc) -> uint8_t {
+        digitalWrite(SD_CS, HIGH);
+        SPI.transfer(0xFF);
+        digitalWrite(SD_CS, LOW);
+        SPI.transfer(0xFF);
+
+        uint8_t pkt[6] = {
+            (uint8_t)(0x40 | cmd),
+            (uint8_t)(arg >> 24),
+            (uint8_t)(arg >> 16),
+            (uint8_t)(arg >> 8),
+            (uint8_t)(arg),
+            crc
+        };
+        for (int i = 0; i < 6; i++) SPI.transfer(pkt[i]);
+
+        uint8_t resp = 0xFF;
+        for (int i = 0; i < 200 && (resp & 0x80); i++) {
+            resp = SPI.transfer(0xFF);
+        }
+        return resp;
+    };
+
+    // 1. Send CMD0 to place card into SPI IDLE state (0x01)
     uint8_t r1 = 0xFF;
-    for (int i = 0; i < 200 && (r1 == 0xFF); i++) r1 = SPI.transfer(0xFF);
+    for (int attempt = 0; attempt < 10 && (r1 != 0x01 && r1 != 0x00); attempt++) {
+        r1 = sendSdCmd(0, 0x00000000, 0x95);
+        delay(2);
+    }
 
-    if (r1 == 0x01) {
-        // Card is in IDLE state.
+    if (r1 == 0x01 || r1 == 0x00) {
+        // Card is responding in SPI mode.
         // 2. Send CMD8 (SEND_IF_COND) to verify SDv2 voltage & high capacity support
-        uint8_t cmd8[] = {0x48, 0x00, 0x00, 0x01, 0xAA, 0x87};
-        for (int i = 0; i < 6; i++) SPI.transfer(cmd8[i]);
-        uint8_t r7 = 0xFF;
-        for (int i = 0; i < 100 && (r7 == 0xFF); i++) r7 = SPI.transfer(0xFF);
+        uint8_t r7 = sendSdCmd(8, 0x000001AA, 0x87);
         bool isV2 = false;
         if (r7 == 0x01) {
             uint8_t r7_bytes[4];
@@ -134,21 +162,14 @@ void SDManager::probeCardDetails() {
             }
         }
 
-        // 3. ACMD41 initialization loop (CMD55 + ACMD41 with HCS=1) to leave IDLE state
+        // 3. ACMD41 initialization loop (CMD55 + ACMD41 with HCS=1) with 400000 Hz spec compliance
         uint32_t startMs = millis();
         bool ready = false;
-        while ((millis() - startMs < 1000) && !ready) {
+        while ((millis() - startMs < 1500) && !ready) {
             // CMD55 (APP_CMD)
-            uint8_t cmd55[] = {0x77, 0x00, 0x00, 0x00, 0x00, 0x65};
-            for (int i = 0; i < 6; i++) SPI.transfer(cmd55[i]);
-            uint8_t r55 = 0xFF;
-            for (int i = 0; i < 20 && (r55 == 0xFF); i++) r55 = SPI.transfer(0xFF);
-
-            // ACMD41 with HCS (bit 30 = 0x40) for SDHC/SDXC
-            uint8_t acmd41[] = {0x69, (uint8_t)(isV2 ? 0x40 : 0x00), 0x00, 0x00, 0x00, 0x77};
-            for (int i = 0; i < 6; i++) SPI.transfer(acmd41[i]);
-            uint8_t r41 = 0xFF;
-            for (int i = 0; i < 50 && (r41 == 0xFF); i++) r41 = SPI.transfer(0xFF);
+            sendSdCmd(55, 0x00000000, 0x65);
+            // ACMD41 with HCS (bit 30 = 0x40000000) for SDHC/SDXC (opcode 0x69)
+            uint8_t r41 = sendSdCmd(41, isV2 ? 0x40000000 : 0x00000000, 0x77);
 
             if (r41 == 0x00) {
                 ready = true;
@@ -158,11 +179,8 @@ void SDManager::probeCardDetails() {
         }
 
         if (ready) {
-            // 4. Send CMD58 (READ_OCR) to verify Card Capacity Status (CCS)
-            uint8_t cmd58[] = {0x7A, 0x00, 0x00, 0x00, 0x00, 0xFD};
-            for (int i = 0; i < 6; i++) SPI.transfer(cmd58[i]);
-            uint8_t r58 = 0xFF;
-            for (int i = 0; i < 20 && (r58 == 0xFF); i++) r58 = SPI.transfer(0xFF);
+            // 4. Send CMD58 (READ_OCR) to verify Card Capacity Status (CCS bit 30)
+            uint8_t r58 = sendSdCmd(58, 0x00000000, 0xFD);
             if (r58 == 0x00) {
                 uint8_t ocr[4];
                 for (int i = 0; i < 4; i++) ocr[i] = SPI.transfer(0xFF);
@@ -173,11 +191,11 @@ void SDManager::probeCardDetails() {
                 }
             }
 
+            // Set 512-byte block length via CMD16
+            sendSdCmd(16, 512, 0xFF);
+
             // 5. Read Sector 0 via CMD17 (READ_SINGLE_BLOCK) to inspect filesystem signature
-            uint8_t cmd17[] = {0x51, 0x00, 0x00, 0x00, 0x00, 0xFF};
-            for (int i = 0; i < 6; i++) SPI.transfer(cmd17[i]);
-            uint8_t r17 = 0xFF;
-            for (int i = 0; i < 50 && (r17 == 0xFF); i++) r17 = SPI.transfer(0xFF);
+            uint8_t r17 = sendSdCmd(17, 0x00000000, 0xFF);
             if (r17 == 0x00) {
                 uint8_t token = 0xFF;
                 for (int i = 0; i < 5000 && (token != 0xFE); i++) token = SPI.transfer(0xFF);
@@ -185,6 +203,8 @@ void SDManager::probeCardDetails() {
                     uint8_t sector[512];
                     for (int i = 0; i < 512; i++) sector[i] = SPI.transfer(0xFF);
                     SPI.transfer(0xFF); SPI.transfer(0xFF); // CRC
+                    digitalWrite(SD_CS, HIGH);
+                    SPI.transfer(0xFF);
 
                     // Check for "EXFAT   " at offset 3 (Superfloppy VBR)
                     if (memcmp(&sector[3], "EXFAT   ", 8) == 0) {
@@ -193,40 +213,46 @@ void SDManager::probeCardDetails() {
                         cardIsSDXC = true;
                         cardTypeName = "SDXC (64GB+)";
                         if (cardCapacityMB < 64000) cardCapacityMB = 64000;
-                    } else if (sector[450] == 0x07) {
-                        // MBR Partition Type 0x07 = exFAT / NTFS
-                        cardIsExFAT = true;
-                        filesystemName = "exFAT";
-                        cardIsSDXC = true;
-                        cardTypeName = "SDXC (64GB+)";
-                        if (cardCapacityMB < 64000) cardCapacityMB = 64000;
+                    }
 
-                        uint32_t partLba = sector[454] | ((uint32_t)sector[455] << 8) |
-                                           ((uint32_t)sector[456] << 16) | ((uint32_t)sector[457] << 24);
-                        if (partLba > 0) {
-                            uint8_t cmd17_part[] = {
-                                0x51,
-                                (uint8_t)(partLba >> 24),
-                                (uint8_t)(partLba >> 16),
-                                (uint8_t)(partLba >> 8),
-                                (uint8_t)(partLba),
-                                0xFF
-                            };
-                            for (int i = 0; i < 6; i++) SPI.transfer(cmd17_part[i]);
-                            uint8_t r17p = 0xFF;
-                            for (int i = 0; i < 50 && (r17p == 0xFF); i++) r17p = SPI.transfer(0xFF);
-                            if (r17p == 0x00) {
-                                uint8_t tok2 = 0xFF;
-                                for (int i = 0; i < 5000 && (tok2 != 0xFE); i++) tok2 = SPI.transfer(0xFF);
-                                if (tok2 == 0xFE) {
-                                    uint8_t partSec[512];
-                                    for (int i = 0; i < 512; i++) partSec[i] = SPI.transfer(0xFF);
-                                    SPI.transfer(0xFF); SPI.transfer(0xFF);
-                                    if (memcmp(&partSec[3], "EXFAT   ", 8) == 0) {
-                                        cardIsExFAT = true;
-                                        filesystemName = "exFAT";
+                    // Check all 4 MBR partition table entries (offsets 446, 462, 478, 494)
+                    if (!cardIsExFAT && sector[510] == 0x55 && sector[511] == 0xAA) {
+                        for (int p = 0; p < 4; p++) {
+                            int pOffset = 446 + (p * 16);
+                            uint8_t pType = sector[pOffset + 4];
+                            uint32_t partLba = sector[pOffset + 8] |
+                                               ((uint32_t)sector[pOffset + 9] << 8) |
+                                               ((uint32_t)sector[pOffset + 10] << 16) |
+                                               ((uint32_t)sector[pOffset + 11] << 24);
+
+                            if (pType == 0x07 || pType == 0xEE) {
+                                // MBR Type 0x07 = exFAT/NTFS, Type 0xEE = GPT Protective MBR
+                                cardIsExFAT = true;
+                                filesystemName = "exFAT";
+                                cardIsSDXC = true;
+                                cardTypeName = "SDXC (64GB+)";
+                                if (cardCapacityMB < 64000) cardCapacityMB = 64000;
+
+                                if (partLba > 0) {
+                                    uint8_t r17p = sendSdCmd(17, partLba, 0xFF);
+                                    if (r17p == 0x00) {
+                                        uint8_t tok2 = 0xFF;
+                                        for (int i = 0; i < 5000 && (tok2 != 0xFE); i++) tok2 = SPI.transfer(0xFF);
+                                        if (tok2 == 0xFE) {
+                                            uint8_t partSec[512];
+                                            for (int i = 0; i < 512; i++) partSec[i] = SPI.transfer(0xFF);
+                                            SPI.transfer(0xFF); SPI.transfer(0xFF); // CRC
+                                            digitalWrite(SD_CS, HIGH);
+                                            SPI.transfer(0xFF);
+
+                                            if (memcmp(&partSec[3], "EXFAT   ", 8) == 0) {
+                                                cardIsExFAT = true;
+                                                filesystemName = "exFAT";
+                                            }
+                                        }
                                     }
                                 }
+                                break;
                             }
                         }
                     }
@@ -234,8 +260,18 @@ void SDManager::probeCardDetails() {
             }
         }
     }
+
     digitalWrite(SD_CS, HIGH);
     for (int i = 0; i < 8; i++) SPI.transfer(0xFF);
+    SPI.endTransaction();
+
+    if (cardIsExFAT) {
+        Serial.println("\n[SD] ========================================================");
+        Serial.println("[SD] SDXC (64GB+) exFAT Card Detected!");
+        Serial.println("[SD] Note: ESP32 hardware FatFs requires FAT32 for playback.");
+        Serial.println("[SD] Please format card as FAT32 (32KB clusters) via GUIFormat/Rufus.");
+        Serial.println("[SD] ========================================================\n");
+    }
 }
 
 bool SDManager::isSDXC() const { return cardIsSDXC; }

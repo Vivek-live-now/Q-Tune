@@ -81,7 +81,13 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 
 - **Directory:** `/music/`
 - **Supported Formats:** Lossless WAV, FLAC, MP3 (powered by zero-stack heap scratch minimp3 engine), M4A, and AAC (powered by Helix fixed-point decoder).
-- **SD Card Support:** Supports SDSC, SDHC, and SDXC cards (up to 64GB+). Strictly negotiates at 400kHz SPI clock per SDXC specification. Includes hardware-level exFAT filesystem detection; for 64GB+ cards, format with FAT32 (using GUIFormat / Rufus) for full high-performance playback on ESP32.
+- **SD Card Support:** Supports SDSC, SDHC, and SDXC cards (up to 64GB, 128GB, 256GB+). Strictly negotiates at <= 400kHz SPI clock per SDXC specification. Includes hardware-level direct SPI exFAT filesystem detection:
+  - **Why FAT32 on ESP32:** The ESP32 hardware FatFs driver requires FAT32 for zero-copy DMA streaming and glitch-free audio playback. Modern SDXC cards (64GB+) are pre-formatted as exFAT by manufacturers.
+  - **Formatting 64GB+ cards to FAT32:**
+    1. **Windows:** Download free **GUIFormat** (`fat32format`) or **Rufus**. Select your SD card drive, choose **FAT32** with **32KB** (or 64KB) Allocation Unit Size, and perform a Quick Format. (Windows' built-in format utility limits FAT32 to 32GB; GUIFormat removes this restriction up to 2TB).
+    2. **macOS:** Open Terminal: `diskutil eraseDisk FAT32 QTUNE MBRFormat /dev/diskX` (replace X with your SD card disk number).
+    3. **Linux:** `sudo mkfs.vfat -F 32 -s 64 /dev/sdX1`
+  - Create the `/music` folder at the root of the card and copy your tracks into it.
 - **Sample Track Path:** `/music/song.wav`
 
 ---

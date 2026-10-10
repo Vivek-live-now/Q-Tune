@@ -277,7 +277,13 @@ void updateSystemInfoMode() {
             ledManager.triggerButtonPulse(CRGB::Orange, 2, 80);
         } else {
             sdManager.remount();
-            ledManager.triggerButtonPulse(CRGB::Green, 2, 80);
+            if (sdManager.isMounted()) {
+                ledManager.triggerButtonPulse(CRGB::Green, 2, 80);
+            } else if (sdManager.isExFAT()) {
+                ledManager.triggerButtonPulse(CRGB::Orange, 2, 80);
+            } else {
+                ledManager.triggerButtonPulse(CRGB::Red, 2, 80);
+            }
         }
     } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
         currentMode = MODE_MAIN_MENU;
