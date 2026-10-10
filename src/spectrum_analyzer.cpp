@@ -18,6 +18,8 @@ SpectrumAnalyzer::SpectrumAnalyzer() :
     bassLevel(0.0f),
     bassFilterState1(0.0f),
     bassFilterState2(0.0f),
+    voicePitch(0.0f),
+    voiceConfidence(0.0f),
     topBarExpiryMs(0),
     sensToastExpiryMs(0) {
     memset(bands, 0, sizeof(bands));
@@ -173,6 +175,8 @@ void SpectrumAnalyzer::clearSamples() {
     bassLevel = 0.0f;
     bassFilterState1 = 0.0f;
     bassFilterState2 = 0.0f;
+    voicePitch = 0.0f;
+    voiceConfidence = 0.0f;
     ringHead = 0;
 }
 
@@ -191,6 +195,8 @@ void SpectrumAnalyzer::sampleAudioStream() {
         bassLevel = bassLevel * 0.70f;
         bassFilterState1 = 0.0f;
         bassFilterState2 = 0.0f;
+        voicePitch = 0.0f;
+        voiceConfidence = voiceConfidence * 0.70f;
         for (size_t i = 0; i < SAMPLE_SIZE; i++) {
             micBuffer[i] = 0;
         }
@@ -245,6 +251,7 @@ void SpectrumAnalyzer::sampleAudioStream() {
     bassLevel = sqrtf(bassSumSq / SAMPLE_SIZE) * sensMult;
 
     processFFT();
+    detectVoicePitch();
 }
 
 void SpectrumAnalyzer::sampleMicrophone() {
@@ -330,6 +337,7 @@ void SpectrumAnalyzer::sampleMicrophone() {
     bassLevel = rmsLevel * 0.7f;
 
     processFFT();
+    detectVoicePitch();
 }
 
 void SpectrumAnalyzer::processFFT() {
@@ -427,6 +435,106 @@ void SpectrumAnalyzer::processFFT() {
                 peakDecayTimer[b] = 0;
             }
         }
+    }
+}
+
+void SpectrumAnalyzer::detectVoicePitch() {
+    // Human voice fundamental pitch range: ~80 Hz to ~800 Hz
+    // Downsample circular ring buffer by 4: effective fs = 44100 / 4 = 11025 Hz
+    // At fs = 11025 Hz:
+    // Min lag = 11025 / 800 ~= 14 samples (~787 Hz)
+    // Max lag = 11025 / 80  ~= 138 samples (~80 Hz)
+    const size_t DOWNSAMPLE = 4;
+    const size_t N_SAMPLES = 256;
+    int16_t down[N_SAMPLES];
+
+    size_t head = ringHead;
+    size_t start = (head + RING_BUFFER_SIZE - (N_SAMPLES * DOWNSAMPLE)) % RING_BUFFER_SIZE;
+
+    int32_t dcSum = 0;
+    for (size_t i = 0; i < N_SAMPLES; i++) {
+        size_t idx = (start + i * DOWNSAMPLE) % RING_BUFFER_SIZE;
+        down[i] = ringBuffer[idx];
+        dcSum += down[i];
+    }
+    int16_t dc = (int16_t)(dcSum / (int32_t)N_SAMPLES);
+    for (size_t i = 0; i < N_SAMPLES; i++) {
+        down[i] -= dc;
+    }
+
+    // Correlation window length N = 80 samples
+    const size_t CORR_LEN = 80;
+    const size_t MIN_LAG = 14;  // ~787 Hz
+    const size_t MAX_LAG = 138; // ~80 Hz
+
+    float energy0 = 0.0f;
+    for (size_t n = 0; n < CORR_LEN; n++) {
+        float s = (float)down[n];
+        energy0 += s * s;
+    }
+
+    if (energy0 < 20000.0f) {
+        // Below acoustic noise floor
+        voiceConfidence = voiceConfidence * 0.70f;
+        return;
+    }
+
+    float bestCorr = -1.0f;
+    size_t bestLag = 0;
+
+    for (size_t lag = MIN_LAG; lag <= MAX_LAG; lag++) {
+        float num = 0.0f;
+        float energyLag = 0.0f;
+        for (size_t n = 0; n < CORR_LEN; n++) {
+            float s0 = (float)down[n];
+            float sLag = (float)down[n + lag];
+            num += s0 * sLag;
+            energyLag += sLag * sLag;
+        }
+
+        float denom = sqrtf(energy0 * energyLag) + 1.0f;
+        float normCorr = num / denom;
+
+        if (normCorr > bestCorr) {
+            bestCorr = normCorr;
+            bestLag = lag;
+        }
+    }
+
+    float refinedLag = (float)bestLag;
+    if (bestLag > MIN_LAG && bestLag < MAX_LAG && bestCorr > 0.35f) {
+        // Parabolic interpolation for fine sub-sample pitch resolution
+        auto getCorr = [&](size_t l) -> float {
+            float num = 0.0f, el = 0.0f;
+            for (size_t n = 0; n < CORR_LEN; n++) {
+                float s0 = (float)down[n];
+                float sl = (float)down[n + l];
+                num += s0 * sl;
+                el += sl * sl;
+            }
+            return num / (sqrtf(energy0 * el) + 1.0f);
+        };
+        float y1 = getCorr(bestLag - 1);
+        float y2 = bestCorr;
+        float y3 = getCorr(bestLag + 1);
+        float denom = 2.0f * (2.0f * y2 - y1 - y3);
+        if (fabsf(denom) > 1e-4f) {
+            float delta = (y3 - y1) / denom;
+            refinedLag += constrain(delta, -0.5f, 0.5f);
+        }
+    }
+
+    if (refinedLag >= (float)MIN_LAG && bestCorr > 0.35f) {
+        float rawPitch = 11025.0f / refinedLag;
+        // Smooth pitch tracking
+        if (voiceConfidence > 0.40f && voicePitch > 60.0f) {
+            voicePitch += (rawPitch - voicePitch) * 0.40f;
+        } else {
+            voicePitch = rawPitch;
+        }
+        voiceConfidence += (constrain(bestCorr, 0.0f, 1.0f) - voiceConfidence) * 0.50f;
+    } else {
+        voiceConfidence = voiceConfidence * 0.60f;
     }
 }
 

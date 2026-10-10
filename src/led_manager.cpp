@@ -363,12 +363,16 @@ void LEDManager::updateReactiveModes(float dt) {
                 break;
             }
             case LedMode::REACT_VOCAL_LIGHTNING: {
-                // Smooth demo breathing vocal glow in user selected color
-                float sweep = 0.5f + 0.5f * sinf(anim_phase * 2.8f);
-                uint8_t val = (uint8_t)(15 + sweep * 240);
-                CRGB c = current_color;
-                c.nscale8(val);
-                leds[0] = c;
+                // Pitch lightning demo: sweep pitch scale from Deep Blue to Cyan to Arc Violet
+                float pitchSweep = 0.5f + 0.5f * sinf(anim_phase * 1.8f);
+                uint8_t demoHue = (pitchSweep < 0.5f) ? (uint8_t)(165.0f - (pitchSweep / 0.5f) * 25.0f)
+                                                      : (uint8_t)(140.0f + ((pitchSweep - 0.5f) / 0.5f) * 60.0f);
+                uint8_t demoSat = (uint8_t)(255 - pitchSweep * 100);
+                float strike = 0.5f + 0.5f * sinf(anim_phase * 3.6f);
+                strike = strike * strike;
+                float crackle = 0.88f + 0.12f * ((rand() % 100) / 100.0f);
+                uint8_t val = (uint8_t)(strike * 240 * crackle);
+                leds[0] = CHSV(demoHue, demoSat, val);
                 break;
             }
             case LedMode::REACT_ENERGY_VU: {
@@ -495,6 +499,13 @@ void LEDManager::updateReactiveModes(float dt) {
     float totalInhibition = constrain(drumPunchMask + snareMask, 0.0f, 0.85f);
     float cleanVocal = vocalCore * (1.0f - totalInhibition) * dominanceGate;
 
+    // 5. True Voice Pitch & Periodicity Voicing Gate
+    float voicePitch = spectrumAnalyzer.getVoicePitch();
+    float voiceConfidence = spectrumAnalyzer.getVoiceConfidence();
+    // Strict voice pitch gate: require strong harmonic periodicity in the vocal register
+    float voicePitchGate = constrain((voiceConfidence - 0.38f) / 0.32f, 0.0f, 1.0f);
+    cleanVocal *= voicePitchGate;
+
     // Soft-knee noise floor gate to suppress low-level instrumental bleed and room noise
     if (cleanVocal < 12.0f) {
         cleanVocal = (cleanVocal * cleanVocal) / 12.0f;
@@ -512,7 +523,7 @@ void LEDManager::updateReactiveModes(float dt) {
         vocal_max -= dt * (vocal_max * 0.35f);
     }
     if (vocal_max < 24.0f) vocal_max = 24.0f;
-    float vocalPunch = constrain((vocalDiff / vocal_max) * sens, 0.0f, 1.0f);
+    float vocalPunch = constrain((vocalDiff / vocal_max) * sens * voicePitchGate, 0.0f, 1.0f);
 
     switch (current_mode) {
         case LedMode::REACT_BASS_PULSE: {
@@ -534,24 +545,59 @@ void LEDManager::updateReactiveModes(float dt) {
         }
 
         case LedMode::REACT_VOCAL_LIGHTNING: {
-            // Smooth vocal envelope follower (fast attack, natural silky decay - no blinking)
-            if (vocalPunch > lightning_intensity) {
-                // Smooth attack tracking vocal surges
-                lightning_intensity += (vocalPunch - lightning_intensity) * (dt * 14.0f);
-            } else {
-                // Natural smooth decay (~320ms release) when vocals taper off
-                lightning_intensity -= dt * 3.2f;
+            // Strictly react ONLY to voice pitch: if no voiced pitch is detected, extinguish completely
+            if (voicePitchGate < 0.05f || voicePitch < 70.0f) {
+                lightning_intensity -= dt * 7.5f;
                 if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
+                if (lightning_intensity <= 0.01f) {
+                    leds[0] = CRGB::Black;
+                    break;
+                }
+            } else {
+                // Active Voice Pitch! Explosive lightning attack on vocal delivery
+                if (vocalPunch > lightning_intensity) {
+                    lightning_intensity += (vocalPunch - lightning_intensity) * (dt * 28.0f);
+                } else {
+                    lightning_intensity -= dt * 4.2f;
+                    if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
+                }
             }
 
-            // Gentle resting aura when music is playing (dim background), blooming to brilliance on singing
-            uint8_t minAura = (energyNorm > 0.05f) ? 8 : 0;
-            float vocalCurve = lightning_intensity * lightning_intensity * 0.75f + lightning_intensity * 0.25f;
-            uint8_t vocalBright = (uint8_t)constrain((int)minAura + (int)(vocalCurve * (255 - minAura)), 0, 255);
+            if (lightning_intensity <= 0.01f) {
+                leds[0] = CRGB::Black;
+                break;
+            }
 
-            CRGB c = current_color;
-            c.nscale8(vocalBright);
-            leds[0] = c;
+            // Human singing pitch normalization across vocal octaves (80 Hz to 650 Hz):
+            float clampedPitch = constrain(voicePitch, 80.0f, 650.0f);
+            float pitchNorm = constrain(log2f(clampedPitch / 80.0f) / log2f(650.0f / 80.0f), 0.0f, 1.0f);
+
+            // Dynamic lightning brightness curve (zero resting aura - black when not singing)
+            float vocalCurve = lightning_intensity * lightning_intensity;
+            uint8_t vocalBright = (uint8_t)constrain((int)(vocalCurve * 255.0f), 0, 255);
+
+            // Lightning chromatic pitch color:
+            // Hue shifts from Electric Deep Sapphire (165) -> Electric Cyan (140) -> Arc Violet (200)
+            uint8_t pitchHue;
+            if (pitchNorm < 0.5f) {
+                pitchHue = (uint8_t)(165.0f - (pitchNorm / 0.5f) * 25.0f);
+            } else {
+                pitchHue = (uint8_t)(140.0f + ((pitchNorm - 0.5f) / 0.5f) * 60.0f);
+            }
+
+            // Desaturate to blinding white on high pitch notes and explosive vocal onsets
+            uint8_t pitchSat = (uint8_t)constrain(255.0f - pitchNorm * 110.0f, 120.0f, 255.0f);
+
+            // Electrical micro-crackle jitter proportional to pitch
+            float crackle = 0.88f + 0.12f * ((rand() % 100) / 100.0f);
+            vocalBright = (uint8_t)(vocalBright * crackle);
+
+            // Instant white-hot strike on powerful vocal transients
+            if (vocalPunch > 0.75f && voicePitchGate > 0.6f) {
+                pitchSat = (uint8_t)(pitchSat * 0.4f);
+            }
+
+            leds[0] = CHSV(pitchHue, pitchSat, vocalBright);
             break;
         }
 

@@ -62,6 +62,8 @@ public:
     float getRMSLevel() const { return rmsLevel; }
     float getBassLevel() const { return bassLevel; }
     const uint8_t* getBands() const { return bands; }
+    float getVoicePitch() const { return voicePitch; }
+    float getVoiceConfidence() const { return voiceConfidence; }
 
     // Top status bar auto-hide management (5-second timeout for full-screen view)
     void wakeTopBar(unsigned long durationMs = 5000);
@@ -70,7 +72,7 @@ public:
 
 private:
     static const size_t SAMPLE_SIZE = 128;
-    static const size_t RING_BUFFER_SIZE = 512;
+    static const size_t RING_BUFFER_SIZE = 1024;
 
     int32_t micBuffer[SAMPLE_SIZE]; // Working buffer for FFT / Waveform
     int16_t ringBuffer[RING_BUFFER_SIZE]; // Lock-free circular sample tap from AudioPlayer
@@ -91,10 +93,13 @@ private:
     float bassLevel;
     float bassFilterState1;
     float bassFilterState2;
+    float voicePitch;
+    float voiceConfidence;
     unsigned long topBarExpiryMs;
     unsigned long sensToastExpiryMs;
 
     void processFFT();
+    void detectVoicePitch();
     void drawBars();
     void drawWaveform();
     void drawPlasma();
