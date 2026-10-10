@@ -462,8 +462,20 @@ void SpectrumAnalyzer::detectVoicePitch() {
         down[i] -= dc;
     }
 
-    // Correlation window length N = 80 samples
-    const size_t CORR_LEN = 80;
+    // High-pass filter at ~80 Hz on the downsampled buffer to reject sub-bass rumble and kick drum fundamental
+    // 1-pole high-pass: y[n] = x[n] - x[n-1] + 0.95 * y[n-1]
+    float hpPrevX = (float)down[0];
+    float hpPrevY = 0.0f;
+    for (size_t i = 0; i < N_SAMPLES; i++) {
+        float x = (float)down[i];
+        float y = x - hpPrevX + 0.95f * hpPrevY;
+        hpPrevX = x;
+        hpPrevY = y;
+        down[i] = (int16_t)constrain((int)y, -32767, 32767);
+    }
+
+    // Correlation window length N = 100 samples (~9.1 ms, covers full fundamental cycles down to 110 Hz)
+    const size_t CORR_LEN = 100;
     const size_t MIN_LAG = 14;  // ~787 Hz
     const size_t MAX_LAG = 138; // ~80 Hz
 
@@ -473,9 +485,9 @@ void SpectrumAnalyzer::detectVoicePitch() {
         energy0 += s * s;
     }
 
-    if (energy0 < 20000.0f) {
+    if (energy0 < 1000.0f) {
         // Below acoustic noise floor
-        voiceConfidence = voiceConfidence * 0.70f;
+        voiceConfidence = voiceConfidence * 0.75f;
         return;
     }
 
@@ -502,7 +514,7 @@ void SpectrumAnalyzer::detectVoicePitch() {
     }
 
     float refinedLag = (float)bestLag;
-    if (bestLag > MIN_LAG && bestLag < MAX_LAG && bestCorr > 0.35f) {
+    if (bestLag > MIN_LAG && bestLag < MAX_LAG && bestCorr > 0.16f) {
         // Parabolic interpolation for fine sub-sample pitch resolution
         auto getCorr = [&](size_t l) -> float {
             float num = 0.0f, el = 0.0f;
@@ -524,17 +536,17 @@ void SpectrumAnalyzer::detectVoicePitch() {
         }
     }
 
-    if (refinedLag >= (float)MIN_LAG && bestCorr > 0.35f) {
+    if (refinedLag >= (float)MIN_LAG && bestCorr > 0.16f) {
         float rawPitch = 11025.0f / refinedLag;
         // Smooth pitch tracking
-        if (voiceConfidence > 0.40f && voicePitch > 60.0f) {
-            voicePitch += (rawPitch - voicePitch) * 0.40f;
+        if (voiceConfidence > 0.20f && voicePitch > 60.0f) {
+            voicePitch += (rawPitch - voicePitch) * 0.45f;
         } else {
             voicePitch = rawPitch;
         }
         voiceConfidence += (constrain(bestCorr, 0.0f, 1.0f) - voiceConfidence) * 0.50f;
     } else {
-        voiceConfidence = voiceConfidence * 0.60f;
+        voiceConfidence = voiceConfidence * 0.80f;
     }
 }
 

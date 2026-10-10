@@ -16,7 +16,8 @@ static const struct {
     { CRGB::Orange,  "ORNG" },
     { CRGB::Red,     "RED" },
     { CRGB::Magenta, "MGTA" },
-    { CRGB::White,   "WHTE" }
+    { CRGB::White,   "WHTE" },
+    { CRGB::Violet,  "PTCH" }
 };
 static const size_t PALETTE_COUNT = sizeof(COLOR_PALETTE) / sizeof(COLOR_PALETTE[0]);
 
@@ -363,15 +364,34 @@ void LEDManager::updateReactiveModes(float dt) {
                 break;
             }
             case LedMode::REACT_VOCAL_LIGHTNING: {
-                // Pitch lightning demo: sweep pitch scale from Deep Blue to Cyan to Arc Violet
+                // Pitch lightning demo: sweep pitch scale and flash selected palette color
                 float pitchSweep = 0.5f + 0.5f * sinf(anim_phase * 1.8f);
-                uint8_t demoHue = (pitchSweep < 0.5f) ? (uint8_t)(165.0f - (pitchSweep / 0.5f) * 25.0f)
-                                                      : (uint8_t)(140.0f + ((pitchSweep - 0.5f) / 0.5f) * 60.0f);
-                uint8_t demoSat = (uint8_t)(255 - pitchSweep * 100);
                 float strike = 0.5f + 0.5f * sinf(anim_phase * 3.6f);
                 strike = strike * strike;
                 float crackle = 0.88f + 0.12f * ((rand() % 100) / 100.0f);
-                uint8_t val = (uint8_t)(strike * 240 * crackle);
+                uint8_t val = (uint8_t)(strike * 240.0f * crackle);
+
+                bool isPitchMode = (color_index == 8);
+                uint8_t demoHue, demoSat;
+                if (isPitchMode) {
+                    demoHue = (pitchSweep < 0.5f) ? (uint8_t)(165.0f - (pitchSweep / 0.5f) * 35.0f)
+                                                  : (uint8_t)(130.0f + ((pitchSweep - 0.5f) / 0.5f) * 105.0f);
+                    demoSat = (uint8_t)(255 - pitchSweep * 90);
+                } else {
+                    CHSV baseHsv = rgb2hsv_approximate(current_color);
+                    demoHue = baseHsv.hue;
+                    demoSat = baseHsv.sat;
+                    if (demoSat > 20) {
+                        int16_t shifted = (int16_t)baseHsv.hue + (int16_t)((pitchSweep - 0.5f) * 36.0f);
+                        if (shifted < 0) shifted += 256;
+                        if (shifted >= 256) shifted -= 256;
+                        demoHue = (uint8_t)shifted;
+                        demoSat = (uint8_t)constrain(baseHsv.sat - (int)(pitchSweep * 80.0f), 100, 255);
+                    } else {
+                        demoSat = 0;
+                    }
+                }
+                if (strike > 0.80f) demoSat = (uint8_t)(demoSat * 0.35f);
                 leds[0] = CHSV(demoHue, demoSat, val);
                 break;
             }
@@ -502,13 +522,24 @@ void LEDManager::updateReactiveModes(float dt) {
     // 5. True Voice Pitch & Periodicity Voicing Gate
     float voicePitch = spectrumAnalyzer.getVoicePitch();
     float voiceConfidence = spectrumAnalyzer.getVoiceConfidence();
-    // Strict voice pitch gate: require strong harmonic periodicity in the vocal register
-    float voicePitchGate = constrain((voiceConfidence - 0.38f) / 0.32f, 0.0f, 1.0f);
-    cleanVocal *= voicePitchGate;
+
+    // Fallback pitch from vocal formant centroid if voice pitch tracking is below vocal fundamental
+    // but strong mid-band vocal formant resonance is present (Bands 1-5 cover 689 Hz - 3100 Hz formants)
+    if (voicePitch < 70.0f && vocalCore > 3.0f) {
+        float centroid = (bands[1] * 120.0f + bands[2] * 180.0f + bands[3] * 250.0f + bands[4] * 330.0f + bands[5] * 420.0f) / (vocalCore + 0.1f);
+        voicePitch = constrain(centroid, 80.0f, 600.0f);
+        if (voiceConfidence < 0.22f) voiceConfidence = 0.22f;
+    }
+
+    // Voice pitch gate: active when vocal periodicity is detected or strong vocal formant dominance is present
+    float pitchPeriodicityGate = constrain((voiceConfidence - 0.14f) / 0.22f, 0.0f, 1.0f);
+    float formantVoicingGate = constrain((vocalDominance - 0.28f) / 0.35f, 0.0f, 1.0f);
+    float voicePitchGate = constrain(pitchPeriodicityGate * 0.75f + formantVoicingGate * 0.55f, 0.0f, 1.0f);
+    cleanVocal *= (0.25f + 0.75f * voicePitchGate);
 
     // Soft-knee noise floor gate to suppress low-level instrumental bleed and room noise
-    if (cleanVocal < 12.0f) {
-        cleanVocal = (cleanVocal * cleanVocal) / 12.0f;
+    if (cleanVocal < 6.0f) {
+        cleanVocal = (cleanVocal * cleanVocal) / 6.0f;
     }
 
     // Dynamic vocal baseline tracker (tau ~ 0.40s)
@@ -516,14 +547,14 @@ void LEDManager::updateReactiveModes(float dt) {
     float vocalDiff = cleanVocal - vocal_avg;
     if (vocalDiff < 0.0f) vocalDiff = 0.0f;
 
-    // Dynamic AGC tracker with elevated floor (24.0f) to avoid false-triggering on quiet passages
+    // Dynamic AGC tracker with adaptive headroom (floor at 10.0f)
     if (vocalDiff > vocal_max) {
         vocal_max = vocalDiff;
     } else {
         vocal_max -= dt * (vocal_max * 0.35f);
     }
-    if (vocal_max < 24.0f) vocal_max = 24.0f;
-    float vocalPunch = constrain((vocalDiff / vocal_max) * sens * voicePitchGate, 0.0f, 1.0f);
+    if (vocal_max < 10.0f) vocal_max = 10.0f;
+    float vocalPunch = constrain((vocalDiff / vocal_max) * sens * (0.3f + 0.7f * voicePitchGate), 0.0f, 1.0f);
 
     switch (current_mode) {
         case LedMode::REACT_BASS_PULSE: {
@@ -545,9 +576,9 @@ void LEDManager::updateReactiveModes(float dt) {
         }
 
         case LedMode::REACT_VOCAL_LIGHTNING: {
-            // Strictly react ONLY to voice pitch: if no voiced pitch is detected, extinguish completely
-            if (voicePitchGate < 0.05f || voicePitch < 70.0f) {
-                lightning_intensity -= dt * 7.5f;
+            // Strictly react to voice pitch and vocal delivery: extinguish when no vocals
+            if (voicePitchGate < 0.10f || voicePitch < 70.0f || vocalPunch < 0.03f) {
+                lightning_intensity -= dt * 6.5f;
                 if (lightning_intensity < 0.0f) lightning_intensity = 0.0f;
                 if (lightning_intensity <= 0.01f) {
                     leds[0] = CRGB::Black;
@@ -576,25 +607,44 @@ void LEDManager::updateReactiveModes(float dt) {
             float vocalCurve = lightning_intensity * lightning_intensity;
             uint8_t vocalBright = (uint8_t)constrain((int)(vocalCurve * 255.0f), 0, 255);
 
-            // Lightning chromatic pitch color:
-            // Hue shifts from Electric Deep Sapphire (165) -> Electric Cyan (140) -> Arc Violet (200)
-            uint8_t pitchHue;
-            if (pitchNorm < 0.5f) {
-                pitchHue = (uint8_t)(165.0f - (pitchNorm / 0.5f) * 25.0f);
-            } else {
-                pitchHue = (uint8_t)(140.0f + ((pitchNorm - 0.5f) / 0.5f) * 60.0f);
-            }
-
-            // Desaturate to blinding white on high pitch notes and explosive vocal onsets
-            uint8_t pitchSat = (uint8_t)constrain(255.0f - pitchNorm * 110.0f, 120.0f, 255.0f);
-
             // Electrical micro-crackle jitter proportional to pitch
             float crackle = 0.88f + 0.12f * ((rand() % 100) / 100.0f);
             vocalBright = (uint8_t)(vocalBright * crackle);
 
-            // Instant white-hot strike on powerful vocal transients
-            if (vocalPunch > 0.75f && voicePitchGate > 0.6f) {
-                pitchSat = (uint8_t)(pitchSat * 0.4f);
+            // Determine Lightning Hue and Saturation based on User Color Palette Option
+            bool isPitchMode = (color_index == 8); // "PTCH" dynamic pitch spectrum
+            uint8_t pitchHue, pitchSat;
+
+            if (isPitchMode) {
+                // Dynamic pitch spectrum: deep blue (low notes) -> electric cyan -> violet -> magenta
+                if (pitchNorm < 0.5f) {
+                    pitchHue = (uint8_t)(165.0f - (pitchNorm / 0.5f) * 35.0f);
+                } else {
+                    pitchHue = (uint8_t)(130.0f + ((pitchNorm - 0.5f) / 0.5f) * 105.0f);
+                }
+                pitchSat = (uint8_t)constrain(255.0f - pitchNorm * 90.0f, 120.0f, 255.0f);
+            } else {
+                // Use user-selected palette color with pitch-modulated hue shift (+/- 25 deg)
+                CHSV baseHsv = rgb2hsv_approximate(current_color);
+                pitchHue = baseHsv.hue;
+                pitchSat = baseHsv.sat;
+
+                if (pitchSat > 20) {
+                    // Modulate hue dynamically around chosen color based on vocal pitch
+                    int16_t shifted = (int16_t)baseHsv.hue + (int16_t)((pitchNorm - 0.5f) * 36.0f);
+                    if (shifted < 0) shifted += 256;
+                    if (shifted >= 256) shifted -= 256;
+                    pitchHue = (uint8_t)shifted;
+                    pitchSat = (uint8_t)constrain(baseHsv.sat - (int)(pitchNorm * 80.0f), 100, 255);
+                } else {
+                    // White palette: pure incandescent lightning with subtle ionization
+                    pitchSat = (uint8_t)constrain((fabsf(pitchNorm - 0.5f) * 30.0f), 0.0f, 30.0f);
+                }
+            }
+
+            // Instant blinding white strike on powerful vocal transients
+            if (vocalPunch > 0.65f) {
+                pitchSat = (uint8_t)(pitchSat * 0.35f);
             }
 
             leds[0] = CHSV(pitchHue, pitchSat, vocalBright);
