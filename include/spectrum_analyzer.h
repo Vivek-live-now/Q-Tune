@@ -11,11 +11,12 @@ enum VisualizerPreset {
     PRESET_ANALOG_VU = 0,
     PRESET_HORIZ_BAR_VU = 1,
     PRESET_VU_SPECTROMETER = 2,
-    PRESET_BAR_SPECTRUM = 3,
-    PRESET_WAVEFORM = 4,
-    PRESET_MILKDROP_PLASMA = 5,
-    PRESET_STARFIELD = 6,
-    PRESET_COUNT = 7
+    PRESET_VINYL_VU = 3,
+    PRESET_BAR_SPECTRUM = 4,
+    PRESET_WAVEFORM = 5,
+    PRESET_MILKDROP_PLASMA = 6,
+    PRESET_STARFIELD = 7,
+    PRESET_COUNT = 8
 };
 
 enum VisualizerSensitivity {
@@ -146,6 +147,7 @@ private:
     void drawAnalogVU();
     void drawHorizontalBarVU();
     void drawVUSpectrometer();
+    void drawVinylVU();
     void drawBars();
     void drawWaveform();
     void drawPlasma();

@@ -1154,13 +1154,13 @@ def test_mp3_zero_stack_helix_aac_and_sdxc_exfat():
 
 def test_vocal_reactive_check_tool():
     print('--- 23. Interactive Vocal Reactive Check Tool & Expression Engine Test ---')
-    with open('src/spectrum_analyzer.cpp', 'r') as f:
+    with open_utf8('src/spectrum_analyzer.cpp') as f:
         sa_src = f.read()
-    with open('src/led_manager.cpp', 'r') as f:
+    with open_utf8('src/led_manager.cpp') as f:
         led_src = f.read()
-    with open('src/diagnostics.cpp', 'r') as f:
+    with open_utf8('src/diagnostics.cpp') as f:
         diag_src = f.read()
-    with open('src/main.cpp', 'r') as f:
+    with open_utf8('src/main.cpp') as f:
         main_src = f.read()
 
     # 1. Pitch correlation peak prominence & voice confidence thresholds
@@ -1205,6 +1205,7 @@ def test_vu_analog_and_spectrometer_suite():
     assert "PRESET_ANALOG_VU" in sa_h_text, "Missing PRESET_ANALOG_VU in spectrum_analyzer.h"
     assert "PRESET_HORIZ_BAR_VU" in sa_h_text, "Missing PRESET_HORIZ_BAR_VU in spectrum_analyzer.h"
     assert "PRESET_VU_SPECTROMETER" in sa_h_text, "Missing PRESET_VU_SPECTROMETER in spectrum_analyzer.h"
+    assert "PRESET_VINYL_VU" in sa_h_text, "Missing PRESET_VINYL_VU in spectrum_analyzer.h"
     assert "PRESET_COUNT" in sa_h_text, "Missing PRESET_COUNT in spectrum_analyzer.h"
 
     # 2. Verify stereo channel sample tap buffers and getters
@@ -1216,6 +1217,7 @@ def test_vu_analog_and_spectrometer_suite():
     assert "drawAnalogVU()" in sa_cpp_text, "drawAnalogVU missing in spectrum_analyzer.cpp"
     assert "drawHorizontalBarVU()" in sa_cpp_text, "drawHorizontalBarVU missing in spectrum_analyzer.cpp"
     assert "drawVUSpectrometer()" in sa_cpp_text, "drawVUSpectrometer missing in spectrum_analyzer.cpp"
+    assert "drawVinylVU()" in sa_cpp_text, "drawVinylVU missing in spectrum_analyzer.cpp"
 
     # 4. Mathematical verification of ANSI C16.5 VU Ballistics simulation
     dt = 0.020  # 50 Hz update
@@ -1238,7 +1240,7 @@ def test_vu_analog_and_spectrometer_suite():
     assert "VU_REF_RMS = 145.0f" in sa_cpp_text or "145.0f" in sa_cpp_text, "0 VU mastered music calibration missing"
     assert "lPeak >= 504 || rPeak >= 504" in sa_cpp_text, "Digital ceiling clip detection threshold missing"
 
-    print("  [PASS] Vintage Analog Needle VU (Klanghelm VUMT), HoRNet Dual Horizontal Bar VU, and Hybrid 8-Band Spectrometer verified.")
+    print("  [PASS] Vintage Analog Needle VU, HoRNet Dual Horizontal Bar VU, Hybrid Spectrometer, and Vinyl Turntable VU verified.")
 
 def main():
     print("==================================================")

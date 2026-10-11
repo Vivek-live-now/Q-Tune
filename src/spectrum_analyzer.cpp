@@ -773,6 +773,7 @@ const char* SpectrumAnalyzer::getPresetName() const {
         case PRESET_ANALOG_VU:       return "ANALOG VU";
         case PRESET_HORIZ_BAR_VU:    return "HORIZ VU";
         case PRESET_VU_SPECTROMETER: return "VU+SPEC";
+        case PRESET_VINYL_VU:        return "VINYL VU";
         case PRESET_BAR_SPECTRUM:    return "BARS";
         case PRESET_WAVEFORM:        return "WAVE";
         case PRESET_MILKDROP_PLASMA: return "PLASMA";
@@ -790,6 +791,7 @@ void SpectrumAnalyzer::render(VisualizerPreset preset) {
         case PRESET_ANALOG_VU: drawAnalogVU(); break;
         case PRESET_HORIZ_BAR_VU: drawHorizontalBarVU(); break;
         case PRESET_VU_SPECTROMETER: drawVUSpectrometer(); break;
+        case PRESET_VINYL_VU: drawVinylVU(); break;
         case PRESET_BAR_SPECTRUM: drawBars(); break;
         case PRESET_WAVEFORM: drawWaveform(); break;
         case PRESET_MILKDROP_PLASMA: drawPlasma(); break;
@@ -1195,6 +1197,251 @@ void SpectrumAnalyzer::drawVUSpectrometer() {
         if (b % 2 == 0) {
             u8g2.drawStr(bx, 63, bandLabels[b]);
         }
+    }
+
+    display.sendBuffer();
+}
+
+void SpectrumAnalyzer::drawVinylVU() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_6x10_tr);
+
+    bool showBar = isTopBarVisible();
+    if (showBar) {
+        String track = audioPlayer.getCurrentTrackName();
+        if (track.length() == 0) {
+            track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        }
+        if (track.length() > 13) {
+            track = track.substring(0, 11) + "..";
+        }
+        char headerBuf[32];
+        if (millis() < sensToastExpiryMs) {
+            snprintf(headerBuf, sizeof(headerBuf), "SENS: %s (%.1fx)", getSensitivityName(), getSensitivityMultiplier());
+        } else {
+            snprintf(headerBuf, sizeof(headerBuf), "[VNL:%s] %s", getSensitivityShortName(), track.c_str());
+        }
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+    }
+
+    // 1. Turntable Platter Geometry
+    int platterX = 39;
+    int platterY = showBar ? 38 : 32;
+    int platterR = showBar ? 23 : 28;
+
+    // Spinning Strobe Calibration Rim (rotates when playing)
+    static float strobeAngle = 0.0f;
+    if (audioPlayer.isPlaying()) {
+        strobeAngle += 0.22f; // ~33 1/3 RPM visual rotational rate
+        if (strobeAngle >= (float)(2.0 * M_PI)) {
+            strobeAngle -= (float)(2.0 * M_PI);
+        }
+    }
+
+    // Outer metal platter edge
+    u8g2.drawCircle(platterX, platterY, platterR);
+
+    // 12 strobe calibration notches around perimeter
+    const int numStrobes = 12;
+    for (int s = 0; s < numStrobes; s++) {
+        float ang = strobeAngle + (float)s * ((float)(2.0 * M_PI) / (float)numStrobes);
+        int sx = platterX + (int)(cosf(ang) * (platterR - 1));
+        int sy = platterY + (int)(sinf(ang) * (platterR - 1));
+        u8g2.drawPixel(sx, sy);
+    }
+
+    // 2. Vinyl Record Disc Body
+    int vinylR = platterR - 3;
+    u8g2.drawCircle(platterX, platterY, vinylR);
+
+    // 3. Audio-Reactive Sound Grooves
+    // Bass energy causes micro-groove vibration / ripple
+    float bassMod = (bassLevel > 18.0f) ? ((bassLevel - 18.0f) / 70.0f) : 0.0f;
+    if (bassMod > 1.0f) bassMod = 1.0f;
+    int modOffset = (bassMod > 0.45f) ? 1 : 0;
+
+    int grooveR1 = vinylR - 4 + modOffset;
+    int grooveR2 = vinylR - 8 - modOffset;
+    int grooveR3 = vinylR - 13;
+    if (grooveR1 > 12) u8g2.drawCircle(platterX, platterY, grooveR1);
+    if (grooveR2 > 10) u8g2.drawCircle(platterX, platterY, grooveR2);
+    if (grooveR3 > 8)  u8g2.drawCircle(platterX, platterY, grooveR3);
+
+    // Vinyl light reflection sheen (sheen segments across grooves)
+    int sheenOffset = vinylR / 2;
+    u8g2.drawPixel(platterX - sheenOffset, platterY - sheenOffset);
+    u8g2.drawPixel(platterX - sheenOffset + 1, platterY - sheenOffset - 1);
+    u8g2.drawPixel(platterX + sheenOffset, platterY + sheenOffset);
+    u8g2.drawPixel(platterX + sheenOffset - 1, platterY + sheenOffset + 1);
+
+    // 4. Center Record Label & Spindle
+    int labelR = 7;
+    u8g2.drawDisc(platterX, platterY, labelR);
+    u8g2.setDrawColor(0);
+    u8g2.drawDisc(platterX, platterY, 2); // Spindle hole
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(platterX - 4, platterY - 2, "33"); // 33 RPM stamp
+    u8g2.setDrawColor(1);
+    u8g2.drawPixel(platterX, platterY); // Center brass spindle pin
+
+    // Strobe Lamp Housing (Bottom-left deck prism)
+    int lampY = platterY + platterR - 5;
+    if (lampY <= 61) {
+        u8g2.drawFrame(1, lampY, 6, 5);
+        u8g2.drawPixel(3, lampY + 2); // Bulb filament
+    }
+
+    // 5. Tonearm Gimbal Pivot & Counterweight (Top-Right of Turntable Deck)
+    int pivX = 92;
+    int pivY = showBar ? 20 : 15;
+
+    // Gimbal mounting ring
+    u8g2.drawCircle(pivX, pivY, 3);
+    u8g2.drawPixel(pivX, pivY);
+    // Counterweight at rear
+    u8g2.drawBox(pivX + 3, pivY - 3, 5, 4);
+    // Cueing rest post
+    u8g2.drawVLine(pivX - 4, pivY + 4, 5);
+
+    // 6. Dynamic VU-Driven Tonearm Tracking & Needle Action
+    // When audio is quiet, needle rests near outer groove.
+    // When music hits peaks / 0VU, tonearm moves inward across the groove,
+    // with cartridge compliance micro-jitter on transients!
+    float defl = needlePos; // 0.0 to 1.05 from ANSI ballistic simulation
+    if (defl < 0.0f) defl = 0.0f;
+    if (defl > 1.05f) defl = 1.05f;
+
+    // Stylus target location on the vinyl record
+    // Deflects between outer track radius and inner track radius
+    float trackR = (float)(vinylR - 4) - defl * 8.0f;
+    float stylusAngle = 0.65f - defl * 0.22f; // Radians along record arc
+    
+    // High-frequency transient micro-jitter (cartridge cantilever compliance)
+    float jitter = 0.0f;
+    if (peakLevel > 35.0f && audioPlayer.isPlaying()) {
+        jitter = ((millis() % 2 == 0) ? 0.6f : -0.6f);
+    }
+
+    int stylusX = platterX + (int)(cosf(stylusAngle) * trackR + jitter);
+    int stylusY = platterY + (int)(sinf(stylusAngle) * trackR);
+
+    // Tonearm S-Curve Wand (Curved two-segment arm tube from pivot to stylus)
+    int elbowX = (pivX + stylusX) / 2 + 5;
+    int elbowY = (pivY + stylusY) / 2 - 4;
+    u8g2.drawLine(pivX, pivY, elbowX, elbowY);
+    u8g2.drawLine(elbowX, elbowY, stylusX, stylusY);
+
+    // Headshell Cartridge Body & Stylus Contact
+    u8g2.drawBox(stylusX - 3, stylusY - 1, 4, 3);
+    u8g2.drawPixel(stylusX - 4, stylusY + 1); // Stylus tip touching groove
+
+    // 7. Right Panel: Dual Stereo Vertical VU Meters & Scale
+    int meterX1 = 111; // Left channel bar
+    int meterX2 = 120; // Right channel bar
+    int meterTopY = showBar ? 20 : 14;
+    int meterH = showBar ? 34 : 40;
+    int barW = 5;
+
+    // Scale tick marks and dB labels
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(102, meterTopY + 4, "+3");
+    u8g2.drawStr(102, meterTopY + (int)(meterH * 0.28f) + 2, " 0");
+    u8g2.drawStr(102, meterTopY + (int)(meterH * 0.60f) + 2, "-6");
+    u8g2.drawStr(100, meterTopY + meterH, "-20");
+
+    // Horizontal reference ticks
+    u8g2.drawHLine(108, meterTopY + 2, 2);
+    u8g2.drawHLine(108, meterTopY + (int)(meterH * 0.28f), 2);
+    u8g2.drawHLine(108, meterTopY + (int)(meterH * 0.60f), 2);
+    u8g2.drawHLine(108, meterTopY + meterH - 2, 2);
+
+    // Meter frames
+    u8g2.drawFrame(meterX1, meterTopY, barW, meterH);
+    u8g2.drawFrame(meterX2, meterTopY, barW, meterH);
+
+    // Convert dB to vertical fill height
+    auto dbToHeight = [&](float db) -> int {
+        if (db <= -20.0f) return 0;
+        float norm = (db + 20.0f) / 23.0f; // -20dB to +3dB range
+        if (norm < 0.0f) norm = 0.0f;
+        if (norm > 1.0f) norm = 1.0f;
+        return (int)(norm * (meterH - 2));
+    };
+
+    int hL = dbToHeight(leftDb);
+    int hR = dbToHeight(rightDb);
+
+    // Fill Left vertical bar
+    if (hL > 0) {
+        int fillY = meterTopY + meterH - 1 - hL;
+        u8g2.drawBox(meterX1 + 1, fillY, barW - 2, hL);
+        // Segment divider lines every 3px
+        u8g2.setDrawColor(0);
+        for (int sy = meterTopY + meterH - 4; sy > fillY; sy -= 3) {
+            u8g2.drawHLine(meterX1 + 1, sy, barW - 2);
+        }
+        u8g2.setDrawColor(1);
+    }
+
+    // Fill Right vertical bar
+    if (hR > 0) {
+        int fillY = meterTopY + meterH - 1 - hR;
+        u8g2.drawBox(meterX2 + 1, fillY, barW - 2, hR);
+        // Segment divider lines every 3px
+        u8g2.setDrawColor(0);
+        for (int sy = meterTopY + meterH - 4; sy > fillY; sy -= 3) {
+            u8g2.drawHLine(meterX2 + 1, sy, barW - 2);
+        }
+        u8g2.setDrawColor(1);
+    }
+
+    // Floating Peak Hold indicators
+    static uint8_t vLeftPeakHold = 0;
+    static uint8_t vRightPeakHold = 0;
+    static uint8_t vPeakTimer = 0;
+
+    if (hL >= vLeftPeakHold) {
+        vLeftPeakHold = hL;
+    }
+    if (hR >= vRightPeakHold) {
+        vRightPeakHold = hR;
+    }
+    if (++vPeakTimer >= 2) {
+        vPeakTimer = 0;
+        if (vLeftPeakHold > 0) vLeftPeakHold--;
+        if (vRightPeakHold > 0) vRightPeakHold--;
+    }
+
+    if (vLeftPeakHold > 0 && vLeftPeakHold <= meterH - 2) {
+        int capY = meterTopY + meterH - 1 - vLeftPeakHold;
+        u8g2.drawHLine(meterX1 + 1, capY, barW - 2);
+    }
+    if (vRightPeakHold > 0 && vRightPeakHold <= meterH - 2) {
+        int capY = meterTopY + meterH - 1 - vRightPeakHold;
+        u8g2.drawHLine(meterX2 + 1, capY, barW - 2);
+    }
+
+    // Channel labels L and R at bottom of meters
+    u8g2.setFont(u8g2_font_4x6_tr);
+    int labelY = meterTopY + meterH + 6;
+    if (labelY <= 63) {
+        u8g2.drawStr(meterX1 + 1, labelY, "L");
+        u8g2.drawStr(meterX2 + 1, labelY, "R");
+    }
+
+    // 8. CLIP Alert / Peak Readout
+    float maxDb = (leftDb >= rightDb) ? leftDb : rightDb;
+    if (maxDb >= 0.0f) {
+        u8g2.drawFrame(72, showBar ? 46 : 50, 26, 8);
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(74, showBar ? 52 : 56, "CLIP");
+    } else {
+        char pkBuf[12];
+        snprintf(pkBuf, sizeof(pkBuf), (maxDb <= -19.5f) ? "--.-" : "%+.1f", maxDb);
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(72, showBar ? 52 : 56, pkBuf);
     }
 
     display.sendBuffer();
