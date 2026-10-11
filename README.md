@@ -97,7 +97,14 @@ The GPIO map for Q-Tune preserves Q-Watch's pin research while reallocating unne
 On startup, Q-Tune launches into the **Unified Home Menu**, providing instant access to all core applications:
 
 1. **Music Player**: Full standalone playback engine with track listing, status, live 8-band mini-equalizer HUD, progress bar, digital volume, and repeat/shuffle modes.
-2. **Spectrum Visualizer**: Real-time live WAV stream visualizer (16-Band Spectrum with Peak-Hold caps, Oscilloscope Waveform, MilkDrop Plasma, Starfield) reacting directly to live decoded WAV audio playing from SD card.
+2. **Spectrum Visualizer**: Real-time live audio visualizer suite featuring 7 distinct modes:
+   * **Analog Needle VU Meter** (`ANALOG VU`): Klanghelm VUMT-style curved scale arc (-20 to +3 dB) with true ANSI C16.5 300ms mechanical ballistics, pivot needle, and corner Peak dB readouts.
+   * **Dual Horizontal Bar VU** (`HORIZ VU`): HoRNet MK4-style stereo L/R horizontal bars with center dB scale, segmented headroom ladder, and peak-hold indicators.
+   * **Hybrid VU + Spectrometer** (`VU+SPEC`): Upper dual stereo horizontal VU bars combined with lower 8-band FFT octave spectrum analyzer.
+   * **16-Band Bar Spectrum** (`BARS`): Full-screen 16-band logarithmic octave audio spectrum analyzer with floating peak-hold caps.
+   * **Oscilloscope Waveform** (`WAVE`): Real-time time-domain audio waveform with dynamic AGC scaling.
+   * **MilkDrop Plasma** (`PLASMA`): Audio energy-driven trigonometric sine/cosine plasma field.
+   * **Starfield Accelerator** (`STAR`): Bass-reactive warp speed starfield particle simulation.
 3. **RGB Light Effects**: Dedicated music-reactive lighting engine with 6 real-time audio-driven modes, base color selection, brightness control, sensitivity tuning, and test pulse.
 4. **Hardware Diagnostics**: 10-point interactive diagnostic suite (including dedicated INMP441 MEMS microphone hardware test) with return-to-menu navigation.
 5. **System Info**: Live VBAT voltage, battery %, CPU frequency profile, volume %, and SD mount status.
@@ -160,7 +167,7 @@ Accessible directly from Main Menu item `3. RGB Light Effects`:
 | **Now Playing** | UP / DOWN (Hold >650ms) | Digital Volume Up / Down (with on-screen overlay) |
 | **Now Playing** | CANCEL (Short) | Return to Track List |
 | **Visualizer Mode** | Any Button | Reveal Top Status Bar (auto-hides after 5s for full-screen 128×64 visualizer) |
-| **Visualizer Mode** | UP / DOWN (Short) | Previous / Next visualizer preset (`BARS` ↔ `WAVE` ↔ `PLASMA` ↔ `STAR`) |
+| **Visualizer Mode** | UP / DOWN (Short) | Previous / Next visualizer preset (`ANALOG VU` ↔ `HORIZ VU` ↔ `VU+SPEC` ↔ `BARS` ↔ `WAVE` ↔ `PLASMA` ↔ `STAR`) |
 | **Visualizer Mode** | OK / SEL (Short) | Toggle Play / Pause |
 | **Visualizer Mode** | OK / SEL (Hold >650ms) | Cycle Visualizer Sensitivity (`LOW` → `NORMAL` → `HIGH`) |
 | **Visualizer Mode** | UP / DOWN (Hold >650ms) | Digital Volume Up / Down |

@@ -277,7 +277,7 @@ void Diagnostics::testINMP441Mic() {
         ButtonEvent evt = buttonManager.update();
         if (evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_CANCEL_PRESS) break;
         if (evt == BTN_EVENT_DN_PRESS) {
-            p = (VisualizerPreset)((p + 1) % 4);
+            p = (VisualizerPreset)((p + 1) % PRESET_COUNT);
         }
         delay(15);
     }

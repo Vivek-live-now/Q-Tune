@@ -9,7 +9,7 @@ SpectrumAnalyzer::SpectrumAnalyzer() :
     ringHead(0),
     lastSampleFeedMs(0),
     lastAnalysisMs(0),
-    currentPreset(PRESET_BAR_SPECTRUM),
+    currentPreset(PRESET_ANALOG_VU),
     sensitivity(VIS_SENS_NORMAL),
     active(false),
     micHardwareInitialized(false),
@@ -21,12 +21,29 @@ SpectrumAnalyzer::SpectrumAnalyzer() :
     voicePitch(0.0f),
     voiceConfidence(0.0f),
     topBarExpiryMs(0),
-    sensToastExpiryMs(0) {
+    sensToastExpiryMs(0),
+    leftPeakLevel(0.0f),
+    rightPeakLevel(0.0f),
+    leftRmsLevel(0.0f),
+    rightRmsLevel(0.0f),
+    leftDb(-20.0f),
+    rightDb(-20.0f),
+    needlePos(0.0f),
+    needleVel(0.0f),
+    lastBallisticMs(0),
+    leftBarPeakHold(0),
+    rightBarPeakHold(0),
+    leftBarDecayTimer(0),
+    rightBarDecayTimer(0) {
     memset(bands, 0, sizeof(bands));
     memset(peakHold, 0, sizeof(peakHold));
     memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
     memset(micBuffer, 0, sizeof(micBuffer));
     memset(ringBuffer, 0, sizeof(ringBuffer));
+    memset(ringBufferL, 0, sizeof(ringBufferL));
+    memset(ringBufferR, 0, sizeof(ringBufferR));
+    memset(spec8PeakHold, 0, sizeof(spec8PeakHold));
+    memset(spec8DecayTimer, 0, sizeof(spec8DecayTimer));
 }
 
 void SpectrumAnalyzer::loadSettings() {
@@ -150,14 +167,18 @@ void SpectrumAnalyzer::feedSamples(const int16_t *samples, size_t count, uint8_t
     if (!samples || count == 0) return;
     size_t head = ringHead;
     for (size_t i = 0; i < count; i++) {
-        int16_t sample;
+        int16_t sampleL, sampleR;
         if (channels == 1) {
-            sample = samples[i];
+            sampleL = samples[i];
+            sampleR = samples[i];
         } else {
-            // Downmix stereo (L + R) / 2 to mono
-            sample = (int16_t)(((int32_t)samples[i * 2] + (int32_t)samples[i * 2 + 1]) / 2);
+            sampleL = samples[i * 2];
+            sampleR = samples[i * 2 + 1];
         }
-        ringBuffer[head] = sample;
+        ringBufferL[head] = sampleL;
+        ringBufferR[head] = sampleR;
+        // Downmix stereo (L + R) / 2 to mono for FFT
+        ringBuffer[head] = (int16_t)(((int32_t)sampleL + (int32_t)sampleR) / 2);
         head = (head + 1) % RING_BUFFER_SIZE;
     }
     ringHead = head;
@@ -166,10 +187,14 @@ void SpectrumAnalyzer::feedSamples(const int16_t *samples, size_t count, uint8_t
 
 void SpectrumAnalyzer::clearSamples() {
     memset(ringBuffer, 0, sizeof(ringBuffer));
+    memset(ringBufferL, 0, sizeof(ringBufferL));
+    memset(ringBufferR, 0, sizeof(ringBufferR));
     memset(micBuffer, 0, sizeof(micBuffer));
     memset(bands, 0, sizeof(bands));
     memset(peakHold, 0, sizeof(peakHold));
     memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
+    memset(spec8PeakHold, 0, sizeof(spec8PeakHold));
+    memset(spec8DecayTimer, 0, sizeof(spec8DecayTimer));
     peakLevel = 0.0f;
     rmsLevel = 0.0f;
     bassLevel = 0.0f;
@@ -177,6 +202,18 @@ void SpectrumAnalyzer::clearSamples() {
     bassFilterState2 = 0.0f;
     voicePitch = 0.0f;
     voiceConfidence = 0.0f;
+    leftPeakLevel = 0.0f;
+    rightPeakLevel = 0.0f;
+    leftRmsLevel = 0.0f;
+    rightRmsLevel = 0.0f;
+    leftDb = -20.0f;
+    rightDb = -20.0f;
+    needlePos = 0.0f;
+    needleVel = 0.0f;
+    leftBarPeakHold = 0;
+    rightBarPeakHold = 0;
+    leftBarDecayTimer = 0;
+    rightBarDecayTimer = 0;
     ringHead = 0;
 }
 
@@ -193,6 +230,21 @@ void SpectrumAnalyzer::sampleAudioStream() {
         peakLevel = peakLevel * 0.70f;
         rmsLevel = rmsLevel * 0.70f;
         bassLevel = bassLevel * 0.70f;
+        leftPeakLevel = leftPeakLevel * 0.70f;
+        rightPeakLevel = rightPeakLevel * 0.70f;
+        leftRmsLevel = leftRmsLevel * 0.70f;
+        rightRmsLevel = rightRmsLevel * 0.70f;
+        leftDb = leftDb * 0.85f - 3.0f;
+        if (leftDb < -20.0f) leftDb = -20.0f;
+        rightDb = rightDb * 0.85f - 3.0f;
+        if (rightDb < -20.0f) rightDb = -20.0f;
+        needlePos = needlePos * 0.75f;
+        needleVel = 0.0f;
+        if (leftBarPeakHold > 0) leftBarPeakHold--;
+        if (rightBarPeakHold > 0) rightBarPeakHold--;
+        for (int i = 0; i < 8; i++) {
+            if (spec8PeakHold[i] > 0) spec8PeakHold[i]--;
+        }
         bassFilterState1 = 0.0f;
         bassFilterState2 = 0.0f;
         voicePitch = 0.0f;
@@ -214,12 +266,26 @@ void SpectrumAnalyzer::sampleAudioStream() {
     size_t start = (head + RING_BUFFER_SIZE - SAMPLE_SIZE) % RING_BUFFER_SIZE;
 
     int64_t sum = 0;
+    float leftSumSq = 0.0f;
+    float rightSumSq = 0.0f;
+    int16_t lPeak = 0;
+    int16_t rPeak = 0;
+
     for (size_t i = 0; i < SAMPLE_SIZE; i++) {
         size_t idx = (start + i) % RING_BUFFER_SIZE;
         // Scale 16-bit PCM down (>> 6) to match calibrated FFT dynamic range
         int16_t s = ringBuffer[idx] >> 6;
+        int16_t sL = ringBufferL[idx] >> 6;
+        int16_t sR = ringBufferR[idx] >> 6;
         micBuffer[i] = s;
         sum += s;
+
+        int16_t aL = abs(sL);
+        int16_t aR = abs(sR);
+        if (aL > lPeak) lPeak = aL;
+        if (aR > rPeak) rPeak = aR;
+        leftSumSq += (float)aL * aL;
+        rightSumSq += (float)aR * aR;
     }
 
     // DC bias removal
@@ -250,7 +316,77 @@ void SpectrumAnalyzer::sampleAudioStream() {
     rmsLevel = sqrtf(sumSq / SAMPLE_SIZE) * sensMult;
     bassLevel = sqrtf(bassSumSq / SAMPLE_SIZE) * sensMult;
 
+    leftPeakLevel = (float)lPeak * sensMult;
+    rightPeakLevel = (float)rPeak * sensMult;
+    leftRmsLevel = sqrtf(leftSumSq / SAMPLE_SIZE) * sensMult;
+    rightRmsLevel = sqrtf(rightSumSq / SAMPLE_SIZE) * sensMult;
+
+    // Standard VU dB calculations (-18 dBFS = 0 VU reference -> ~64.0 amplitude)
+    float vL = leftRmsLevel / 64.0f;
+    float vR = rightRmsLevel / 64.0f;
+    leftDb = (vL > 0.05f) ? (20.0f * log10f(vL)) : -20.0f;
+    if (leftDb > 3.5f) leftDb = 3.5f;
+    if (leftDb < -20.0f) leftDb = -20.0f;
+
+    rightDb = (vR > 0.05f) ? (20.0f * log10f(vR)) : -20.0f;
+    if (rightDb > 3.5f) rightDb = 3.5f;
+    if (rightDb < -20.0f) rightDb = -20.0f;
+
+    // Ballistic simulation (300ms rise time to 99%, ANSI C16.5 mechanical response)
+    float dt = (lastBallisticMs > 0 && now > lastBallisticMs) ? ((float)(now - lastBallisticMs) / 1000.0f) : 0.020f;
+    if (dt > 0.1f) dt = 0.020f;
+    lastBallisticMs = now;
+
+    float vMax = (vL >= vR) ? vL : vR;
+    float targetDeflection = (vMax > 0.08f) ? ((vMax - 0.08f) / 1.33f) : 0.0f;
+    if (targetDeflection > 1.08f) targetDeflection = 1.08f;
+    if (targetDeflection < 0.0f) targetDeflection = 0.0f;
+
+    float err = targetDeflection - needlePos;
+    needleVel += (err * 120.0f - needleVel * 15.0f) * dt;
+    needlePos += needleVel * dt;
+    if (needlePos < 0.0f) { needlePos = 0.0f; needleVel = 0.0f; }
+    if (needlePos > 1.08f) { needlePos = 1.08f; needleVel = 0.0f; }
+
+    // Horizontal bar peak hold update
+    uint8_t barWL = (uint8_t)constrain((int)(vL * 58.0f), 0, 84);
+    uint8_t barWR = (uint8_t)constrain((int)(vR * 58.0f), 0, 84);
+    if (barWL >= leftBarPeakHold) {
+        leftBarPeakHold = barWL;
+        leftBarDecayTimer = 0;
+    } else {
+        leftBarDecayTimer++;
+        if (leftBarDecayTimer > 20 && leftBarPeakHold > 0) {
+            leftBarPeakHold--;
+        }
+    }
+    if (barWR >= rightBarPeakHold) {
+        rightBarPeakHold = barWR;
+        rightBarDecayTimer = 0;
+    } else {
+        rightBarDecayTimer++;
+        if (rightBarDecayTimer > 20 && rightBarPeakHold > 0) {
+            rightBarPeakHold--;
+        }
+    }
+
     processFFT();
+
+    // 8-band spectrometer peak hold update for hybrid mode
+    for (int b = 0; b < 8; b++) {
+        uint8_t h8 = (bands[b * 2] + bands[b * 2 + 1]) / 2;
+        if (h8 >= spec8PeakHold[b]) {
+            spec8PeakHold[b] = h8;
+            spec8DecayTimer[b] = 0;
+        } else {
+            spec8DecayTimer[b]++;
+            if (spec8DecayTimer[b] > 3 && spec8PeakHold[b] > 0) {
+                spec8PeakHold[b]--;
+                spec8DecayTimer[b] = 0;
+            }
+        }
+    }
+
     detectVoicePitch();
 }
 
@@ -565,22 +701,25 @@ void SpectrumAnalyzer::detectVoicePitch() {
 }
 
 void SpectrumAnalyzer::nextPreset() {
-    currentPreset = (VisualizerPreset)((currentPreset + 1) % 4);
+    currentPreset = (VisualizerPreset)((currentPreset + 1) % PRESET_COUNT);
     wakeTopBar(5000);
 }
 
 void SpectrumAnalyzer::previousPreset() {
-    currentPreset = (VisualizerPreset)((currentPreset + 3) % 4);
+    currentPreset = (VisualizerPreset)((currentPreset + PRESET_COUNT - 1) % PRESET_COUNT);
     wakeTopBar(5000);
 }
 
 const char* SpectrumAnalyzer::getPresetName() const {
     switch (currentPreset) {
+        case PRESET_ANALOG_VU:       return "ANALOG VU";
+        case PRESET_HORIZ_BAR_VU:    return "HORIZ VU";
+        case PRESET_VU_SPECTROMETER: return "VU+SPEC";
         case PRESET_BAR_SPECTRUM:    return "BARS";
         case PRESET_WAVEFORM:        return "WAVE";
         case PRESET_MILKDROP_PLASMA: return "PLASMA";
         case PRESET_STARFIELD:       return "STAR";
-        default:                     return "BARS";
+        default:                     return "ANALOG VU";
     }
 }
 
@@ -590,11 +729,409 @@ void SpectrumAnalyzer::render() {
 
 void SpectrumAnalyzer::render(VisualizerPreset preset) {
     switch (preset) {
+        case PRESET_ANALOG_VU: drawAnalogVU(); break;
+        case PRESET_HORIZ_BAR_VU: drawHorizontalBarVU(); break;
+        case PRESET_VU_SPECTROMETER: drawVUSpectrometer(); break;
         case PRESET_BAR_SPECTRUM: drawBars(); break;
         case PRESET_WAVEFORM: drawWaveform(); break;
         case PRESET_MILKDROP_PLASMA: drawPlasma(); break;
         case PRESET_STARFIELD: drawStarfield(); break;
+        default: drawAnalogVU(); break;
     }
+}
+
+void SpectrumAnalyzer::drawAnalogVU() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_6x10_tr);
+
+    bool showBar = isTopBarVisible();
+    if (showBar) {
+        String track = audioPlayer.getCurrentTrackName();
+        if (track.length() == 0) {
+            track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        }
+        if (track.length() > 13) {
+            track = track.substring(0, 11) + "..";
+        }
+        char headerBuf[32];
+        if (millis() < sensToastExpiryMs) {
+            snprintf(headerBuf, sizeof(headerBuf), "SENS: %s (%.1fx)", getSensitivityName(), getSensitivityMultiplier());
+        } else {
+            snprintf(headerBuf, sizeof(headerBuf), "[VU:%s] %s", getSensitivityShortName(), track.c_str());
+        }
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+    }
+
+    int pivotX = 64;
+    int pivotY = showBar ? 63 : 62;
+    int arcR = showBar ? 42 : 46;
+    int needleR = showBar ? 44 : 48;
+
+    // Curved meter scale arc from 150 deg down to 30 deg
+    for (int deg = 150; deg >= 30; deg -= 2) {
+        float rad = (float)deg * (float)M_PI / 180.0f;
+        int x = pivotX + (int)(cosf(rad) * arcR);
+        int y = pivotY - (int)(sinf(rad) * arcR);
+        u8g2.drawPixel(x, y);
+
+        // Danger sector from 68 down to 30 deg (0 dB to +3 dB): reinforced double arc
+        if (deg <= 68) {
+            int xIn = pivotX + (int)(cosf(rad) * (arcR - 1));
+            int yIn = pivotY - (int)(sinf(rad) * (arcR - 1));
+            u8g2.drawPixel(xIn, yIn);
+        }
+    }
+
+    // Tick marks across the scale
+    struct VUTick {
+        float deg;
+        bool major;
+    };
+    static const VUTick ticks[] = {
+        {150.0f, true},  // -20
+        {128.5f, true},  // -10
+        {117.0f, false}, // -7
+        {106.5f, true},  // -5
+        {93.5f,  false}, // -3
+        {77.0f,  false}, // -1
+        {67.5f,  true},  //  0
+        {56.0f,  false}, // +1
+        {43.5f,  false}, // +2
+        {30.0f,  true}   // +3
+    };
+
+    for (size_t i = 0; i < sizeof(ticks) / sizeof(ticks[0]); i++) {
+        float rad = ticks[i].deg * (float)M_PI / 180.0f;
+        int rIn = arcR - (ticks[i].major ? 4 : 2);
+        int rOut = arcR + (ticks[i].major ? 4 : 2);
+        int x0 = pivotX + (int)(cosf(rad) * rIn);
+        int y0 = pivotY - (int)(sinf(rad) * rIn);
+        int x1 = pivotX + (int)(cosf(rad) * rOut);
+        int y1 = pivotY - (int)(sinf(rad) * rOut);
+        u8g2.drawLine(x0, y0, x1, y1);
+    }
+
+    // Scale numeric labels
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(12, showBar ? 42 : 39, "-20");
+    u8g2.drawStr(27, showBar ? 28 : 24, "-10");
+    u8g2.drawStr(46, showBar ? 20 : 16, "-5");
+    u8g2.drawStr(77, showBar ? 21 : 17, "0");
+    u8g2.drawStr(104, showBar ? 42 : 39, "+3");
+
+    // Center "VU" label
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(59, pivotY - 14, "VU");
+
+    // Moving Needle with ballistics
+    float clampedPos = needlePos;
+    if (clampedPos < 0.0f) clampedPos = 0.0f;
+    if (clampedPos > 1.05f) clampedPos = 1.05f;
+    float needleDeg = 150.0f - clampedPos * 120.0f;
+    float needleRad = needleDeg * (float)M_PI / 180.0f;
+    int tipX = pivotX + (int)(cosf(needleRad) * needleR);
+    int tipY = pivotY - (int)(sinf(needleRad) * needleR);
+
+    // Needle stroke with solid visual presence
+    u8g2.drawLine(pivotX, pivotY, tipX, tipY);
+    int baseOffX = (needleDeg < 90.0f) ? -1 : 1;
+    u8g2.drawLine(pivotX + baseOffX, pivotY, tipX, tipY);
+
+    // Center pivot hub disk
+    u8g2.drawDisc(pivotX, pivotY, 3);
+    u8g2.setDrawColor(0);
+    u8g2.drawPixel(pivotX, pivotY);
+    u8g2.setDrawColor(1);
+
+    // Lower corners: digital peak/dB readouts
+    u8g2.setFont(u8g2_font_4x6_tr);
+    char lBuf[16], rBuf[16];
+    if (leftDb <= -19.5f) {
+        snprintf(lBuf, sizeof(lBuf), "L:--.-");
+    } else {
+        snprintf(lBuf, sizeof(lBuf), "L:%+.1f", leftDb);
+    }
+    if (rightDb <= -19.5f) {
+        snprintf(rBuf, sizeof(rBuf), "R:--.-");
+    } else {
+        snprintf(rBuf, sizeof(rBuf), "R:%+.1f", rightDb);
+    }
+    u8g2.drawStr(2, 62, lBuf);
+    u8g2.drawStr(98, 62, rBuf);
+
+    // Peak clipping / overload indicator
+    if (leftDb >= 0.0f || rightDb >= 0.0f) {
+        u8g2.drawFrame(51, showBar ? 25 : 22, 26, 8);
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(53, showBar ? 31 : 28, "CLIP");
+    }
+
+    display.sendBuffer();
+}
+
+void SpectrumAnalyzer::drawHorizontalBarVU() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_6x10_tr);
+
+    bool showBar = isTopBarVisible();
+    if (showBar) {
+        String track = audioPlayer.getCurrentTrackName();
+        if (track.length() == 0) {
+            track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        }
+        if (track.length() > 13) {
+            track = track.substring(0, 11) + "..";
+        }
+        char headerBuf[32];
+        if (millis() < sensToastExpiryMs) {
+            snprintf(headerBuf, sizeof(headerBuf), "SENS: %s (%.1fx)", getSensitivityName(), getSensitivityMultiplier());
+        } else {
+            snprintf(headerBuf, sizeof(headerBuf), "[HRZ:%s] %s", getSensitivityShortName(), track.c_str());
+        }
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+    }
+
+    int startY = showBar ? 15 : 6;
+    int barW = 86;
+    int barH = 7;
+    int barX = 14;
+    int lY = startY;
+    int rY = startY + 20;
+    int zeroMarkX = barX + (int)(barW * 0.69f);
+
+    // Channel labels
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(2, lY + 6, "L");
+    u8g2.drawStr(2, rY + 6, "R");
+
+    // Outer bar frames
+    u8g2.drawFrame(barX, lY, barW, barH);
+    u8g2.drawFrame(barX, rY, barW, barH);
+
+    auto dbToWidth = [&](float db) -> int {
+        if (db <= -20.0f) return 0;
+        float norm = (db + 20.0f) / 23.0f;
+        if (norm < 0.0f) norm = 0.0f;
+        if (norm > 1.0f) norm = 1.0f;
+        return (int)(norm * (barW - 2));
+    };
+
+    int fillWL = dbToWidth(leftDb);
+    int fillWR = dbToWidth(rightDb);
+    int zeroPixelW = zeroMarkX - barX - 1;
+
+    // Fill Left Bar
+    if (fillWL > 0) {
+        int safeW = (fillWL <= zeroPixelW) ? fillWL : zeroPixelW;
+        u8g2.drawBox(barX + 1, lY + 1, safeW, barH - 2);
+        if (fillWL > zeroPixelW) {
+            int overW = fillWL - zeroPixelW;
+            for (int dx = 0; dx < overW; dx++) {
+                int px = barX + 1 + zeroPixelW + dx;
+                for (int dy = 0; dy < barH - 2; dy++) {
+                    if ((px + dy) % 2 == 0) u8g2.drawPixel(px, lY + 1 + dy);
+                }
+            }
+        }
+        u8g2.setDrawColor(0);
+        for (int sx = barX + 4; sx < barX + fillWL; sx += 4) {
+            u8g2.drawVLine(sx, lY + 1, barH - 2);
+        }
+        u8g2.setDrawColor(1);
+    }
+
+    // Fill Right Bar
+    if (fillWR > 0) {
+        int safeW = (fillWR <= zeroPixelW) ? fillWR : zeroPixelW;
+        u8g2.drawBox(barX + 1, rY + 1, safeW, barH - 2);
+        if (fillWR > zeroPixelW) {
+            int overW = fillWR - zeroPixelW;
+            for (int dx = 0; dx < overW; dx++) {
+                int px = barX + 1 + zeroPixelW + dx;
+                for (int dy = 0; dy < barH - 2; dy++) {
+                    if ((px + dy) % 2 == 0) u8g2.drawPixel(px, rY + 1 + dy);
+                }
+            }
+        }
+        u8g2.setDrawColor(0);
+        for (int sx = barX + 4; sx < barX + fillWR; sx += 4) {
+            u8g2.drawVLine(sx, rY + 1, barH - 2);
+        }
+        u8g2.setDrawColor(1);
+    }
+
+    // Floating Peak Hold indicators
+    int peakPixL = leftBarPeakHold;
+    if (peakPixL > barW - 3) peakPixL = barW - 3;
+    if (peakPixL > 0) {
+        u8g2.drawVLine(barX + 1 + peakPixL, lY - 1, barH + 2);
+    }
+
+    int peakPixR = rightBarPeakHold;
+    if (peakPixR > barW - 3) peakPixR = barW - 3;
+    if (peakPixR > 0) {
+        u8g2.drawVLine(barX + 1 + peakPixR, rY - 1, barH + 2);
+    }
+
+    // Central Scale markings between L and R bars
+    int scaleY = startY + 11;
+    u8g2.drawHLine(barX, scaleY + 3, barW);
+
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawVLine(barX, scaleY + 1, 5);
+    u8g2.drawStr(barX - 2, scaleY + 2, "-20");
+
+    int x10 = barX + (int)(barW * 0.25f);
+    u8g2.drawVLine(x10, scaleY + 1, 5);
+    u8g2.drawStr(x10 - 4, scaleY + 2, "-10");
+
+    int x5 = barX + (int)(barW * 0.48f);
+    u8g2.drawVLine(x5, scaleY + 1, 5);
+    u8g2.drawStr(x5 - 2, scaleY + 2, "-5");
+
+    u8g2.drawVLine(zeroMarkX, scaleY - 1, 9);
+    u8g2.drawStr(zeroMarkX - 2, scaleY + 2, "0");
+
+    int x3 = barX + barW - 1;
+    u8g2.drawVLine(x3, scaleY + 1, 5);
+    u8g2.drawStr(x3 - 6, scaleY + 2, "+3");
+
+    // Right-side numeric readouts
+    u8g2.setFont(u8g2_font_4x6_tr);
+    char bufL[12], bufR[12];
+    snprintf(bufL, sizeof(bufL), (leftDb <= -19.5f) ? "--.-" : "%+.1f", leftDb);
+    snprintf(bufR, sizeof(bufR), (rightDb <= -19.5f) ? "--.-" : "%+.1f", rightDb);
+    u8g2.drawStr(103, lY + 6, bufL);
+    u8g2.drawStr(103, rY + 6, bufR);
+
+    // Bottom telemetry strip
+    int bottomY = rY + barH + 9;
+    if (bottomY <= 63) {
+        u8g2.drawHLine(0, bottomY - 3, 128);
+        char botBuf[36];
+        snprintf(botBuf, sizeof(botBuf), "RMS:%-4.0f PEAK:%-4.0f CAL:-18VU", rmsLevel, peakLevel);
+        u8g2.drawStr(4, bottomY + 5, botBuf);
+    }
+
+    display.sendBuffer();
+}
+
+void SpectrumAnalyzer::drawVUSpectrometer() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_6x10_tr);
+
+    bool showBar = isTopBarVisible();
+    if (showBar) {
+        String track = audioPlayer.getCurrentTrackName();
+        if (track.length() == 0) {
+            track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        }
+        if (track.length() > 13) {
+            track = track.substring(0, 11) + "..";
+        }
+        char headerBuf[32];
+        if (millis() < sensToastExpiryMs) {
+            snprintf(headerBuf, sizeof(headerBuf), "SENS: %s (%.1fx)", getSensitivityName(), getSensitivityMultiplier());
+        } else {
+            snprintf(headerBuf, sizeof(headerBuf), "[V+S:%s] %s", getSensitivityShortName(), track.c_str());
+        }
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+    }
+
+    // TOP PANE: Compact Dual Stereo VU Bars
+    int vuY = showBar ? 14 : 3;
+    int barW = 82;
+    int barH = 5;
+    int barX = 14;
+
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(2, vuY + 5, "L");
+    u8g2.drawStr(2, vuY + 12, "R");
+
+    u8g2.drawFrame(barX, vuY, barW, barH);
+    u8g2.drawFrame(barX, vuY + 7, barW, barH);
+
+    int zeroX = barX + (int)(barW * 0.69f);
+    u8g2.drawVLine(zeroX, vuY - 1, 14);
+
+    auto dbToCompactW = [&](float db) -> int {
+        if (db <= -20.0f) return 0;
+        float norm = (db + 20.0f) / 23.0f;
+        if (norm < 0.0f) norm = 0.0f;
+        if (norm > 1.0f) norm = 1.0f;
+        return (int)(norm * (barW - 2));
+    };
+    int wL = dbToCompactW(leftDb);
+    int wR = dbToCompactW(rightDb);
+
+    if (wL > 0) u8g2.drawBox(barX + 1, vuY + 1, wL, barH - 2);
+    if (wR > 0) u8g2.drawBox(barX + 1, vuY + 8, wR, barH - 2);
+
+    int pkL = (leftBarPeakHold * barW) / 88;
+    int pkR = (rightBarPeakHold * barW) / 88;
+    if (pkL > barW - 3) pkL = barW - 3;
+    if (pkR > barW - 3) pkR = barW - 3;
+    if (pkL > 0) u8g2.drawVLine(barX + 1 + pkL, vuY - 1, barH + 2);
+    if (pkR > 0) u8g2.drawVLine(barX + 1 + pkR, vuY + 6, barH + 2);
+
+    char vDbBuf[16];
+    float maxDb = (leftDb >= rightDb) ? leftDb : rightDb;
+    snprintf(vDbBuf, sizeof(vDbBuf), (maxDb <= -19.5f) ? "--.-" : "%+.1f", maxDb);
+    u8g2.drawStr(100, vuY + 8, vDbBuf);
+
+    // DIVIDER LINE
+    int divY = vuY + 15;
+    u8g2.drawHLine(0, divY, 128);
+
+    // BOTTOM PANE: 8-Band Real-Time Audio FFT Frequency Spectrometer
+    static const char* bandLabels[8] = {"63", "125", "250", "500", "1k", "2k", "4k", "8k"};
+    int maxSpecH = 63 - (divY + 8);
+    int specBottomY = 63 - 7;
+    int numBands = 8;
+    int bWidth = 11;
+    int bSpacing = 4;
+    int startX = 6;
+
+    for (int b = 0; b < numBands; b++) {
+        int val = (bands[b * 2] + bands[b * 2 + 1]) / 2;
+        int h = (val * maxSpecH) / 48;
+        if (h > maxSpecH) h = maxSpecH;
+        if (h < 0) h = 0;
+
+        int bx = startX + b * (bWidth + bSpacing);
+        int by = specBottomY - h;
+
+        if (h > 0) {
+            u8g2.drawBox(bx, by, bWidth, h);
+            u8g2.setDrawColor(0);
+            for (int sy = specBottomY - 3; sy > by; sy -= 3) {
+                u8g2.drawHLine(bx, sy, bWidth);
+            }
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawHLine(bx, specBottomY, bWidth);
+        }
+
+        int capH = (spec8PeakHold[b] * maxSpecH) / 48;
+        if (capH > maxSpecH) capH = maxSpecH;
+        if (capH > 0) {
+            int capY = specBottomY - capH;
+            u8g2.drawHLine(bx, capY, bWidth);
+        }
+
+        u8g2.setFont(u8g2_font_4x6_tr);
+        if (b % 2 == 0) {
+            u8g2.drawStr(bx, 63, bandLabels[b]);
+        }
+    }
+
+    display.sendBuffer();
 }
 
 void SpectrumAnalyzer::renderMiniBars(U8G2 &u8g2, int x, int y, int width, int height) {

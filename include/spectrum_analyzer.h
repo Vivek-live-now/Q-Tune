@@ -8,10 +8,14 @@
 #include "display.h"
 
 enum VisualizerPreset {
-    PRESET_BAR_SPECTRUM,
-    PRESET_WAVEFORM,
-    PRESET_MILKDROP_PLASMA,
-    PRESET_STARFIELD
+    PRESET_ANALOG_VU = 0,
+    PRESET_HORIZ_BAR_VU = 1,
+    PRESET_VU_SPECTROMETER = 2,
+    PRESET_BAR_SPECTRUM = 3,
+    PRESET_WAVEFORM = 4,
+    PRESET_MILKDROP_PLASMA = 5,
+    PRESET_STARFIELD = 6,
+    PRESET_COUNT = 7
 };
 
 enum VisualizerSensitivity {
@@ -65,6 +69,14 @@ public:
     float getVoicePitch() const { return voicePitch; }
     float getVoiceConfidence() const { return voiceConfidence; }
 
+    // Stereo channel levels & dB readouts
+    float getLeftPeak() const { return leftPeakLevel; }
+    float getRightPeak() const { return rightPeakLevel; }
+    float getLeftRMS() const { return leftRmsLevel; }
+    float getRightRMS() const { return rightRmsLevel; }
+    float getLeftDb() const { return leftDb; }
+    float getRightDb() const { return rightDb; }
+
     // Top status bar auto-hide management (5-second timeout for full-screen view)
     void wakeTopBar(unsigned long durationMs = 5000);
     bool isTopBarVisible() const;
@@ -76,6 +88,8 @@ private:
 
     int32_t micBuffer[SAMPLE_SIZE]; // Working buffer for FFT / Waveform
     int16_t ringBuffer[RING_BUFFER_SIZE]; // Lock-free circular sample tap from AudioPlayer
+    int16_t ringBufferL[RING_BUFFER_SIZE]; // Left channel circular tap
+    int16_t ringBufferR[RING_BUFFER_SIZE]; // Right channel circular tap
     volatile size_t ringHead;
     unsigned long lastSampleFeedMs;
     unsigned long lastAnalysisMs;
@@ -98,8 +112,34 @@ private:
     unsigned long topBarExpiryMs;
     unsigned long sensToastExpiryMs;
 
+    // Stereo channel levels and dB
+    float leftPeakLevel;
+    float rightPeakLevel;
+    float leftRmsLevel;
+    float rightRmsLevel;
+    float leftDb;
+    float rightDb;
+
+    // Analog VU ballistic simulation
+    float needlePos;
+    float needleVel;
+    unsigned long lastBallisticMs;
+
+    // Horizontal bar peak hold
+    uint8_t leftBarPeakHold;
+    uint8_t rightBarPeakHold;
+    uint8_t leftBarDecayTimer;
+    uint8_t rightBarDecayTimer;
+
+    // Hybrid spectrometer 8-band peak hold
+    uint8_t spec8PeakHold[8];
+    uint8_t spec8DecayTimer[8];
+
     void processFFT();
     void detectVoicePitch();
+    void drawAnalogVU();
+    void drawHorizontalBarVU();
+    void drawVUSpectrometer();
     void drawBars();
     void drawWaveform();
     void drawPlasma();

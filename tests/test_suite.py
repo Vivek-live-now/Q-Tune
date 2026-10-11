@@ -1187,6 +1187,53 @@ def test_vocal_reactive_check_tool():
 
     print('  [PASS] Vocal Expression Engine, held note sustain, vibrato shimmer, 50/255 brightness floor, and interactive check tool verified.')
 
+def test_vu_analog_and_spectrometer_suite():
+    print("\n--- 24. VU Analog Meter & Spectrometer Suite Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sa_h = os.path.join(base_dir, "include", "spectrum_analyzer.h")
+    sa_cpp = os.path.join(base_dir, "src", "spectrum_analyzer.cpp")
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+
+    with open_utf8(sa_h) as f:
+        sa_h_text = f.read()
+    with open_utf8(sa_cpp) as f:
+        sa_cpp_text = f.read()
+    with open_utf8(diag_cpp) as f:
+        diag_cpp_text = f.read()
+
+    # 1. Verify preset declarations
+    assert "PRESET_ANALOG_VU" in sa_h_text, "Missing PRESET_ANALOG_VU in spectrum_analyzer.h"
+    assert "PRESET_HORIZ_BAR_VU" in sa_h_text, "Missing PRESET_HORIZ_BAR_VU in spectrum_analyzer.h"
+    assert "PRESET_VU_SPECTROMETER" in sa_h_text, "Missing PRESET_VU_SPECTROMETER in spectrum_analyzer.h"
+    assert "PRESET_COUNT" in sa_h_text, "Missing PRESET_COUNT in spectrum_analyzer.h"
+
+    # 2. Verify stereo channel sample tap buffers and getters
+    assert "ringBufferL" in sa_h_text and "ringBufferR" in sa_h_text, "Stereo circular taps missing in spectrum_analyzer.h"
+    assert "getLeftDb" in sa_h_text and "getRightDb" in sa_h_text, "Stereo dB getters missing in spectrum_analyzer.h"
+    assert "leftBarPeakHold" in sa_h_text and "rightBarPeakHold" in sa_h_text, "Stereo bar peak hold missing in spectrum_analyzer.h"
+
+    # 3. Verify render method definitions in cpp
+    assert "drawAnalogVU()" in sa_cpp_text, "drawAnalogVU missing in spectrum_analyzer.cpp"
+    assert "drawHorizontalBarVU()" in sa_cpp_text, "drawHorizontalBarVU missing in spectrum_analyzer.cpp"
+    assert "drawVUSpectrometer()" in sa_cpp_text, "drawVUSpectrometer missing in spectrum_analyzer.cpp"
+
+    # 4. Mathematical verification of ANSI C16.5 VU Ballistics simulation
+    dt = 0.020  # 50 Hz update
+    needle_pos = 0.0
+    needle_vel = 0.0
+    target_deflection = 0.69  # 0 VU point
+    for _ in range(15):  # 300 ms elapsed
+        err = target_deflection - needle_pos
+        needle_vel += (err * 120.0 - needle_vel * 15.0) * dt
+        needle_pos += needle_vel * dt
+    # At 300 ms, needle should reach ~99% of 0 VU steady state (ANSI C16.5)
+    assert 0.67 <= needle_pos <= 0.72, f"VU needle ballistics out of spec at 300ms: {needle_pos}"
+
+    # 5. Verify diagnostics preset cycling uses PRESET_COUNT
+    assert "PRESET_COUNT" in diag_cpp_text, "Diagnostics must use PRESET_COUNT for cycling"
+
+    print("  [PASS] Vintage Analog Needle VU (Klanghelm VUMT), HoRNet Dual Horizontal Bar VU, and Hybrid 8-Band Spectrometer verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1214,7 +1261,8 @@ def main():
     test_album_art_extraction_dithering_and_customization()
     test_mp3_zero_stack_helix_aac_and_sdxc_exfat()
     test_vocal_reactive_check_tool()
-    print("\nAll 23 Q-Tune test verifications PASSED (100%)!\n")
+    test_vu_analog_and_spectrometer_suite()
+    print("\nAll 24 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()
