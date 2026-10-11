@@ -1240,6 +1240,9 @@ def test_vu_analog_and_spectrometer_suite():
     assert "VU_REF_RMS = 145.0f" in sa_cpp_text or "145.0f" in sa_cpp_text, "0 VU mastered music calibration missing"
     assert "lPeak >= 504 || rPeak >= 504" in sa_cpp_text, "Digital ceiling clip detection threshold missing"
 
+    # 7. Verify horizontal bar layout does not shift up on full-screen transition
+    assert "startY = 15" in sa_cpp_text, "Horizontal bar must stay anchored at startY = 15 without shifting on full-screen transition"
+
     print("  [PASS] Vintage Analog Needle VU, HoRNet Dual Horizontal Bar VU, Hybrid Spectrometer, and Vinyl Turntable VU verified.")
 
 def main():

@@ -955,7 +955,7 @@ void SpectrumAnalyzer::drawHorizontalBarVU() {
         u8g2.drawHLine(0, 12, 128);
     }
 
-    int startY = showBar ? 15 : 6;
+    int startY = 15; // Fixed vertical anchor so horizontal bars do not shift up when full screen happens
     int barW = 86;
     int barH = 7;
     int barX = 14;
