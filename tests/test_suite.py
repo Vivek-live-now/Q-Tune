@@ -1232,6 +1232,12 @@ def test_vu_analog_and_spectrometer_suite():
     # 5. Verify diagnostics preset cycling uses PRESET_COUNT
     assert "PRESET_COUNT" in diag_cpp_text, "Diagnostics must use PRESET_COUNT for cycling"
 
+    # 6. Verify Digital Clipping & Mastered Music Reference Calibration
+    assert "isClipping" in sa_h_text and "isClipping" in sa_cpp_text, "isClipping() missing"
+    assert "getLeftPeakDb" in sa_h_text and "getRightPeakDb" in sa_h_text, "True Peak dB getters missing"
+    assert "VU_REF_RMS = 145.0f" in sa_cpp_text or "145.0f" in sa_cpp_text, "0 VU mastered music calibration missing"
+    assert "lPeak >= 504 || rPeak >= 504" in sa_cpp_text, "Digital ceiling clip detection threshold missing"
+
     print("  [PASS] Vintage Analog Needle VU (Klanghelm VUMT), HoRNet Dual Horizontal Bar VU, and Hybrid 8-Band Spectrometer verified.")
 
 def main():

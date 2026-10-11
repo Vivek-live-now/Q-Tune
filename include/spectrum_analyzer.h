@@ -76,6 +76,9 @@ public:
     float getRightRMS() const { return rightRmsLevel; }
     float getLeftDb() const { return leftDb; }
     float getRightDb() const { return rightDb; }
+    float getLeftPeakDb() const { return leftPeakDb; }
+    float getRightPeakDb() const { return rightPeakDb; }
+    bool isClipping() const;
 
     // Top status bar auto-hide management (5-second timeout for full-screen view)
     void wakeTopBar(unsigned long durationMs = 5000);
@@ -119,6 +122,9 @@ private:
     float rightRmsLevel;
     float leftDb;
     float rightDb;
+    float leftPeakDb;
+    float rightPeakDb;
+    unsigned long clipExpiryMs;
 
     // Analog VU ballistic simulation
     float needlePos;

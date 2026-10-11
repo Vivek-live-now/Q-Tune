@@ -28,6 +28,9 @@ SpectrumAnalyzer::SpectrumAnalyzer() :
     rightRmsLevel(0.0f),
     leftDb(-20.0f),
     rightDb(-20.0f),
+    leftPeakDb(-30.0f),
+    rightPeakDb(-30.0f),
+    clipExpiryMs(0),
     needlePos(0.0f),
     needleVel(0.0f),
     lastBallisticMs(0),
@@ -122,6 +125,10 @@ void SpectrumAnalyzer::resetTopBar() {
     topBarExpiryMs = 0;
 }
 
+bool SpectrumAnalyzer::isClipping() const {
+    return millis() < clipExpiryMs;
+}
+
 bool SpectrumAnalyzer::begin() {
     loadSettings();
     active = false;
@@ -208,6 +215,9 @@ void SpectrumAnalyzer::clearSamples() {
     rightRmsLevel = 0.0f;
     leftDb = -20.0f;
     rightDb = -20.0f;
+    leftPeakDb = -30.0f;
+    rightPeakDb = -30.0f;
+    clipExpiryMs = 0;
     needlePos = 0.0f;
     needleVel = 0.0f;
     leftBarPeakHold = 0;
@@ -238,6 +248,9 @@ void SpectrumAnalyzer::sampleAudioStream() {
         if (leftDb < -20.0f) leftDb = -20.0f;
         rightDb = rightDb * 0.85f - 3.0f;
         if (rightDb < -20.0f) rightDb = -20.0f;
+        leftPeakDb = -30.0f;
+        rightPeakDb = -30.0f;
+        clipExpiryMs = 0;
         needlePos = needlePos * 0.75f;
         needleVel = 0.0f;
         if (leftBarPeakHold > 0) leftBarPeakHold--;
@@ -321,9 +334,11 @@ void SpectrumAnalyzer::sampleAudioStream() {
     leftRmsLevel = sqrtf(leftSumSq / SAMPLE_SIZE) * sensMult;
     rightRmsLevel = sqrtf(rightSumSq / SAMPLE_SIZE) * sensMult;
 
-    // Standard VU dB calculations (-18 dBFS = 0 VU reference -> ~64.0 amplitude)
-    float vL = leftRmsLevel / 64.0f;
-    float vR = rightRmsLevel / 64.0f;
+    // Real-world mastering calibration (0 VU = -11 dBFS, RMS amplitude ~145.0)
+    const float VU_REF_RMS = 145.0f;
+    float vL = leftRmsLevel / VU_REF_RMS;
+    float vR = rightRmsLevel / VU_REF_RMS;
+
     leftDb = (vL > 0.05f) ? (20.0f * log10f(vL)) : -20.0f;
     if (leftDb > 3.5f) leftDb = 3.5f;
     if (leftDb < -20.0f) leftDb = -20.0f;
@@ -332,13 +347,30 @@ void SpectrumAnalyzer::sampleAudioStream() {
     if (rightDb > 3.5f) rightDb = 3.5f;
     if (rightDb < -20.0f) rightDb = -20.0f;
 
+    // True Peak in dBFS (relative to 511 full-scale ceiling)
+    float peakRatioL = (float)lPeak / 511.0f;
+    float peakRatioR = (float)rPeak / 511.0f;
+    leftPeakDb = (peakRatioL > 0.01f) ? (20.0f * log10f(peakRatioL)) : -30.0f;
+    if (leftPeakDb > 0.0f) leftPeakDb = 0.0f;
+    if (leftPeakDb < -30.0f) leftPeakDb = -30.0f;
+
+    rightPeakDb = (peakRatioR > 0.01f) ? (20.0f * log10f(peakRatioR)) : -30.0f;
+    if (rightPeakDb > 0.0f) rightPeakDb = 0.0f;
+    if (rightPeakDb < -30.0f) rightPeakDb = -30.0f;
+
+    // True Digital Peak Clipping: triggers ONLY when signal hits digital full-scale ceiling (504+ out of 511)
+    if (lPeak >= 504 || rPeak >= 504) {
+        clipExpiryMs = now + 750;
+    }
+
     // Ballistic simulation (300ms rise time to 99%, ANSI C16.5 mechanical response)
     float dt = (lastBallisticMs > 0 && now > lastBallisticMs) ? ((float)(now - lastBallisticMs) / 1000.0f) : 0.020f;
     if (dt > 0.1f) dt = 0.020f;
     lastBallisticMs = now;
 
     float vMax = (vL >= vR) ? vL : vR;
-    float targetDeflection = (vMax > 0.08f) ? ((vMax - 0.08f) / 1.33f) : 0.0f;
+    // Map voltage ratio to dial deflection: 0.0 at -20 VU (0.10 ratio), 0.69 at 0 VU (1.00 ratio), 1.0 at +3 VU (1.413 ratio)
+    float targetDeflection = (vMax > 0.10f) ? ((vMax - 0.10f) / 1.313f * 1.0f) : 0.0f;
     if (targetDeflection > 1.08f) targetDeflection = 1.08f;
     if (targetDeflection < 0.0f) targetDeflection = 0.0f;
 
@@ -349,8 +381,15 @@ void SpectrumAnalyzer::sampleAudioStream() {
     if (needlePos > 1.08f) { needlePos = 1.08f; needleVel = 0.0f; }
 
     // Horizontal bar peak hold update
-    uint8_t barWL = (uint8_t)constrain((int)(vL * 58.0f), 0, 84);
-    uint8_t barWR = (uint8_t)constrain((int)(vR * 58.0f), 0, 84);
+    auto dbToWidth = [](float db) -> uint8_t {
+        if (db <= -20.0f) return 0;
+        float norm = (db <= 0.0f) ? ((db + 20.0f) / 20.0f * 0.69f) : (0.69f + (db / 3.0f) * 0.31f);
+        if (norm < 0.0f) norm = 0.0f;
+        if (norm > 1.0f) norm = 1.0f;
+        return (uint8_t)(norm * 84.0f);
+    };
+    uint8_t barWL = dbToWidth(leftDb);
+    uint8_t barWR = dbToWidth(rightDb);
     if (barWL >= leftBarPeakHold) {
         leftBarPeakHold = barWL;
         leftBarDecayTimer = 0;
@@ -471,6 +510,25 @@ void SpectrumAnalyzer::sampleMicrophone() {
     peakLevel = (float)peak;
     rmsLevel = sqrtf(sumSq / SAMPLE_SIZE);
     bassLevel = rmsLevel * 0.7f;
+
+    leftPeakLevel = peakLevel;
+    rightPeakLevel = peakLevel;
+    leftRmsLevel = rmsLevel;
+    rightRmsLevel = rmsLevel;
+    const float VU_REF_RMS = 145.0f;
+    float v = rmsLevel / VU_REF_RMS;
+    leftDb = (v > 0.05f) ? (20.0f * log10f(v)) : -20.0f;
+    if (leftDb > 3.5f) leftDb = 3.5f;
+    if (leftDb < -20.0f) leftDb = -20.0f;
+    rightDb = leftDb;
+    float peakRatio = peakLevel / 511.0f;
+    leftPeakDb = (peakRatio > 0.01f) ? (20.0f * log10f(peakRatio)) : -30.0f;
+    if (leftPeakDb > 0.0f) leftPeakDb = 0.0f;
+    if (leftPeakDb < -30.0f) leftPeakDb = -30.0f;
+    rightPeakDb = leftPeakDb;
+    if (peak >= 504) {
+        clipExpiryMs = millis() + 750;
+    }
 
     processFFT();
     detectVoicePitch();
@@ -845,24 +903,24 @@ void SpectrumAnalyzer::drawAnalogVU() {
     u8g2.drawPixel(pivotX, pivotY);
     u8g2.setDrawColor(1);
 
-    // Lower corners: digital peak/dB readouts
+    // Lower corners: digital true peak readouts (Klanghelm VUMT style: dBFS)
     u8g2.setFont(u8g2_font_4x6_tr);
     char lBuf[16], rBuf[16];
-    if (leftDb <= -19.5f) {
+    if (leftPeakDb <= -29.0f) {
         snprintf(lBuf, sizeof(lBuf), "L:--.-");
     } else {
-        snprintf(lBuf, sizeof(lBuf), "L:%+.1f", leftDb);
+        snprintf(lBuf, sizeof(lBuf), "L:%.1f", leftPeakDb);
     }
-    if (rightDb <= -19.5f) {
+    if (rightPeakDb <= -29.0f) {
         snprintf(rBuf, sizeof(rBuf), "R:--.-");
     } else {
-        snprintf(rBuf, sizeof(rBuf), "R:%+.1f", rightDb);
+        snprintf(rBuf, sizeof(rBuf), "R:%.1f", rightPeakDb);
     }
     u8g2.drawStr(2, 62, lBuf);
     u8g2.drawStr(98, 62, rBuf);
 
-    // Peak clipping / overload indicator
-    if (leftDb >= 0.0f || rightDb >= 0.0f) {
+    // Peak clipping / overload indicator (digital full-scale ceiling latch)
+    if (isClipping()) {
         u8g2.drawFrame(51, showBar ? 25 : 22, 26, 8);
         u8g2.setFont(u8g2_font_4x6_tr);
         u8g2.drawStr(53, showBar ? 31 : 28, "CLIP");
@@ -914,7 +972,7 @@ void SpectrumAnalyzer::drawHorizontalBarVU() {
 
     auto dbToWidth = [&](float db) -> int {
         if (db <= -20.0f) return 0;
-        float norm = (db + 20.0f) / 23.0f;
+        float norm = (db <= 0.0f) ? ((db + 20.0f) / 20.0f * 0.69f) : (0.69f + (db / 3.0f) * 0.31f);
         if (norm < 0.0f) norm = 0.0f;
         if (norm > 1.0f) norm = 1.0f;
         return (int)(norm * (barW - 2));
@@ -1013,7 +1071,11 @@ void SpectrumAnalyzer::drawHorizontalBarVU() {
     if (bottomY <= 63) {
         u8g2.drawHLine(0, bottomY - 3, 128);
         char botBuf[36];
-        snprintf(botBuf, sizeof(botBuf), "RMS:%-4.0f PEAK:%-4.0f CAL:-18VU", rmsLevel, peakLevel);
+        if (isClipping()) {
+            snprintf(botBuf, sizeof(botBuf), "!CLIP! PK:%.1f/%.1f dBFS", leftPeakDb, rightPeakDb);
+        } else {
+            snprintf(botBuf, sizeof(botBuf), "RMS:%-4.0f PEAK:%-4.0f CAL:-11VU", rmsLevel, peakLevel);
+        }
         u8g2.drawStr(4, bottomY + 5, botBuf);
     }
 
@@ -1062,7 +1124,7 @@ void SpectrumAnalyzer::drawVUSpectrometer() {
 
     auto dbToCompactW = [&](float db) -> int {
         if (db <= -20.0f) return 0;
-        float norm = (db + 20.0f) / 23.0f;
+        float norm = (db <= 0.0f) ? ((db + 20.0f) / 20.0f * 0.69f) : (0.69f + (db / 3.0f) * 0.31f);
         if (norm < 0.0f) norm = 0.0f;
         if (norm > 1.0f) norm = 1.0f;
         return (int)(norm * (barW - 2));
@@ -1081,8 +1143,12 @@ void SpectrumAnalyzer::drawVUSpectrometer() {
     if (pkR > 0) u8g2.drawVLine(barX + 1 + pkR, vuY + 6, barH + 2);
 
     char vDbBuf[16];
-    float maxDb = (leftDb >= rightDb) ? leftDb : rightDb;
-    snprintf(vDbBuf, sizeof(vDbBuf), (maxDb <= -19.5f) ? "--.-" : "%+.1f", maxDb);
+    if (isClipping()) {
+        snprintf(vDbBuf, sizeof(vDbBuf), "CLIP");
+    } else {
+        float maxDb = (leftDb >= rightDb) ? leftDb : rightDb;
+        snprintf(vDbBuf, sizeof(vDbBuf), (maxDb <= -19.5f) ? "--.-" : "%+.1f", maxDb);
+    }
     u8g2.drawStr(100, vuY + 8, vDbBuf);
 
     // DIVIDER LINE
