@@ -434,8 +434,185 @@ bool SDManager::buildLibraryIndex(void (*progressCallback)(int count)) {
     return (count > 0);
 }
 
+bool SDManager::hasLyricsIndex() {
+    if (!mounted) {
+        if (!begin()) return false;
+    }
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    bool exists = SD.exists("/music/lyrics_index.bin");
+    if (exists) {
+        File f = SD.open("/music/lyrics_index.bin", FILE_READ);
+        if (f) {
+            uint32_t magic = 0;
+            uint16_t ver = 0;
+            if (f.read((uint8_t*)&magic, 4) == 4 && f.read((uint8_t*)&ver, 2) == 2) {
+                exists = (magic == LYRICS_INDEX_MAGIC && ver == LYRICS_INDEX_VERSION);
+            } else {
+                exists = false;
+            }
+            f.close();
+        } else {
+            exists = false;
+        }
+    }
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return exists;
+}
+
+bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
+    if (!mounted) {
+        if (!begin()) return false;
+    }
+
+    std::vector<String> musicFiles = listMusicFiles();
+    if (musicFiles.empty()) return false;
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+
+    if (SD.exists("/music/lyrics_index.tmp")) {
+        SD.remove("/music/lyrics_index.tmp");
+    }
+
+    File idxFile = SD.open("/music/lyrics_index.tmp", FILE_WRITE);
+    if (!idxFile) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    // Write Header
+    uint32_t magic = LYRICS_INDEX_MAGIC;
+    uint16_t version = LYRICS_INDEX_VERSION;
+    uint32_t count = (uint32_t)musicFiles.size();
+
+    idxFile.write((const uint8_t*)&magic, 4);
+    idxFile.write((const uint8_t*)&version, 2);
+    idxFile.write((const uint8_t*)&count, 4);
+
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+    for (size_t i = 0; i < musicFiles.size(); i++) {
+        String path = musicFiles[i];
+        LyricsIndexEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        strncpy(entry.audioPath, path.c_str(), sizeof(entry.audioPath) - 1);
+
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        File audioFile = SD.open(path, FILE_READ);
+        if (audioFile) {
+            entry.fileSize = audioFile.size();
+
+            // Check external .lrc or .txt first
+            int dot = path.lastIndexOf('.');
+            String basePath = (dot > 0) ? path.substring(0, dot) : path;
+            String lrcPath = basePath + ".lrc";
+            String txtPath = basePath + ".txt";
+
+            if (SD.exists(lrcPath)) {
+                File lf = SD.open(lrcPath, FILE_READ);
+                String content = "";
+                if (lf) {
+                    size_t bToRead = min((size_t)lf.size(), (size_t)2048);
+                    while (lf.available() && content.length() < bToRead) content += (char)lf.read();
+                    lf.close();
+                }
+                if (content.indexOf('[') >= 0 && content.indexOf(':') > 0) {
+                    entry.syncType = LYRICS_SYNC_TIMED;
+                    entry.sourcePriority = LYRICS_SRC_EXT_SYNC;
+                } else {
+                    entry.syncType = LYRICS_SYNC_UNTIMED;
+                    entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+                }
+            } else if (SD.exists(txtPath)) {
+                entry.syncType = LYRICS_SYNC_UNTIMED;
+                entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+            } else {
+                // Check embedded
+                String embText = "";
+                LyricsSyncType embSync = LYRICS_SYNC_NONE;
+                LyricsSourcePriority embPri = LYRICS_SRC_NONE;
+                LyricsParser::extractEmbeddedLyrics(audioFile, path, embText, embSync, embPri);
+                entry.syncType = (uint8_t)embSync;
+                entry.sourcePriority = (uint8_t)embPri;
+            }
+            audioFile.close();
+        }
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        idxFile.write((const uint8_t*)&entry, sizeof(entry));
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        if (progressCallback != nullptr && (i % 5 == 0)) {
+            progressCallback((int)i + 1);
+        }
+    }
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    idxFile.close();
+
+    if (SD.exists("/music/lyrics_index.bin")) {
+        SD.remove("/music/lyrics_index.bin");
+    }
+    SD.rename("/music/lyrics_index.tmp", "/music/lyrics_index.bin");
+
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return true;
+}
+
+bool SDManager::lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSync, LyricsSourcePriority &outPri) {
+    outSync = LYRICS_SYNC_NONE;
+    outPri = LYRICS_SRC_NONE;
+
+    if (!hasLyricsIndex()) return false;
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    File f = SD.open("/music/lyrics_index.bin", FILE_READ);
+    if (!f) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    uint32_t count = 0;
+
+    if (f.read((uint8_t*)&magic, 4) != 4 || f.read((uint8_t*)&version, 2) != 2 || f.read((uint8_t*)&count, 4) != 4) {
+        f.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    if (magic != LYRICS_INDEX_MAGIC || version != LYRICS_INDEX_VERSION) {
+        f.close();
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    LyricsIndexEntry entry;
+    bool found = false;
+
+    for (uint32_t i = 0; i < count && f.available() >= (int)sizeof(entry); i++) {
+        if (f.read((uint8_t*)&entry, sizeof(entry)) == sizeof(entry)) {
+            if (strcmp(entry.audioPath, audioPath.c_str()) == 0) {
+                outSync = (LyricsSyncType)entry.syncType;
+                outPri = (LyricsSourcePriority)entry.sourcePriority;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    f.close();
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return found;
+}
+
 bool SDManager::rescanLibrary(void (*progressCallback)(int count)) {
-    return buildLibraryIndex(progressCallback);
+    bool ok = buildLibraryIndex(progressCallback);
+    if (ok) {
+        buildLyricsIndex(progressCallback);
+    }
+    return ok;
 }
 
 std::vector<String> SDManager::listMusicFiles() {
