@@ -439,24 +439,26 @@ bool SDManager::hasLyricsIndex() {
         if (!begin()) return false;
     }
     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-    bool exists = SD.exists("/music/lyrics_index.bin");
-    if (exists) {
+    bool valid = false;
+    if (SD.exists("/music/lyrics_index.bin")) {
         File f = SD.open("/music/lyrics_index.bin", FILE_READ);
         if (f) {
             uint32_t magic = 0;
             uint16_t ver = 0;
-            if (f.read((uint8_t*)&magic, 4) == 4 && f.read((uint8_t*)&ver, 2) == 2) {
-                exists = (magic == LYRICS_INDEX_MAGIC && ver == LYRICS_INDEX_VERSION);
-            } else {
-                exists = false;
+            uint32_t count = 0;
+            if (f.read((uint8_t*)&magic, 4) == 4 && f.read((uint8_t*)&ver, 2) == 2 && f.read((uint8_t*)&count, 4) == 4) {
+                if (magic == LYRICS_INDEX_MAGIC && ver == LYRICS_INDEX_VERSION) {
+                    size_t expectedSize = 10 + (count * sizeof(LyricsIndexEntry));
+                    if (f.size() == expectedSize) {
+                        valid = true;
+                    }
+                }
             }
             f.close();
-        } else {
-            exists = false;
         }
     }
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
-    return exists;
+    return valid;
 }
 
 bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
@@ -646,22 +648,23 @@ bool SDManager::lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSy
 
     for (uint32_t i = 0; i < count && f.available() >= (int)sizeof(entry); i++) {
         if (f.read((uint8_t*)&entry, sizeof(entry)) == sizeof(entry)) {
+            entry.audioPath[sizeof(entry.audioPath) - 1] = '\0';
             if (strcmp(entry.audioPath, audioPath.c_str()) == 0) {
-                // Verify file size / change detection for external files
-                int dot = audioPath.lastIndexOf('.');
-                String basePath = (dot > 0) ? audioPath.substring(0, dot) : audioPath;
-                String lrcPath = basePath + ".lrc";
-                String txtPath = basePath + ".txt";
+                if (entry.syncType <= 2 && entry.sourcePriority <= 4) {
+                    int dot = audioPath.lastIndexOf('.');
+                    String basePath = (dot > 0) ? audioPath.substring(0, dot) : audioPath;
+                    String lrcPath = basePath + ".lrc";
+                    String txtPath = basePath + ".txt";
 
-                uint32_t currentLrcSz = SD.exists(lrcPath) ? SD.open(lrcPath, FILE_READ).size() : 0;
-                uint32_t currentTxtSz = SD.exists(txtPath) ? SD.open(txtPath, FILE_READ).size() : 0;
+                    uint32_t currentAudioSz = SD.exists(audioPath) ? SD.open(audioPath, FILE_READ).size() : 0;
+                    uint32_t currentLrcSz = SD.exists(lrcPath) ? SD.open(lrcPath, FILE_READ).size() : 0;
+                    uint32_t currentTxtSz = SD.exists(txtPath) ? SD.open(txtPath, FILE_READ).size() : 0;
 
-                if (currentLrcSz == entry.lrcFileSize && currentTxtSz == entry.txtFileSize) {
-                    outSync = (LyricsSyncType)entry.syncType;
-                    outPri = (LyricsSourcePriority)entry.sourcePriority;
-                    found = true;
-                } else {
-                    found = false; // External file changed or was removed
+                    if (currentAudioSz == entry.audioFileSize && currentLrcSz == entry.lrcFileSize && currentTxtSz == entry.txtFileSize) {
+                        outSync = (LyricsSyncType)entry.syncType;
+                        outPri = (LyricsSourcePriority)entry.sourcePriority;
+                        found = true;
+                    }
                 }
                 break;
             }
