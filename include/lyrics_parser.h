@@ -42,9 +42,6 @@ public:
     // Load and normalize lyrics for an audio track path
     bool loadForTrack(const String &audioPath);
 
-    // Load lyrics directly from a specified file path or embedded source
-    bool loadFromFile(const String &filePath, LyricsSourcePriority priorityHint = LYRICS_SRC_NONE);
-
     // Queries
     bool hasLyrics() const;
     LyricsSyncType getSyncType() const;
@@ -61,8 +58,16 @@ public:
     static size_t countUtf8CodePoints(const String &str);
     static String truncateUtf8CodePoints(const String &str, size_t maxCodePoints);
 
+    // ID3 Encoding Helper
+    static String decodeID3String(const uint8_t *data, size_t len, uint8_t encoding);
+
     // Embedded Lyrics Extraction Helpers (Inspects audio file containers)
-    static bool extractEmbeddedLyrics(File &file, const String &audioPath, String &outLyricsText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority);
+    static bool extractEmbeddedLyrics(File &file, const String &audioPath, String &outLyricsText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority, std::vector<LyricLine> &outSyltLines);
+
+    // Format Content Parsers
+    bool parseLRCContent(const String &content);
+    bool parseTXTContent(const String &content);
+    static bool parseLRCLine(const String &line, uint32_t &timestampMs, String &text);
 
 private:
     std::vector<LyricLine> lines;
@@ -70,15 +75,15 @@ private:
     LyricsSyncType syncType;
     LyricsSourcePriority sourcePriority;
 
-    // Format Parsers
-    bool parseLRCContent(const String &content);
-    bool parseTXTContent(const String &content);
-    static bool parseLRCLine(const String &line, uint32_t &timestampMs, String &text);
-
     // Embedded Extractor Helpers
-    static bool extractMP3Lyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority);
+    static bool extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t tagSize, uint8_t ver, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority, std::vector<LyricLine> &outSyltLines);
+    static bool extractMP3Lyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority, std::vector<LyricLine> &outSyltLines);
+    static bool extractWAVLyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority, std::vector<LyricLine> &outSyltLines);
     static bool extractFLACLyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority);
     static bool extractM4ALyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority);
+
+    // ID3 SYLT Binary Parser
+    static bool parseID3SYLT(const uint8_t *data, size_t size, std::vector<LyricLine> &outSyltLines);
 };
 
 extern LyricsParser lyricsParser;
