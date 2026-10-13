@@ -609,7 +609,7 @@ bool LyricsParser::extractFLACLyrics(File &file, String &outText, LyricsSyncType
     return false;
 }
 
-static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority) {
+static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority, bool insideLyricsItem = false) {
     if (startOffset >= endOffset || !file) return false;
 
     file.seek(startOffset);
@@ -641,10 +641,11 @@ static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, S
         if (strcmp(aType, "moov") == 0 || strcmp(aType, "udta") == 0 || strcmp(aType, "meta") == 0 || strcmp(aType, "ilst") == 0 || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0) {
             uint32_t subStart = curPos + headerLen + (strcmp(aType, "meta") == 0 ? 4 : 0); // Skip version/flags for meta
             uint32_t subEnd = curPos + aSize;
-            if (scanM4AAtoms(file, subStart, subEnd, outText, outSync, outPriority)) {
+            const bool childInsideLyrics = insideLyricsItem || strcmp(aType, "\\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0;
+            if (scanM4AAtoms(file, subStart, subEnd, outText, outSync, outPriority, childInsideLyrics)) {
                 return true;
             }
-        } else if (strcmp(aType, "data") == 0) {
+        } else if (strcmp(aType, "data") == 0 && insideLyricsItem) {
             file.seek(curPos + 16); // Skip header + flags
             size_t dataLen = (aSize > 16) ? (aSize - 16) : 0;
             if (dataLen > 0 && dataLen < MAX_LYRIC_FILE_SIZE && curPos + 16 + dataLen <= endOffset) {
