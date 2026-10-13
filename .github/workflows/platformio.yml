@@ -27,6 +27,11 @@ jobs:
       - name: Run Q-Tune Verification Test Suite
         run: python3 tests/test_suite.py
 
+      - name: Build and run production ID3 codec native tests
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic tests/test_lyrics_native.cpp -o tests/test_lyrics_native
+          ./tests/test_lyrics_native
+
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
