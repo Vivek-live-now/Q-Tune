@@ -44,17 +44,17 @@ static const float SIN_LUT[256] = {
 
 // Fast sine with linear interpolation: max error < 0.00008
 inline float fast_sin(float rad) {
-    constexpr float TWO_PI = 6.28318530717958647692f;
-    constexpr float SCALE = 256.0f / TWO_PI;
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    constexpr float kScale = 256.0f / kTwoPi;
 
     // Normalize to [0, 2*PI)
     if (rad < 0.0f) {
-        rad += TWO_PI * static_cast<float>(static_cast<int>(-rad / TWO_PI) + 1);
-    } else if (rad >= TWO_PI) {
-        rad -= TWO_PI * static_cast<float>(static_cast<int>(rad / TWO_PI));
+        rad += kTwoPi * static_cast<float>(static_cast<int>(-rad / kTwoPi) + 1);
+    } else if (rad >= kTwoPi) {
+        rad -= kTwoPi * static_cast<float>(static_cast<int>(rad / kTwoPi));
     }
 
-    float pos = rad * SCALE;
+    float pos = rad * kScale;
     int idx = static_cast<int>(pos);
     float frac = pos - static_cast<float>(idx);
     int i0 = idx & 255;
