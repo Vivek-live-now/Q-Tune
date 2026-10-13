@@ -1,4 +1,5 @@
 #include "display.h"
+#include "simd_accel.h"
 
 Display::Display() : u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RST) {}
 
@@ -11,7 +12,7 @@ bool Display::begin() {
     SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, OLED_CS);
     u8g2.begin();
     u8g2.setBusClock(8000000UL);
-    u8g2.clearBuffer();
+    clear();
     u8g2.setFont(u8g2_font_ncenB08_tr);
     u8g2.drawStr(0, 10, "Q-Tune Init...");
     u8g2.sendBuffer();
@@ -23,7 +24,23 @@ U8G2 &Display::getU8g2() {
 }
 
 void Display::clear() {
-    u8g2.clearBuffer();
+    clearBufferFast();
+}
+
+void Display::clearBufferFast() {
+    uint8_t *buf = u8g2.getBufferPtr();
+    if (buf) {
+        simd_clear_128(buf, 1024);
+    } else {
+        u8g2.clearBuffer();
+    }
+}
+
+void Display::invertBuffer() {
+    uint8_t *buf = u8g2.getBufferPtr();
+    if (buf) {
+        simd_invert_128(buf, buf, 1024);
+    }
 }
 
 void Display::sendBuffer() {

@@ -12,6 +12,8 @@ public:
     bool begin();
     U8G2 &getU8g2();
     void clear();
+    void clearBufferFast();
+    void invertBuffer();
     void sendBuffer();
 
     // Q-Watch Signature Menu System Implementation

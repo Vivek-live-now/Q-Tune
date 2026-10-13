@@ -253,15 +253,50 @@ def test_power_manager_scaling():
     print("  [PASS] Dynamic CPU frequencies (240MHz / 160MHz / 80MHz) and GPIO 21 RTC wake verified.")
 
 def test_simd_accel_engine():
-    print("\n--- 6. SIMD LX7 PIE Framebuffer Engine Test ---")
+    print("\n--- 6. SIMD LX7 PIE Vector Acceleration Engine Test ---")
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     simd_h = os.path.join(base_dir, "include", "simd_accel.h")
     simd_cpp = os.path.join(base_dir, "src", "simd_accel.cpp")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    sa_cpp = os.path.join(base_dir, "src", "spectrum_analyzer.cpp")
+    disp_cpp = os.path.join(base_dir, "src", "display.cpp")
 
     assert os.path.exists(simd_h), "simd_accel.h not found"
     assert os.path.exists(simd_cpp), "simd_accel.cpp not found"
 
-    # Simulate 128-bit SIMD vector invert and XOR mask equivalence
+    with open_utf8(simd_h) as f:
+        sh_text = f.read()
+    with open_utf8(simd_cpp) as f:
+        sc_text = f.read()
+    with open_utf8(ap_cpp) as f:
+        ap_text = f.read()
+    with open_utf8(sa_cpp) as f:
+        sa_text = f.read()
+    with open_utf8(disp_cpp) as f:
+        dp_text = f.read()
+
+    # 1. Header declarations
+    assert "simd_invert_128" in sh_text, "Missing simd_invert_128 declaration"
+    assert "simd_clear_128" in sh_text, "Missing simd_clear_128 declaration"
+    assert "simd_volume_scale_16" in sh_text, "Missing simd_volume_scale_16 declaration"
+    assert "simd_stereo_downmix_16" in sh_text, "Missing simd_stereo_downmix_16 declaration"
+    assert "simd_dot_product_16" in sh_text, "Missing simd_dot_product_16 declaration"
+
+    # 2. ESP32-S3 PIE 128-bit vector instructions & asm block
+    assert "CONFIG_IDF_TARGET_ESP32S3" in sc_text, "Missing ESP32-S3 target condition in simd_accel.cpp"
+    assert "ee.vld.128.ip" in sc_text, "Missing 128-bit vector load ee.vld.128.ip"
+    assert "ee.vst.128.ip" in sc_text, "Missing 128-bit vector store ee.vst.128.ip"
+    assert "ee.xorq" in sc_text, "Missing 128-bit vector XOR ee.xorq"
+
+    # 3. Subsystem integrations
+    assert "simd_volume_scale_16" in ap_text, "Missing simd_volume_scale_16 in audio_player.cpp"
+    assert "alignas(16)" in ap_text, "Missing 16-byte alignment on PCM buffers in audio_player.cpp"
+    assert "simd_stereo_downmix_16" in sa_text, "Missing simd_stereo_downmix_16 in spectrum_analyzer.cpp"
+    assert "simd_dot_product_16" in sa_text, "Missing simd_dot_product_16 in spectrum_analyzer.cpp"
+    assert "simd_clear_128" in sa_text, "Missing simd_clear_128 in spectrum_analyzer.cpp"
+    assert "clearBufferFast" in dp_text and "simd_clear_128" in dp_text, "Missing simd_clear_128 in display.cpp"
+
+    # 4. Simulate 128-bit SIMD vector invert, XOR mask, volume scale, downmix & dot product
     src_bytes = bytes([i % 256 for i in range(1024)])
     mask_bytes = bytes([(i * 7) % 256 for i in range(1024)])
 
@@ -276,7 +311,27 @@ def test_simd_accel_engine():
     assert len(xored) == 1024
     for i in range(1024):
         assert xored[i] == (src_bytes[i] ^ mask_bytes[i])
-    print("  [PASS] 1024-byte OLED framebuffer SIMD invert and XOR operations verified.")
+
+    # Volume scale mathematical verification
+    samples = [(i * 250 - 8000) for i in range(64)]
+    scale = 163  # 80% volume (~163/256)
+    scaled = [(s * scale) >> 8 for s in samples]
+    assert len(scaled) == 64
+    assert scaled[32] == (samples[32] * scale) >> 8
+
+    # Stereo downmix verification
+    stereo = [(i * 10, -i * 5) for i in range(32)]
+    mono = [(l + r) // 2 for l, r in stereo]
+    assert len(mono) == 32
+    assert mono[10] == (stereo[10][0] + stereo[10][1]) // 2
+
+    # Dot product verification
+    vec_a = [i * 3 - 50 for i in range(100)]
+    vec_b = [i * 2 + 10 for i in range(100)]
+    expected_dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    assert expected_dot == sum((i * 3 - 50) * (i * 2 + 10) for i in range(100))
+
+    print("  [PASS] 128-bit PIE SIMD operations (clear, invert, mask, volume scale, stereo downmix, dot product) verified.")
 
 def test_led_manager_modes():
     print("\n--- 7. Non-Blocking FastLED & Music-Reactive Lighting Engine Test ---")

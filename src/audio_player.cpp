@@ -2,6 +2,7 @@
 #include "spectrum_analyzer.h"
 #include "sd_manager.h"
 #include "usb_manager.h"
+#include "simd_accel.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
@@ -317,7 +318,7 @@ void AudioPlayer::update() {
                 }
             }
         } else {
-            uint8_t buffer[2048];
+            alignas(16) uint8_t buffer[2048];
             int bytesToRead = sizeof(buffer);
 
             int bytesRead = 0;
@@ -336,11 +337,7 @@ void AudioPlayer::update() {
                 spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
 
                 if (volumeScale < 256) {
-                    int16_t *samples = (int16_t*)buffer;
-                    int sampleCount = bytesRead / sizeof(int16_t);
-                    for (int i = 0; i < sampleCount; i++) {
-                        samples[i] = (int16_t)(((int32_t)samples[i] * volumeScale) >> 8);
-                    }
+                    simd_volume_scale_16((int16_t*)buffer, (const int16_t*)buffer, bytesRead / sizeof(int16_t), volumeScale);
                 }
                 routeAudioOutput(buffer, bytesRead / sizeof(int16_t), bytesRead);
                 bytesPlayed += bytesRead;
@@ -374,8 +371,8 @@ void AudioPlayer::update() {
 
     if (currentChannels == 1) {
         // Expand Mono PCM to Stereo frames for MAX98357A I2S
-        int16_t monoBuf[512];
-        int16_t stereoBuf[1024];
+        alignas(16) int16_t monoBuf[512];
+        alignas(16) int16_t stereoBuf[1024];
         int bytesToRead = sizeof(monoBuf);
         if (totalDataBytes > 0 && bytesPlayed + bytesToRead > totalDataBytes) {
             bytesToRead = totalDataBytes - bytesPlayed;
@@ -405,13 +402,12 @@ void AudioPlayer::update() {
             consecutiveReadErrors = 0;
             int samples = bytesRead / sizeof(int16_t);
             spectrumAnalyzer.feedSamples(monoBuf, samples, 1);
+            if (volumeScale < 256) {
+                simd_volume_scale_16(monoBuf, monoBuf, samples, volumeScale);
+            }
             for (int i = 0; i < samples; i++) {
-                int16_t sample = monoBuf[i];
-                if (volumeScale < 256) {
-                    sample = (int16_t)(((int32_t)sample * volumeScale) >> 8);
-                }
-                stereoBuf[i * 2] = sample;
-                stereoBuf[i * 2 + 1] = sample;
+                stereoBuf[i * 2] = monoBuf[i];
+                stereoBuf[i * 2 + 1] = monoBuf[i];
             }
             routeAudioOutput(stereoBuf, samples * 2, samples * 4);
             bytesPlayed += bytesRead;
@@ -437,7 +433,7 @@ void AudioPlayer::update() {
         }
     } else {
         // Direct Stereo PCM streaming
-        uint8_t buffer[2048];
+        alignas(16) uint8_t buffer[2048];
         int bytesToRead = sizeof(buffer);
         if (totalDataBytes > 0 && bytesPlayed + bytesToRead > totalDataBytes) {
             bytesToRead = totalDataBytes - bytesPlayed;
@@ -469,11 +465,7 @@ void AudioPlayer::update() {
             spectrumAnalyzer.feedSamples((const int16_t*)buffer, frameCount, 2);
 
             if (volumeScale < 256) {
-                int16_t *samples = (int16_t*)buffer;
-                int sampleCount = bytesRead / sizeof(int16_t);
-                for (int i = 0; i < sampleCount; i++) {
-                    samples[i] = (int16_t)(((int32_t)samples[i] * volumeScale) >> 8);
-                }
+                simd_volume_scale_16((int16_t*)buffer, (const int16_t*)buffer, bytesRead / sizeof(int16_t), volumeScale);
             }
             routeAudioOutput(buffer, bytesRead / sizeof(int16_t), bytesRead);
             bytesPlayed += bytesRead;

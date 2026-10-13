@@ -90,10 +90,10 @@ private:
     static const size_t SAMPLE_SIZE = 128;
     static const size_t RING_BUFFER_SIZE = 1024;
 
-    int32_t micBuffer[SAMPLE_SIZE]; // Working buffer for FFT / Waveform
-    int16_t ringBuffer[RING_BUFFER_SIZE]; // Lock-free circular sample tap from AudioPlayer
-    int16_t ringBufferL[RING_BUFFER_SIZE]; // Left channel circular tap
-    int16_t ringBufferR[RING_BUFFER_SIZE]; // Right channel circular tap
+    alignas(16) int32_t micBuffer[SAMPLE_SIZE]; // Working buffer for FFT / Waveform
+    alignas(16) int16_t ringBuffer[RING_BUFFER_SIZE]; // Lock-free circular sample tap from AudioPlayer
+    alignas(16) int16_t ringBufferL[RING_BUFFER_SIZE]; // Left channel circular tap
+    alignas(16) int16_t ringBufferR[RING_BUFFER_SIZE]; // Right channel circular tap
     volatile size_t ringHead;
     unsigned long lastSampleFeedMs;
     unsigned long lastAnalysisMs;

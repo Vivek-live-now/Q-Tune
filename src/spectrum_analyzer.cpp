@@ -1,6 +1,7 @@
 #include "spectrum_analyzer.h"
 #include "audio_player.h"
 #include "fast_math.h"
+#include "simd_accel.h"
 #include <driver/i2s.h>
 #include <driver/gpio.h>
 #include <math.h>
@@ -205,36 +206,47 @@ void SpectrumAnalyzer::stop() {
 
 void SpectrumAnalyzer::feedSamples(const int16_t *samples, size_t count, uint8_t channels) {
     if (!samples || count == 0) return;
-    size_t head = ringHead;
-    for (size_t i = 0; i < count; i++) {
-        int16_t sampleL, sampleR;
-        if (channels == 1) {
-            sampleL = samples[i];
-            sampleR = samples[i];
-        } else {
-            sampleL = samples[i * 2];
-            sampleR = samples[i * 2 + 1];
-        }
-        ringBufferL[head] = sampleL;
-        ringBufferR[head] = sampleR;
-        // Downmix stereo (L + R) / 2 to mono for FFT
-        ringBuffer[head] = (int16_t)(((int32_t)sampleL + (int32_t)sampleR) / 2);
-        head = (head + 1) % RING_BUFFER_SIZE;
+
+    if (count > RING_BUFFER_SIZE) {
+        size_t skip = count - RING_BUFFER_SIZE;
+        samples += (channels == 2 ? skip * 2 : skip);
+        count = RING_BUFFER_SIZE;
     }
-    ringHead = head;
+
+    size_t head = ringHead;
+    size_t firstPart = (count <= (RING_BUFFER_SIZE - head)) ? count : (RING_BUFFER_SIZE - head);
+    size_t secondPart = count - firstPart;
+
+    if (channels == 2) {
+        simd_stereo_downmix_16(&ringBuffer[head], &ringBufferL[head], &ringBufferR[head], samples, firstPart);
+        if (secondPart > 0) {
+            simd_stereo_downmix_16(&ringBuffer[0], &ringBufferL[0], &ringBufferR[0], samples + firstPart * 2, secondPart);
+        }
+    } else {
+        memcpy(&ringBuffer[head], samples, firstPart * sizeof(int16_t));
+        memcpy(&ringBufferL[head], samples, firstPart * sizeof(int16_t));
+        memcpy(&ringBufferR[head], samples, firstPart * sizeof(int16_t));
+        if (secondPart > 0) {
+            memcpy(&ringBuffer[0], samples + firstPart, secondPart * sizeof(int16_t));
+            memcpy(&ringBufferL[0], samples + firstPart, secondPart * sizeof(int16_t));
+            memcpy(&ringBufferR[0], samples + firstPart, secondPart * sizeof(int16_t));
+        }
+    }
+
+    ringHead = (head + count) % RING_BUFFER_SIZE;
     lastSampleFeedMs = millis();
 }
 
 void SpectrumAnalyzer::clearSamples() {
-    memset(ringBuffer, 0, sizeof(ringBuffer));
-    memset(ringBufferL, 0, sizeof(ringBufferL));
-    memset(ringBufferR, 0, sizeof(ringBufferR));
-    memset(micBuffer, 0, sizeof(micBuffer));
-    memset(bands, 0, sizeof(bands));
-    memset(peakHold, 0, sizeof(peakHold));
-    memset(peakDecayTimer, 0, sizeof(peakDecayTimer));
-    memset(spec8PeakHold, 0, sizeof(spec8PeakHold));
-    memset(spec8DecayTimer, 0, sizeof(spec8DecayTimer));
+    simd_clear_128((uint8_t*)ringBuffer, sizeof(ringBuffer));
+    simd_clear_128((uint8_t*)ringBufferL, sizeof(ringBufferL));
+    simd_clear_128((uint8_t*)ringBufferR, sizeof(ringBufferR));
+    simd_clear_128((uint8_t*)micBuffer, sizeof(micBuffer));
+    simd_clear_128((uint8_t*)bands, sizeof(bands));
+    simd_clear_128((uint8_t*)peakHold, sizeof(peakHold));
+    simd_clear_128((uint8_t*)peakDecayTimer, sizeof(peakDecayTimer));
+    simd_clear_128((uint8_t*)spec8PeakHold, sizeof(spec8PeakHold));
+    simd_clear_128((uint8_t*)spec8DecayTimer, sizeof(spec8DecayTimer));
     peakLevel = 0.0f;
     rmsLevel = 0.0f;
     bassLevel = 0.0f;
@@ -672,7 +684,7 @@ void SpectrumAnalyzer::detectVoicePitch() {
     // Max lag = 11025 / 80  ~= 138 samples (~80 Hz)
     const size_t DOWNSAMPLE = 4;
     const size_t N_SAMPLES = 256;
-    int16_t down[N_SAMPLES];
+    alignas(16) int16_t down[N_SAMPLES];
 
     size_t head = ringHead;
     size_t start = (head + RING_BUFFER_SIZE - (N_SAMPLES * DOWNSAMPLE)) % RING_BUFFER_SIZE;
@@ -710,11 +722,8 @@ void SpectrumAnalyzer::detectVoicePitch() {
     const size_t MIN_LAG = 14;  // ~787 Hz
     const size_t MAX_LAG = 138; // ~80 Hz
 
-    float energy0 = 0.0f;
-    for (size_t n = 0; n < CORR_LEN; n++) {
-        float s = downF[n];
-        energy0 += s * s;
-    }
+    int64_t energy0_i = simd_dot_product_16(down, down, CORR_LEN);
+    float energy0 = (float)energy0_i;
 
     if (energy0 < 1000.0f) {
         // Below acoustic noise floor
@@ -729,15 +738,10 @@ void SpectrumAnalyzer::detectVoicePitch() {
     size_t lagCount = 0;
 
     for (size_t lag = MIN_LAG; lag <= MAX_LAG; lag++) {
-        float num = 0.0f;
-        float energyLag = 0.0f;
-        const float *sLagPtr = &downF[lag];
-        for (size_t n = 0; n < CORR_LEN; n++) {
-            float s0 = downF[n];
-            float sLag = sLagPtr[n];
-            num += s0 * sLag;
-            energyLag += sLag * sLag;
-        }
+        int64_t num_i = simd_dot_product_16(down, &down[lag], CORR_LEN);
+        int64_t energyLag_i = simd_dot_product_16(&down[lag], &down[lag], CORR_LEN);
+        float num = (float)num_i;
+        float energyLag = (float)energyLag_i;
 
         float denom = sqrtf(energy0 * energyLag) + 1.0f;
         float normCorr = num / denom;
@@ -757,15 +761,9 @@ void SpectrumAnalyzer::detectVoicePitch() {
     if (bestLag > MIN_LAG && bestLag < MAX_LAG && bestCorr > 0.22f) {
         // Parabolic interpolation for fine sub-sample pitch resolution
         auto getCorr = [&](size_t l) -> float {
-            float num = 0.0f, el = 0.0f;
-            const float *slPtr = &downF[l];
-            for (size_t n = 0; n < CORR_LEN; n++) {
-                float s0 = downF[n];
-                float sl = slPtr[n];
-                num += s0 * sl;
-                el += sl * sl;
-            }
-            return num / (sqrtf(energy0 * el) + 1.0f);
+            int64_t num_i = simd_dot_product_16(down, &down[l], CORR_LEN);
+            int64_t el_i = simd_dot_product_16(&down[l], &down[l], CORR_LEN);
+            return (float)num_i / (sqrtf(energy0 * (float)el_i) + 1.0f);
         };
         float y1 = getCorr(bestLag - 1);
         float y2 = bestCorr;
