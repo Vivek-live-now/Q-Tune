@@ -58,9 +58,7 @@ inline std::string decodeString(const uint8_t *data, size_t len, uint8_t encodin
         } else if (data[0] == 0xFF && data[1] == 0xFE) {
             bigEndian = false;
             i = 2;
-        } else {
-            return out; // ID3 UTF-16 encoding requires a BOM.
-        }
+        } // Existing files without a per-string BOM use little-endian UTF-16.
     }
 
     while (i + 1 < len) {
