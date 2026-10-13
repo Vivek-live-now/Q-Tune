@@ -506,12 +506,19 @@ bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
         if (audioFile) {
             entry.audioFileSize = audioFile.size();
 
-            // Check external .lrc or .txt
+            // Shared Source Priority Policy:
+            // 1. External .lrc (Synchronized)
+            // 2. Embedded Synchronized (SYLT)
+            // 3. External .txt / untimed .lrc
+            // 4. Embedded Unsynchronized (USLT, Vorbis, M4A)
+
             int dot = path.lastIndexOf('.');
             String basePath = (dot > 0) ? path.substring(0, dot) : path;
             String lrcPath = basePath + ".lrc";
             String txtPath = basePath + ".txt";
 
+            bool foundExtLrc = false;
+            bool extLrcIsTimed = false;
             if (SD.exists(lrcPath)) {
                 File lf = SD.open(lrcPath, FILE_READ);
                 if (lf) {
@@ -522,22 +529,24 @@ bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
                     lf.close();
 
                     LyricsParser tempParser;
-                    if (tempParser.parseLRCContent(content) && tempParser.isSynchronized()) {
-                        entry.syncType = LYRICS_SYNC_TIMED;
-                        entry.sourcePriority = LYRICS_SRC_EXT_SYNC;
-                    } else {
-                        entry.syncType = LYRICS_SYNC_UNTIMED;
-                        entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+                    if (tempParser.parseLRCContent(content)) {
+                        foundExtLrc = true;
+                        extLrcIsTimed = tempParser.isSynchronized();
                     }
                 }
-            } else if (SD.exists(txtPath)) {
+            }
+
+            if (SD.exists(txtPath)) {
                 File tf = SD.open(txtPath, FILE_READ);
                 if (tf) {
                     entry.txtFileSize = tf.size();
                     tf.close();
                 }
-                entry.syncType = LYRICS_SYNC_UNTIMED;
-                entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+            }
+
+            if (foundExtLrc && extLrcIsTimed) {
+                entry.syncType = LYRICS_SYNC_TIMED;
+                entry.sourcePriority = LYRICS_SRC_EXT_SYNC;
             } else {
                 // Check embedded
                 String embText = "";
@@ -545,8 +554,20 @@ bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
                 LyricsSourcePriority embPri = LYRICS_SRC_NONE;
                 std::vector<LyricLine> syltLines;
                 LyricsParser::extractEmbeddedLyrics(audioFile, path, embText, embSync, embPri, syltLines);
-                entry.syncType = (uint8_t)embSync;
-                entry.sourcePriority = (uint8_t)embPri;
+
+                if (embSync == LYRICS_SYNC_TIMED) {
+                    entry.syncType = LYRICS_SYNC_TIMED;
+                    entry.sourcePriority = LYRICS_SRC_EMB_SYNC;
+                } else if (foundExtLrc || entry.txtFileSize > 0) {
+                    entry.syncType = LYRICS_SYNC_UNTIMED;
+                    entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+                } else if (embSync == LYRICS_SYNC_UNTIMED) {
+                    entry.syncType = LYRICS_SYNC_UNTIMED;
+                    entry.sourcePriority = LYRICS_SRC_EMB_UNSYNC;
+                } else {
+                    entry.syncType = LYRICS_SYNC_NONE;
+                    entry.sourcePriority = LYRICS_SRC_NONE;
+                }
             }
             audioFile.close();
         }
@@ -569,12 +590,21 @@ bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
     idxFile.close();
 
     if (writtenEntries > 0) {
-        if (SD.exists("/music/lyrics_index.bin")) {
-            SD.remove("/music/lyrics_index.bin");
+        if (SD.exists("/music/lyrics_index.bak")) {
+            SD.remove("/music/lyrics_index.bak");
         }
-        SD.rename("/music/lyrics_index.tmp", "/music/lyrics_index.bin");
+        if (SD.exists("/music/lyrics_index.bin")) {
+            SD.rename("/music/lyrics_index.bin", "/music/lyrics_index.bak");
+        }
+        bool renamed = SD.rename("/music/lyrics_index.tmp", "/music/lyrics_index.bin");
+        if (renamed) {
+            if (SD.exists("/music/lyrics_index.bak")) SD.remove("/music/lyrics_index.bak");
+        } else {
+            if (SD.exists("/music/lyrics_index.bak")) SD.rename("/music/lyrics_index.bak", "/music/lyrics_index.bin");
+            SD.remove("/music/lyrics_index.tmp");
+        }
     } else {
-        SD.remove("/music/lyrics_index.tmp"); // Build failed, keep old index if present
+        SD.remove("/music/lyrics_index.tmp");
     }
 
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);

@@ -273,14 +273,38 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
 
     if (!sdManager.isMounted()) return false;
 
-    // 0. Check persistent index first
+    // 0. Query persistent index first to optimize loading path
     LyricsSyncType idxSync = LYRICS_SYNC_NONE;
     LyricsSourcePriority idxPri = LYRICS_SRC_NONE;
     bool inIdx = sdManager.lookupLyricsIndex(audioPath, idxSync, idxPri);
 
+    if (inIdx && idxSync == LYRICS_SYNC_NONE) {
+        return false; // Fast path: Index confirms track has no lyrics available!
+    }
+
     int dot = audioPath.lastIndexOf('.');
     if (dot <= 0) return false;
     String basePath = audioPath.substring(0, dot);
+
+    // If index indicates External Timed LRC (Highest Priority)
+    if (inIdx && idxPri == LYRICS_SRC_EXT_SYNC) {
+        String lrcPath = basePath + ".lrc";
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        File f = SD.open(lrcPath, FILE_READ);
+        String content = "";
+        if (f) {
+            size_t bytesToRead = min((size_t)f.size(), MAX_LYRIC_FILE_SIZE);
+            content.reserve(bytesToRead);
+            while (f.available() && content.length() < bytesToRead) content += (char)f.read();
+            f.close();
+        }
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        if (content.length() > 0 && parseLRCContent(content) && isSynchronized()) {
+            sourcePriority = LYRICS_SRC_EXT_SYNC;
+            return true;
+        }
+    }
 
     // 1. Priority 1: External .lrc file
     String lrcPath = basePath + ".lrc";
@@ -295,16 +319,14 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         if (f) {
             size_t bytesToRead = min((size_t)f.size(), MAX_LYRIC_FILE_SIZE);
             content.reserve(bytesToRead);
-            while (f.available() && content.length() < bytesToRead) {
-                content += (char)f.read();
-            }
+            while (f.available() && content.length() < bytesToRead) content += (char)f.read();
             f.close();
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
         if (content.length() > 0 && parseLRCContent(content)) {
             sourcePriority = (syncType == LYRICS_SYNC_TIMED) ? LYRICS_SRC_EXT_SYNC : LYRICS_SRC_EXT_UNSYNC;
-            if (syncType == LYRICS_SYNC_TIMED) return true; // Highest priority
+            if (syncType == LYRICS_SYNC_TIMED) return true; // Highest priority found
         }
     }
 
@@ -353,9 +375,7 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         if (f) {
             size_t bytesToRead = min((size_t)f.size(), MAX_LYRIC_FILE_SIZE);
             content.reserve(bytesToRead);
-            while (f.available() && content.length() < bytesToRead) {
-                content += (char)f.read();
-            }
+            while (f.available() && content.length() < bytesToRead) content += (char)f.read();
             f.close();
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -535,7 +555,7 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
         uint32_t frameStart = file.position();
 
         // 1. SYLT (Synchronised lyrics/text)
-        if (strcmp(fId, "SYLT") == 0 && fSize > 6) {
+        if (strcmp(fId, "SYLT") == 0 && fSize > 6 && fSize <= 16384) {
             uint8_t *syltBuf = (uint8_t*)malloc(fSize);
             if (syltBuf) {
                 if (file.read(syltBuf, fSize) == fSize) {
@@ -551,7 +571,7 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
         }
 
         // 2. USLT (Unsynchronised lyrics/text)
-        if (strcmp(fId, "USLT") == 0 && fSize > 4) {
+        if (strcmp(fId, "USLT") == 0 && fSize > 4 && fSize <= 16384) {
             uint8_t encoding = file.read();
             char lang[4] = {0};
             file.read((uint8_t*)lang, 3);
@@ -702,13 +722,12 @@ bool LyricsParser::extractFLACLyrics(File &file, String &outText, LyricsSyncType
     return false;
 }
 
-bool LyricsParser::extractM4ALyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority) {
-    if (!file || file.size() < 128) return false;
-    file.seek(0);
+static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority) {
+    if (startOffset >= endOffset || !file) return false;
 
-    uint32_t fileSize = file.size();
+    file.seek(startOffset);
 
-    while (file.available() >= 8 && file.position() < fileSize) {
+    while (file.position() + 8 <= endOffset && file.available() >= 8) {
         uint32_t curPos = file.position();
         uint8_t aHdr[8];
         if (file.read(aHdr, 8) != 8) break;
@@ -717,46 +736,46 @@ bool LyricsParser::extractM4ALyrics(File &file, String &outText, LyricsSyncType 
         char aType[5] = {0};
         memcpy(aType, &aHdr[4], 4);
 
-        if (aSize < 8 || curPos + aSize > fileSize) break;
-
-        if (strcmp(aType, "moov") == 0 || strcmp(aType, "udta") == 0 || strcmp(aType, "meta") == 0 || strcmp(aType, "ilst") == 0) {
-            if (strcmp(aType, "meta") == 0) {
-                file.seek(curPos + 12); // Skip version and flags
-            }
-            continue;
-        } else if (strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0) {
-            uint32_t atomEnd = curPos + aSize;
-            while (file.position() + 8 <= atomEnd && file.position() < fileSize) {
-                uint32_t subPos = file.position();
-                uint8_t subHdr[8];
-                if (file.read(subHdr, 8) != 8) break;
-                uint32_t subSize = ((uint32_t)subHdr[0] << 24) | ((uint32_t)subHdr[1] << 16) | ((uint32_t)subHdr[2] << 8) | (uint32_t)subHdr[3];
-                char subType[5] = {0};
-                memcpy(subType, &subHdr[4], 4);
-
-                if (subSize < 8 || subPos + subSize > atomEnd) break;
-
-                if (strcmp(subType, "data") == 0) {
-                    file.seek(subPos + 16); // Header + flags
-                    size_t dataLen = (subSize > 16) ? (subSize - 16) : 0;
-                    if (dataLen > 0 && dataLen < MAX_LYRIC_FILE_SIZE && subPos + 16 + dataLen <= fileSize) {
-                        outText.reserve(dataLen);
-                        while (file.position() < subPos + subSize && file.available()) {
-                            outText += (char)file.read();
-                        }
-                        outSync = LYRICS_SYNC_UNTIMED;
-                        outPriority = LYRICS_SRC_EMB_UNSYNC;
-                        return true;
-                    }
-                }
-                file.seek(subPos + subSize);
-            }
-            file.seek(curPos + aSize);
-        } else {
-            file.seek(curPos + aSize);
+        uint32_t headerLen = 8;
+        if (aSize == 1) { // 64-bit extended atom size
+            uint8_t largeHdr[8];
+            if (file.read(largeHdr, 8) != 8) break;
+            aSize = ((uint32_t)largeHdr[4] << 24) | ((uint32_t)largeHdr[5] << 16) | ((uint32_t)largeHdr[6] << 8) | (uint32_t)largeHdr[7];
+            headerLen = 16;
+        } else if (aSize == 0) {
+            aSize = endOffset - curPos;
         }
+
+        if (aSize < headerLen || curPos + aSize > endOffset) break;
+
+        if (strcmp(aType, "moov") == 0 || strcmp(aType, "udta") == 0 || strcmp(aType, "meta") == 0 || strcmp(aType, "ilst") == 0 || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0) {
+            uint32_t subStart = curPos + headerLen + (strcmp(aType, "meta") == 0 ? 4 : 0); // Skip version/flags for meta
+            uint32_t subEnd = curPos + aSize;
+            if (scanM4AAtoms(file, subStart, subEnd, outText, outSync, outPriority)) {
+                return true;
+            }
+        } else if (strcmp(aType, "data") == 0) {
+            file.seek(curPos + 16); // Skip header + flags
+            size_t dataLen = (aSize > 16) ? (aSize - 16) : 0;
+            if (dataLen > 0 && dataLen < MAX_LYRIC_FILE_SIZE && curPos + 16 + dataLen <= endOffset) {
+                outText.reserve(dataLen);
+                while (file.position() < curPos + aSize && file.available()) {
+                    outText += (char)file.read();
+                }
+                outSync = LYRICS_SYNC_UNTIMED;
+                outPriority = LYRICS_SRC_EMB_UNSYNC;
+                return true;
+            }
+        }
+
+        file.seek(curPos + aSize);
     }
     return false;
+}
+
+bool LyricsParser::extractM4ALyrics(File &file, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority) {
+    if (!file || file.size() < 128) return false;
+    return scanM4AAtoms(file, 0, file.size(), outText, outSync, outPriority);
 }
 
 LyricsParser lyricsParser;
