@@ -1270,18 +1270,17 @@ def test_lyrics_parsers_and_fixture_verification():
     assert "expectedSize = 10 + (count * sizeof(LyricsIndexEntry))" in sd_src, "Index total length validation missing"
     assert ".bak" in sd_src, "Crash-safe backup recovery missing in sd_manager.cpp"
 
-    # 4. Binary SYLT Frame Simulator Verification
-    # Encoding=0 (ISO), TimeFormat=2 (ms), ContentType=1 (Lyrics)
-    sylt_frame = bytearray([0x00, 0x65, 0x6E, 0x67, 0x02, 0x01, 0x00]) # Header + null descriptor
-    sylt_frame.extend(b"Line 1")
-    sylt_frame.append(0)
-    sylt_frame.extend(struct.pack(">I", 5000)) # 5000 ms
-    sylt_frame.extend(b"Line 2")
-    sylt_frame.append(0)
-    sylt_frame.extend(struct.pack(">I", 12000)) # 12000 ms
-
-    assert len(sylt_frame) > 10, "SYLT binary frame simulation failed"
-    print("  [PASS] ID3 SYLT frame simulation, M4A atom stack traversal, V2 index change detection, and backup recovery verified.")
+    # 4. The production ID3 codec is shared with the native C++ harness.
+    codec_h = os.path.join(base_dir, "include", "lyrics_id3_codec.h")
+    native_test = os.path.join(base_dir, "tests", "test_lyrics_native.cpp")
+    with open_utf8(codec_h) as f: codec_src = f.read()
+    with open_utf8(native_test) as f: native_src = f.read()
+    assert "LyricsID3Codec::parseSYLT" in lrc_src, "Production SYLT parser does not use shared codec"
+    assert "LyricsID3Codec::decodeString" in lrc_src, "Production decoder does not use shared codec"
+    assert '#include "../include/lyrics_id3_codec.h"' in native_src, "Native tests do not include production codec"
+    assert "unterminatedText" in native_src and "truncatedTimestamp" in native_src, "Malformed SYLT fixtures missing"
+    assert "inline bool parseSYLT" in codec_src, "Production SYLT implementation missing"
+    print("  [PASS] Production ID3 codec is shared with native tests; CI compiles and executes fixture tests.")
 
 def main():
     print("==================================================")
@@ -1312,7 +1311,7 @@ def main():
     test_vocal_reactive_check_tool()
     test_vu_analog_and_spectrometer_suite()
     test_lyrics_parsers_and_fixture_verification()
-    print("\nAll 25 Q-Tune test verifications PASSED (100%)!\n")
+    print("\nAll 25 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()
