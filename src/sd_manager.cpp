@@ -448,9 +448,11 @@ bool SDManager::hasLyricsIndex() {
             uint32_t count = 0;
             if (f.read((uint8_t*)&magic, 4) == 4 && f.read((uint8_t*)&ver, 2) == 2 && f.read((uint8_t*)&count, 4) == 4) {
                 if (magic == LYRICS_INDEX_MAGIC && ver == LYRICS_INDEX_VERSION) {
-                    size_t expectedSize = 10 + (count * sizeof(LyricsIndexEntry));
-                    if (f.size() == expectedSize) {
-                        valid = true;
+                    if (count <= (0xFFFFFFFF - 10) / sizeof(LyricsIndexEntry)) {
+                        size_t expectedSize = 10 + (count * sizeof(LyricsIndexEntry));
+                        if (f.size() == expectedSize) {
+                            valid = true;
+                        }
                     }
                 }
             }

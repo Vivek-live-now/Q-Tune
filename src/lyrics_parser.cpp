@@ -740,13 +740,16 @@ static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, S
         if (aSize == 1) { // 64-bit extended atom size
             uint8_t largeHdr[8];
             if (file.read(largeHdr, 8) != 8) break;
-            aSize = ((uint32_t)largeHdr[4] << 24) | ((uint32_t)largeHdr[5] << 16) | ((uint32_t)largeHdr[6] << 8) | (uint32_t)largeHdr[7];
+            uint32_t highSize = ((uint32_t)largeHdr[0] << 24) | ((uint32_t)largeHdr[1] << 16) | ((uint32_t)largeHdr[2] << 8) | (uint32_t)largeHdr[3];
+            uint32_t lowSize = ((uint32_t)largeHdr[4] << 24) | ((uint32_t)largeHdr[5] << 16) | ((uint32_t)largeHdr[6] << 8) | (uint32_t)largeHdr[7];
+            if (highSize > 0) break; // Reject atom sizes > 4GB on 32-bit target
+            aSize = lowSize;
             headerLen = 16;
         } else if (aSize == 0) {
             aSize = endOffset - curPos;
         }
 
-        if (aSize < headerLen || curPos + aSize > endOffset) break;
+        if (aSize < headerLen || curPos > endOffset || aSize > endOffset - curPos) break;
 
         if (strcmp(aType, "moov") == 0 || strcmp(aType, "udta") == 0 || strcmp(aType, "meta") == 0 || strcmp(aType, "ilst") == 0 || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0) {
             uint32_t subStart = curPos + headerLen + (strcmp(aType, "meta") == 0 ? 4 : 0); // Skip version/flags for meta

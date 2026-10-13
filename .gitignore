@@ -5,3 +5,4 @@
 build_binaries/
 __pycache__/
 *.pyc
+tests/test_lyrics_native
