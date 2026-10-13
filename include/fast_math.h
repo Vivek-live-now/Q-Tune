@@ -1,41 +1,95 @@
 #ifndef FAST_MATH_H
 #define FAST_MATH_H
 
-#include <Arduino.h>
-#include <math.h>
-
-#ifdef TWO_PI
-#undef TWO_PI
-#endif
-
-#ifdef HALF_PI
-#undef HALF_PI
-#endif
-
-#ifdef PI
-#undef PI
-#endif
+#include <cmath>
+#include <cstdint>
 
 namespace FastMath {
-    constexpr float TWO_PI = 6.28318530717958647692f;
-    constexpr float PI_VAL = 3.14159265358979323846f;
-    constexpr float HALF_PI = 1.57079632679489661923f;
 
-    inline float fast_sin(float x) {
-        return sinf(x);
+// Precomputed 256-entry sine table across [0, 2*PI)
+static const float SIN_LUT[256] = {
+     0.00000000f,      0.02454123f,      0.04906767f,      0.07356456f,      0.09801714f,      0.12241068f,      0.14673047f,      0.17096189f,
+     0.19509032f,      0.21910124f,      0.24298018f,      0.26671276f,      0.29028468f,      0.31368174f,      0.33688985f,      0.35989504f,
+     0.38268343f,      0.40524131f,      0.42755509f,      0.44961133f,      0.47139674f,      0.49289819f,      0.51410274f,      0.53499762f,
+     0.55557023f,      0.57580819f,      0.59569930f,      0.61523159f,      0.63439328f,      0.65317284f,      0.67155895f,      0.68954054f,
+     0.70710678f,      0.72424708f,      0.74095113f,      0.75720885f,      0.77301045f,      0.78834643f,      0.80320753f,      0.81758481f,
+     0.83146961f,      0.84485357f,      0.85772861f,      0.87008699f,      0.88192126f,      0.89322430f,      0.90398929f,      0.91420976f,
+     0.92387953f,      0.93299280f,      0.94154407f,      0.94952818f,      0.95694034f,      0.96377607f,      0.97003125f,      0.97570213f,
+     0.98078528f,      0.98527764f,      0.98917651f,      0.99247953f,      0.99518473f,      0.99729046f,      0.99879546f,      0.99969882f,
+     1.00000000f,      0.99969882f,      0.99879546f,      0.99729046f,      0.99518473f,      0.99247953f,      0.98917651f,      0.98527764f,
+     0.98078528f,      0.97570213f,      0.97003125f,      0.96377607f,      0.95694034f,      0.94952818f,      0.94154407f,      0.93299280f,
+     0.92387953f,      0.91420976f,      0.90398929f,      0.89322430f,      0.88192126f,      0.87008699f,      0.85772861f,      0.84485357f,
+     0.83146961f,      0.81758481f,      0.80320753f,      0.78834643f,      0.77301045f,      0.75720885f,      0.74095113f,      0.72424708f,
+     0.70710678f,      0.68954054f,      0.67155895f,      0.65317284f,      0.63439328f,      0.61523159f,      0.59569930f,      0.57580819f,
+     0.55557023f,      0.53499762f,      0.51410274f,      0.49289819f,      0.47139674f,      0.44961133f,      0.42755509f,      0.40524131f,
+     0.38268343f,      0.35989504f,      0.33688985f,      0.31368174f,      0.29028468f,      0.26671276f,      0.24298018f,      0.21910124f,
+     0.19509032f,      0.17096189f,      0.14673047f,      0.12241068f,      0.09801714f,      0.07356456f,      0.04906767f,      0.02454123f,
+     0.00000000f,     -0.02454123f,     -0.04906767f,     -0.07356456f,     -0.09801714f,     -0.12241068f,     -0.14673047f,     -0.17096189f,
+    -0.19509032f,     -0.21910124f,     -0.24298018f,     -0.26671276f,     -0.29028468f,     -0.31368174f,     -0.33688985f,     -0.35989504f,
+    -0.38268343f,     -0.40524131f,     -0.42755509f,     -0.44961133f,     -0.47139674f,     -0.49289819f,     -0.51410274f,     -0.53499762f,
+    -0.55557023f,     -0.57580819f,     -0.59569930f,     -0.61523159f,     -0.63439328f,     -0.65317284f,     -0.67155895f,     -0.68954054f,
+    -0.70710678f,     -0.72424708f,     -0.74095113f,     -0.75720885f,     -0.77301045f,     -0.78834643f,     -0.80320753f,     -0.81758481f,
+    -0.83146961f,     -0.84485357f,     -0.85772861f,     -0.87008699f,     -0.88192126f,     -0.89322430f,     -0.90398929f,     -0.91420976f,
+    -0.92387953f,     -0.93299280f,     -0.94154407f,     -0.94952818f,     -0.95694034f,     -0.96377607f,     -0.97003125f,     -0.97570213f,
+    -0.98078528f,     -0.98527764f,     -0.98917651f,     -0.99247953f,     -0.99518473f,     -0.99729046f,     -0.99879546f,     -0.99969882f,
+    -1.00000000f,     -0.99969882f,     -0.99879546f,     -0.99729046f,     -0.99518473f,     -0.99247953f,     -0.98917651f,     -0.98527764f,
+    -0.98078528f,     -0.97570213f,     -0.97003125f,     -0.96377607f,     -0.95694034f,     -0.94952818f,     -0.94154407f,     -0.93299280f,
+    -0.92387953f,     -0.91420976f,     -0.90398929f,     -0.89322430f,     -0.88192126f,     -0.87008699f,     -0.85772861f,     -0.84485357f,
+    -0.83146961f,     -0.81758481f,     -0.80320753f,     -0.78834643f,     -0.77301045f,     -0.75720885f,     -0.74095113f,     -0.72424708f,
+    -0.70710678f,     -0.68954054f,     -0.67155895f,     -0.65317284f,     -0.63439328f,     -0.61523159f,     -0.59569930f,     -0.57580819f,
+    -0.55557023f,     -0.53499762f,     -0.51410274f,     -0.49289819f,     -0.47139674f,     -0.44961133f,     -0.42755509f,     -0.40524131f,
+    -0.38268343f,     -0.35989504f,     -0.33688985f,     -0.31368174f,     -0.29028468f,     -0.26671276f,     -0.24298018f,     -0.21910124f,
+    -0.19509032f,     -0.17096189f,     -0.14673047f,     -0.12241068f,     -0.09801714f,     -0.07356456f,     -0.04906767f,     -0.02454123f
+};
+
+// Fast sine with linear interpolation: max error < 0.00008
+inline float fast_sin(float rad) {
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    constexpr float kScale = 256.0f / kTwoPi;
+
+    // Normalize to [0, 2*PI)
+    if (rad < 0.0f) {
+        rad += kTwoPi * static_cast<float>(static_cast<int>(-rad / kTwoPi) + 1);
+    } else if (rad >= kTwoPi) {
+        rad -= kTwoPi * static_cast<float>(static_cast<int>(rad / kTwoPi));
     }
-    inline float fast_cos(float x) {
-        return cosf(x);
-    }
-    inline float fast_inv_sqrt(float x) {
-        return 1.0f / sqrtf(x);
-    }
-    inline float fast_log10(float x) {
-        return log10f(x);
-    }
-    inline float fast_db20(float linear) {
-        return (linear > 0.00001f) ? (20.0f * log10f(linear)) : -100.0f;
-    }
+
+    float pos = rad * kScale;
+    int idx = static_cast<int>(pos);
+    float frac = pos - static_cast<float>(idx);
+    int i0 = idx & 255;
+    int i1 = (i0 + 1) & 255;
+    return SIN_LUT[i0] + frac * (SIN_LUT[i1] - SIN_LUT[i0]);
 }
+
+// Fast cosine via phase shift: cos(x) = sin(x + PI/2)
+inline float fast_cos(float rad) {
+    return fast_sin(rad + 1.5707963267948966f);
+}
+
+// Fast log10 approximation via IEEE-754 binary exponent + Pade polynomial: max error < 0.003
+inline float fast_log10(float x) {
+    if (x <= 0.0f) return -100.0f;
+    union { float f; uint32_t i; } u;
+    u.f = x;
+    int exp = static_cast<int>((u.i >> 23) & 0xFF) - 127;
+    float mantissa = static_cast<float>(u.i & 0x7FFFFF) * (1.0f / 8388608.0f);
+    // Pade approximation for log2(1 + m) on [0, 1]
+    float y = mantissa * (6.0f + mantissa) / (6.0f + 4.0f * mantissa) * 1.4426950408889634f;
+    return (static_cast<float>(exp) + y) * 0.3010299956639812f;
+}
+
+// Fast decibel mapping: 20 * log10(ratio)
+inline float fast_db20(float ratio) {
+    return 20.0f * fast_log10(ratio);
+}
+
+// Fast inverse square root
+inline float fast_inv_sqrt(float x) {
+    if (x <= 0.0f) return 0.0f;
+    return 1.0f / sqrtf(x);
+}
+
+} // namespace FastMath
 
 #endif // FAST_MATH_H

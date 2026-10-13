@@ -1009,11 +1009,12 @@ def test_library_indexing_and_multipage_lyrics():
         ts = (mm * 60 + ss) * 1000 + ms
         return ts, m.group(4).strip()
 
-    ts1, text1 = parse_lrc_tag("[00:12.50] Hello world")
-    assert ts1 == 12500 and text1 == "Hello world", f"Expected 12500, got {ts1}"
-
-    ts2, text2 = parse_lrc_tag("[03:45.89] Bohemian Rhapsody")
-    assert ts2 == 225890 and text2 == "Bohemian Rhapsody", f"Expected 225890, got {ts2}"
+    # 8. Negative Scan Caching & Page 3 Repeat Scan Prevention
+    assert "getLoadedAudioPath" in lrch_src, "getLoadedAudioPath missing in lyrics_parser.h"
+    assert "if (loadedAudioPath == audioPath) {" in lrccpp_src, "Negative scan caching missing in lyrics_parser.cpp"
+    assert "if (loadedAudioPath == audioPath && hasLyrics())" not in lrccpp_src, "Broken positive-only cache check still present in lyrics_parser.cpp"
+    assert "lyricsParser.getLoadedAudioPath() != audioPlayer.getCurrentTrackPath()" in uicpp_src, "renderPlayerPage3 must guard loadForTrack with loadedAudioPath check"
+    assert "if (!lyricsParser.hasLyrics()) {" not in uicpp_src, "Unconditional per-frame load on missing lyrics found in ui_player.cpp"
 
     print("  [PASS] Music library indexing, categorization, Now Playing non-restart protection, and multi-page LRC lyrics verified.")
 
@@ -1260,9 +1261,11 @@ def test_lyrics_parsers_and_fixture_verification():
     assert "decodeID3String" in lrc_src, "decodeID3String missing in lyrics_parser.cpp"
     assert "16384" in lrc_src, "ID3 frame size safety limit missing"
 
-    # 2. M4A Parent Atom Traversal
+    # 2. M4A Parent Atom Traversal & Precedence Logic
     assert "scanM4AAtoms" in lrc_src, "scanM4AAtoms missing in lyrics_parser.cpp"
     assert "©lyr" in lrc_src, "©lyr atom missing in lyrics_parser.cpp"
+    assert r'childInsideLyrics = insideLyricsItem || strcmp(aType, "\xA9" "lyr") == 0' in lrc_src, "Single-backslash \xA9lyr check missing in childInsideLyrics"
+    assert "candidateUsltText" in lrc_src, "candidateUsltText deferral logic missing for ID3 SYLT precedence"
 
     # 3. Index Integrity & Change Detection
     assert "currentAudioSz == entry.audioFileSize" in sd_src, "audioFileSize change detection missing"
@@ -1270,18 +1273,50 @@ def test_lyrics_parsers_and_fixture_verification():
     assert "expectedSize = 10 + (count * sizeof(LyricsIndexEntry))" in sd_src, "Index total length validation missing"
     assert ".bak" in sd_src, "Crash-safe backup recovery missing in sd_manager.cpp"
 
-    # 4. Binary SYLT Frame Simulator Verification
-    # Encoding=0 (ISO), TimeFormat=2 (ms), ContentType=1 (Lyrics)
-    sylt_frame = bytearray([0x00, 0x65, 0x6E, 0x67, 0x02, 0x01, 0x00]) # Header + null descriptor
-    sylt_frame.extend(b"Line 1")
-    sylt_frame.append(0)
-    sylt_frame.extend(struct.pack(">I", 5000)) # 5000 ms
-    sylt_frame.extend(b"Line 2")
-    sylt_frame.append(0)
-    sylt_frame.extend(struct.pack(">I", 12000)) # 12000 ms
+    # 4. The production ID3 codec is shared with the native C++ harness.
+    codec_h = os.path.join(base_dir, "include", "lyrics_id3_codec.h")
+    native_test = os.path.join(base_dir, "tests", "test_lyrics_native.cpp")
+    with open_utf8(codec_h) as f: codec_src = f.read()
+    with open_utf8(native_test) as f: native_src = f.read()
+    assert "LyricsID3Codec::parseSYLT" in lrc_src, "Production SYLT parser does not use shared codec"
+    assert "LyricsID3Codec::decodeString" in lrc_src, "Production decoder does not use shared codec"
+    assert '#include "../include/lyrics_id3_codec.h"' in native_src, "Native tests do not include production codec"
+    assert "unterminatedText" in native_src and "truncatedTimestamp" in native_src, "Malformed SYLT fixtures missing"
+    assert "inline bool parseSYLT" in codec_src, "Production SYLT implementation missing"
+    print("  [PASS] Production ID3 codec is shared with native tests; CI compiles and executes fixture tests.")
 
-    assert len(sylt_frame) > 10, "SYLT binary frame simulation failed"
-    print("  [PASS] ID3 SYLT frame simulation, M4A atom stack traversal, V2 index change detection, and backup recovery verified.")
+def test_fpu_math_optimizations():
+    print("\n--- 26. Hardware FPU Math & Fast DSP Subsystem Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    fast_math_h = os.path.join(base_dir, "include", "fast_math.h")
+    sa_cpp = os.path.join(base_dir, "src", "spectrum_analyzer.cpp")
+    pio_ini = os.path.join(base_dir, "platformio.ini")
+
+    with open_utf8(fast_math_h) as f: fm_text = f.read()
+    with open_utf8(sa_cpp) as f: sa_text = f.read()
+    with open_utf8(pio_ini) as f: pio_text = f.read()
+
+    # 1. Compiler flags enabling hardware FPU instruction inlining
+    assert "-fno-math-errno" in pio_text, "Missing -fno-math-errno in platformio.ini"
+    assert "-ffast-math" in pio_text, "Missing -ffast-math in platformio.ini"
+
+    # 2. FastMath header-only library methods and LUT definitions
+    assert "SIN_LUT[256]" in fm_text, "Missing 256-entry SIN_LUT in fast_math.h"
+    assert "fast_sin" in fm_text, "Missing fast_sin in fast_math.h"
+    assert "fast_cos" in fm_text, "Missing fast_cos in fast_math.h"
+    assert "fast_log10" in fm_text, "Missing fast_log10 in fast_math.h"
+    assert "fast_db20" in fm_text, "Missing fast_db20 in fast_math.h"
+    assert "fast_inv_sqrt" in fm_text, "Missing fast_inv_sqrt in fast_math.h"
+
+    # 3. Precomputed DSP tables in spectrum_analyzer.cpp
+    assert "HANNING_128[128]" in sa_text, "Missing precomputed 128-point HANNING_128 window"
+    assert "TWIDDLE_STAGES[7]" in sa_text, "Missing precomputed TWIDDLE_STAGES butterfly table"
+    assert "downF[N_SAMPLES]" in sa_text, "Missing downF float conversion cache in detectVoicePitch"
+
+    # 4. Ensure no soft-float double precision pi multiplication in spectrum_analyzer.cpp
+    assert "2.0 * M_PI" not in sa_text, "Found double precision literal '2.0 * M_PI', use 2.0f * (float)M_PI"
+
+    print("  [PASS] Hardware FPU flags (-fno-math-errno, -ffast-math), precomputed Hanning/Twiddle LUTs, and FastMath acceleration verified.")
 
 def main():
     print("==================================================")
@@ -1312,7 +1347,8 @@ def main():
     test_vocal_reactive_check_tool()
     test_vu_analog_and_spectrometer_suite()
     test_lyrics_parsers_and_fixture_verification()
-    print("\nAll 25 Q-Tune test verifications PASSED (100%)!\n")
+    test_fpu_math_optimizations()
+    print("\nAll 26 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

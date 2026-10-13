@@ -60,6 +60,7 @@ void UIPlayer::setPage(PlayerPage page) {
 void UIPlayer::cyclePage() {
     currentPage = (PlayerPage)((currentPage + 1) % 3);
     if (currentPage == PAGE_LYRICS) {
+        manualLyricIndex = 0;
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     } else if (currentPage == PAGE_NOW_PLAYING) {
         albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
@@ -89,6 +90,7 @@ void UIPlayer::enterFolder(const String &folderPath) {
 
 void UIPlayer::playNextTrack() {
     if (trackList.empty()) return;
+    manualLyricIndex = 0;
     if (playbackMode == PLAY_MODE_REPEAT_ONE) {
         audioPlayer.playFile(trackList[currentTrackIndex]);
     } else if (playbackMode == PLAY_MODE_SHUFFLE) {
@@ -113,6 +115,7 @@ void UIPlayer::playNextTrack() {
 
 void UIPlayer::playPreviousTrack() {
     if (trackList.empty()) return;
+    manualLyricIndex = 0;
     currentTrackIndex = (currentTrackIndex - 1 + trackList.size()) % trackList.size();
     audioPlayer.playFile(trackList[currentTrackIndex]);
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
@@ -949,16 +952,16 @@ void UIPlayer::renderPlayerPage3() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
 
+    if (lyricsParser.getLoadedAudioPath() != audioPlayer.getCurrentTrackPath()) {
+        lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+    }
+
     u8g2.setFont(u8g2_font_5x7_tr);
     char headerBuf[32];
     const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]" : (lyricsParser.hasLyrics() ? "[MANUAL]" : "[NONE]");
     snprintf(headerBuf, sizeof(headerBuf), "LYRICS %s B:%d%%", modeTag, battery.getPercentage());
     u8g2.drawStr(0, 8, headerBuf);
     u8g2.drawHLine(0, 10, 128);
-
-    if (!lyricsParser.hasLyrics()) {
-        lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
-    }
 
     if (lyricsParser.hasLyrics()) {
         int curIdx = 0;
