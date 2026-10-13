@@ -952,7 +952,7 @@ void UIPlayer::renderPlayerPage3() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
 
-    if (!lyricsParser.hasLyrics()) {
+    if (lyricsParser.getLoadedAudioPath() != audioPlayer.getCurrentTrackPath()) {
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 

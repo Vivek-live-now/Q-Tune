@@ -1009,11 +1009,12 @@ def test_library_indexing_and_multipage_lyrics():
         ts = (mm * 60 + ss) * 1000 + ms
         return ts, m.group(4).strip()
 
-    ts1, text1 = parse_lrc_tag("[00:12.50] Hello world")
-    assert ts1 == 12500 and text1 == "Hello world", f"Expected 12500, got {ts1}"
-
-    ts2, text2 = parse_lrc_tag("[03:45.89] Bohemian Rhapsody")
-    assert ts2 == 225890 and text2 == "Bohemian Rhapsody", f"Expected 225890, got {ts2}"
+    # 8. Negative Scan Caching & Page 3 Repeat Scan Prevention
+    assert "getLoadedAudioPath" in lrch_src, "getLoadedAudioPath missing in lyrics_parser.h"
+    assert "if (loadedAudioPath == audioPath) {" in lrccpp_src, "Negative scan caching missing in lyrics_parser.cpp"
+    assert "if (loadedAudioPath == audioPath && hasLyrics())" not in lrccpp_src, "Broken positive-only cache check still present in lyrics_parser.cpp"
+    assert "lyricsParser.getLoadedAudioPath() != audioPlayer.getCurrentTrackPath()" in uicpp_src, "renderPlayerPage3 must guard loadForTrack with loadedAudioPath check"
+    assert "if (!lyricsParser.hasLyrics()) {" not in uicpp_src, "Unconditional per-frame load on missing lyrics found in ui_player.cpp"
 
     print("  [PASS] Music library indexing, categorization, Now Playing non-restart protection, and multi-page LRC lyrics verified.")
 

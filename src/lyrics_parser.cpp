@@ -205,14 +205,17 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         return false;
     }
 
-    if (loadedAudioPath == audioPath && hasLyrics()) {
-        return true; // Cached
+    if (loadedAudioPath == audioPath) {
+        return hasLyrics(); // Cached (whether track has lyrics or is known to have none)
     }
 
     clear();
     loadedAudioPath = audioPath;
 
-    if (!sdManager.isMounted()) return false;
+    if (!sdManager.isMounted()) {
+        loadedAudioPath = "";
+        return false;
+    }
 
     // 0. Query persistent index first to optimize loading path
     LyricsSyncType idxSync = LYRICS_SYNC_NONE;
@@ -336,7 +339,10 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         }
     }
 
-    clear();
+    lines.clear();
+    syncType = LYRICS_SYNC_NONE;
+    sourcePriority = LYRICS_SRC_NONE;
+    loadedAudioPath = audioPath;
     return false;
 }
 
