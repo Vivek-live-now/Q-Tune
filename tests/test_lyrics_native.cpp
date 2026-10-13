@@ -1,6 +1,8 @@
 #include "../include/lyrics_id3_codec.h"
+#include "../include/fast_math.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -27,7 +29,7 @@ static std::vector<uint8_t> makeSylt(const std::vector<std::pair<std::string, ui
 }
 
 int main() {
-    std::cout << "=== Production ID3 codec native tests ===\n";
+    std::cout << "=== Production Native Unit Tests (ID3 Codec & FastMath) ===\n";
 
     // Test the exact shared implementation used by src/lyrics_parser.cpp.
     const uint8_t latin1[] = {'C', 'a', 'f', 0xE9, 0};
@@ -68,6 +70,44 @@ int main() {
     assert(!LyricsID3Codec::parseSYLT(truncatedTimestamp.data(), truncatedTimestamp.size(), lines));
     assert(lines.empty());
     std::cout << "[PASS] SYLT timestamps and malformed-frame rejection\n";
-    std::cout << "All production ID3 codec native tests passed.\n";
+
+    // FastMath unit tests
+    // 1. fast_sin and fast_cos precision (< 0.0001 error)
+    constexpr float PI_F = 3.14159265358979323846f;
+    assert(std::fabs(FastMath::fast_sin(0.0f) - 0.0f) < 0.0001f);
+    assert(std::fabs(FastMath::fast_sin(PI_F * 0.5f) - 1.0f) < 0.0001f);
+    assert(std::fabs(FastMath::fast_sin(PI_F) - 0.0f) < 0.0001f);
+    assert(std::fabs(FastMath::fast_sin(PI_F * 1.5f) - (-1.0f)) < 0.0001f);
+    assert(std::fabs(FastMath::fast_cos(0.0f) - 1.0f) < 0.0001f);
+    assert(std::fabs(FastMath::fast_cos(PI_F * 0.5f) - 0.0f) < 0.0001f);
+    assert(std::fabs(FastMath::fast_cos(PI_F) - (-1.0f)) < 0.0001f);
+
+    // Negative angle & wrap-around
+    assert(std::fabs(FastMath::fast_sin(-PI_F * 0.5f) - (-1.0f)) < 0.0001f);
+    assert(std::fabs(FastMath::fast_cos(-PI_F) - (-1.0f)) < 0.0001f);
+    assert(std::fabs(FastMath::fast_sin(10.0f * PI_F + PI_F * 0.5f) - 1.0f) < 0.0001f);
+
+    // 2. fast_log10 approximation (< 0.003 max error)
+    assert(FastMath::fast_log10(0.0f) == -100.0f);
+    assert(FastMath::fast_log10(-5.0f) == -100.0f);
+    assert(std::fabs(FastMath::fast_log10(1.0f) - 0.0f) < 0.003f);
+    assert(std::fabs(FastMath::fast_log10(10.0f) - 1.0f) < 0.003f);
+    assert(std::fabs(FastMath::fast_log10(100.0f) - 2.0f) < 0.003f);
+    assert(std::fabs(FastMath::fast_log10(1000.0f) - 3.0f) < 0.003f);
+    assert(std::fabs(FastMath::fast_log10(0.1f) - (-1.0f)) < 0.003f);
+
+    // 3. fast_db20
+    assert(std::fabs(FastMath::fast_db20(1.0f) - 0.0f) < 0.06f);
+    assert(std::fabs(FastMath::fast_db20(0.1f) - (-20.0f)) < 0.06f);
+    assert(std::fabs(FastMath::fast_db20(0.01f) - (-40.0f)) < 0.06f);
+
+    // 4. fast_inv_sqrt
+    assert(FastMath::fast_inv_sqrt(0.0f) == 0.0f);
+    assert(FastMath::fast_inv_sqrt(-1.0f) == 0.0f);
+    assert(std::fabs(FastMath::fast_inv_sqrt(4.0f) - 0.5f) < 0.001f);
+    assert(std::fabs(FastMath::fast_inv_sqrt(16.0f) - 0.25f) < 0.001f);
+    std::cout << "[PASS] FastMath LUT trig, log10, db20, and inv_sqrt precision verified\n";
+
+    std::cout << "All production native tests passed.\n";
     return 0;
 }

@@ -1284,6 +1284,39 @@ def test_lyrics_parsers_and_fixture_verification():
     assert "inline bool parseSYLT" in codec_src, "Production SYLT implementation missing"
     print("  [PASS] Production ID3 codec is shared with native tests; CI compiles and executes fixture tests.")
 
+def test_fpu_math_optimizations():
+    print("\n--- 26. Hardware FPU Math & Fast DSP Subsystem Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    fast_math_h = os.path.join(base_dir, "include", "fast_math.h")
+    sa_cpp = os.path.join(base_dir, "src", "spectrum_analyzer.cpp")
+    pio_ini = os.path.join(base_dir, "platformio.ini")
+
+    with open_utf8(fast_math_h) as f: fm_text = f.read()
+    with open_utf8(sa_cpp) as f: sa_text = f.read()
+    with open_utf8(pio_ini) as f: pio_text = f.read()
+
+    # 1. Compiler flags enabling hardware FPU instruction inlining
+    assert "-fno-math-errno" in pio_text, "Missing -fno-math-errno in platformio.ini"
+    assert "-ffast-math" in pio_text, "Missing -ffast-math in platformio.ini"
+
+    # 2. FastMath header-only library methods and LUT definitions
+    assert "SIN_LUT[256]" in fm_text, "Missing 256-entry SIN_LUT in fast_math.h"
+    assert "fast_sin" in fm_text, "Missing fast_sin in fast_math.h"
+    assert "fast_cos" in fm_text, "Missing fast_cos in fast_math.h"
+    assert "fast_log10" in fm_text, "Missing fast_log10 in fast_math.h"
+    assert "fast_db20" in fm_text, "Missing fast_db20 in fast_math.h"
+    assert "fast_inv_sqrt" in fm_text, "Missing fast_inv_sqrt in fast_math.h"
+
+    # 3. Precomputed DSP tables in spectrum_analyzer.cpp
+    assert "HANNING_128[128]" in sa_text, "Missing precomputed 128-point HANNING_128 window"
+    assert "TWIDDLE_STAGES[7]" in sa_text, "Missing precomputed TWIDDLE_STAGES butterfly table"
+    assert "downF[N_SAMPLES]" in sa_text, "Missing downF float conversion cache in detectVoicePitch"
+
+    # 4. Ensure no soft-float double precision pi multiplication in spectrum_analyzer.cpp
+    assert "2.0 * M_PI" not in sa_text, "Found double precision literal '2.0 * M_PI', use 2.0f * (float)M_PI"
+
+    print("  [PASS] Hardware FPU flags (-fno-math-errno, -ffast-math), precomputed Hanning/Twiddle LUTs, and FastMath acceleration verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1313,7 +1346,8 @@ def main():
     test_vocal_reactive_check_tool()
     test_vu_analog_and_spectrometer_suite()
     test_lyrics_parsers_and_fixture_verification()
-    print("\nAll 25 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_fpu_math_optimizations()
+    print("\nAll 26 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

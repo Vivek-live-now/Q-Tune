@@ -1,9 +1,42 @@
 #include "spectrum_analyzer.h"
 #include "audio_player.h"
+#include "fast_math.h"
 #include <driver/i2s.h>
 #include <driver/gpio.h>
 #include <math.h>
 #include <string.h>
+
+// Precomputed 128-point Hanning window (eliminates 128 dynamic cosf calls per frame)
+static const float HANNING_128[128] = {
+     0.00000000f,      0.00061179f,      0.00244567f,      0.00549715f,      0.00975876f,      0.01522007f,      0.02186772f,      0.02968544f,
+     0.03865409f,      0.04875174f,      0.05995367f,      0.07223246f,      0.08555808f,      0.09989790f,      0.11521684f,      0.13147741f,
+     0.14863981f,      0.16666206f,      0.18550003f,      0.20510764f,      0.22543690f,      0.24643807f,      0.26805974f,      0.29024901f,
+     0.31295157f,      0.33611188f,      0.35967324f,      0.38357801f,      0.40776768f,      0.43218306f,      0.45676440f,      0.48145154f,
+     0.50618408f,      0.53090148f,      0.55554326f,      0.58004912f,      0.60435908f,      0.62841366f,      0.65215399f,      0.67552198f,
+     0.69846043f,      0.72091321f,      0.74282539f,      0.76414333f,      0.78481486f,      0.80478941f,      0.82401809f,      0.84245384f,
+     0.86005154f,      0.87676814f,      0.89256273f,      0.90739665f,      0.92123360f,      0.93403973f,      0.94578368f,      0.95643673f,
+     0.96597280f,      0.97436855f,      0.98160345f,      0.98765978f,      0.99252273f,      0.99618039f,      0.99862382f,      0.99984703f,
+     0.99984703f,      0.99862382f,      0.99618039f,      0.99252273f,      0.98765978f,      0.98160345f,      0.97436855f,      0.96597280f,
+     0.95643673f,      0.94578368f,      0.93403973f,      0.92123360f,      0.90739665f,      0.89256273f,      0.87676814f,      0.86005154f,
+     0.84245384f,      0.82401809f,      0.80478941f,      0.78481486f,      0.76414333f,      0.74282539f,      0.72091321f,      0.69846043f,
+     0.67552198f,      0.65215399f,      0.62841366f,      0.60435908f,      0.58004912f,      0.55554326f,      0.53090148f,      0.50618408f,
+     0.48145154f,      0.45676440f,      0.43218306f,      0.40776768f,      0.38357801f,      0.35967324f,      0.33611188f,      0.31295157f,
+     0.29024901f,      0.26805974f,      0.24643807f,      0.22543690f,      0.20510764f,      0.18550003f,      0.16666206f,      0.14863981f,
+     0.13147741f,      0.11521684f,      0.09989790f,      0.08555808f,      0.07223246f,      0.05995367f,      0.04875174f,      0.03865409f,
+     0.02968544f,      0.02186772f,      0.01522007f,      0.00975876f,      0.00549715f,      0.00244567f,      0.00061179f,      0.00000000f
+};
+
+// Precomputed twiddle factors for 7 Radix-2 butterfly stages (len = 2, 4, 8, 16, 32, 64, 128)
+struct TwiddleStage { float r; float i; };
+static const TwiddleStage TWIDDLE_STAGES[7] = {
+    {-1.00000000f,  0.00000000f}, // len=2: -pi
+    { 0.00000000f, -1.00000000f}, // len=4: -pi/2
+    { 0.70710678f, -0.70710678f}, // len=8: -pi/4
+    { 0.92387953f, -0.38268343f}, // len=16: -pi/8
+    { 0.98078528f, -0.19509032f}, // len=32: -pi/16
+    { 0.99518473f, -0.09801714f}, // len=64: -pi/32
+    { 0.99879546f, -0.04906767f}  // len=128: -pi/64
+};
 
 SpectrumAnalyzer::SpectrumAnalyzer() :
     ringHead(0),
@@ -339,22 +372,22 @@ void SpectrumAnalyzer::sampleAudioStream() {
     float vL = leftRmsLevel / VU_REF_RMS;
     float vR = rightRmsLevel / VU_REF_RMS;
 
-    leftDb = (vL > 0.05f) ? (20.0f * log10f(vL)) : -20.0f;
+    leftDb = (vL > 0.05f) ? (20.0f * FastMath::fast_log10(vL)) : -20.0f;
     if (leftDb > 3.5f) leftDb = 3.5f;
     if (leftDb < -20.0f) leftDb = -20.0f;
 
-    rightDb = (vR > 0.05f) ? (20.0f * log10f(vR)) : -20.0f;
+    rightDb = (vR > 0.05f) ? (20.0f * FastMath::fast_log10(vR)) : -20.0f;
     if (rightDb > 3.5f) rightDb = 3.5f;
     if (rightDb < -20.0f) rightDb = -20.0f;
 
     // True Peak in dBFS (relative to 511 full-scale ceiling)
     float peakRatioL = (float)lPeak / 511.0f;
     float peakRatioR = (float)rPeak / 511.0f;
-    leftPeakDb = (peakRatioL > 0.01f) ? (20.0f * log10f(peakRatioL)) : -30.0f;
+    leftPeakDb = (peakRatioL > 0.01f) ? (20.0f * FastMath::fast_log10(peakRatioL)) : -30.0f;
     if (leftPeakDb > 0.0f) leftPeakDb = 0.0f;
     if (leftPeakDb < -30.0f) leftPeakDb = -30.0f;
 
-    rightPeakDb = (peakRatioR > 0.01f) ? (20.0f * log10f(peakRatioR)) : -30.0f;
+    rightPeakDb = (peakRatioR > 0.01f) ? (20.0f * FastMath::fast_log10(peakRatioR)) : -30.0f;
     if (rightPeakDb > 0.0f) rightPeakDb = 0.0f;
     if (rightPeakDb < -30.0f) rightPeakDb = -30.0f;
 
@@ -517,12 +550,12 @@ void SpectrumAnalyzer::sampleMicrophone() {
     rightRmsLevel = rmsLevel;
     const float VU_REF_RMS = 145.0f;
     float v = rmsLevel / VU_REF_RMS;
-    leftDb = (v > 0.05f) ? (20.0f * log10f(v)) : -20.0f;
+    leftDb = (v > 0.05f) ? (20.0f * FastMath::fast_log10(v)) : -20.0f;
     if (leftDb > 3.5f) leftDb = 3.5f;
     if (leftDb < -20.0f) leftDb = -20.0f;
     rightDb = leftDb;
     float peakRatio = peakLevel / 511.0f;
-    leftPeakDb = (peakRatio > 0.01f) ? (20.0f * log10f(peakRatio)) : -30.0f;
+    leftPeakDb = (peakRatio > 0.01f) ? (20.0f * FastMath::fast_log10(peakRatio)) : -30.0f;
     if (leftPeakDb > 0.0f) leftPeakDb = 0.0f;
     if (leftPeakDb < -30.0f) leftPeakDb = -30.0f;
     rightPeakDb = leftPeakDb;
@@ -538,10 +571,9 @@ void SpectrumAnalyzer::processFFT() {
     float xr[SAMPLE_SIZE];
     float xi[SAMPLE_SIZE];
 
-    // Hanning window to prevent spectral leakage
+    // Precomputed Hanning window to prevent spectral leakage
     for (size_t i = 0; i < SAMPLE_SIZE; i++) {
-        float win = 0.5f * (1.0f - cosf(2.0f * (float)M_PI * i / (SAMPLE_SIZE - 1)));
-        xr[i] = (float)micBuffer[i] * win;
+        xr[i] = (float)micBuffer[i] * HANNING_128[i];
         xi[i] = 0.0f;
     }
 
@@ -558,11 +590,11 @@ void SpectrumAnalyzer::processFFT() {
         }
     }
 
-    // Cooley-Tukey Radix-2 butterflies
-    for (size_t len = 2; len <= SAMPLE_SIZE; len <<= 1) {
-        float ang = -2.0f * (float)M_PI / (float)len;
-        float wlen_r = cosf(ang);
-        float wlen_i = sinf(ang);
+    // Cooley-Tukey Radix-2 butterflies with precomputed twiddles
+    size_t stage = 0;
+    for (size_t len = 2; len <= SAMPLE_SIZE; len <<= 1, stage++) {
+        float wlen_r = TWIDDLE_STAGES[stage].r;
+        float wlen_i = TWIDDLE_STAGES[stage].i;
         for (size_t i = 0; i < SAMPLE_SIZE; i += len) {
             float w_r = 1.0f;
             float w_i = 0.0f;
@@ -605,7 +637,7 @@ void SpectrumAnalyzer::processFFT() {
 
         uint8_t targetHeight = 0;
         if (val > 40.0f) {
-            float scaled = log10f(val / 40.0f) * 28.0f;
+            float scaled = FastMath::fast_log10(val / 40.0f) * 28.0f;
             if (scaled > 62.0f) scaled = 62.0f;
             if (scaled < 0.0f) scaled = 0.0f;
             targetHeight = (uint8_t)scaled;
@@ -668,6 +700,11 @@ void SpectrumAnalyzer::detectVoicePitch() {
         down[i] = (int16_t)constrain((int)y, -32767, 32767);
     }
 
+    float downF[N_SAMPLES];
+    for (size_t i = 0; i < N_SAMPLES; i++) {
+        downF[i] = (float)down[i];
+    }
+
     // Correlation window length N = 100 samples (~9.1 ms, covers full fundamental cycles down to 110 Hz)
     const size_t CORR_LEN = 100;
     const size_t MIN_LAG = 14;  // ~787 Hz
@@ -675,7 +712,7 @@ void SpectrumAnalyzer::detectVoicePitch() {
 
     float energy0 = 0.0f;
     for (size_t n = 0; n < CORR_LEN; n++) {
-        float s = (float)down[n];
+        float s = downF[n];
         energy0 += s * s;
     }
 
@@ -694,9 +731,10 @@ void SpectrumAnalyzer::detectVoicePitch() {
     for (size_t lag = MIN_LAG; lag <= MAX_LAG; lag++) {
         float num = 0.0f;
         float energyLag = 0.0f;
+        const float *sLagPtr = &downF[lag];
         for (size_t n = 0; n < CORR_LEN; n++) {
-            float s0 = (float)down[n];
-            float sLag = (float)down[n + lag];
+            float s0 = downF[n];
+            float sLag = sLagPtr[n];
             num += s0 * sLag;
             energyLag += sLag * sLag;
         }
@@ -720,9 +758,10 @@ void SpectrumAnalyzer::detectVoicePitch() {
         // Parabolic interpolation for fine sub-sample pitch resolution
         auto getCorr = [&](size_t l) -> float {
             float num = 0.0f, el = 0.0f;
+            const float *slPtr = &downF[l];
             for (size_t n = 0; n < CORR_LEN; n++) {
-                float s0 = (float)down[n];
-                float sl = (float)down[n + l];
+                float s0 = downF[n];
+                float sl = slPtr[n];
                 num += s0 * sl;
                 el += sl * sl;
             }
@@ -832,14 +871,14 @@ void SpectrumAnalyzer::drawAnalogVU() {
     // Curved meter scale arc from 150 deg down to 30 deg
     for (int deg = 150; deg >= 30; deg -= 2) {
         float rad = (float)deg * (float)M_PI / 180.0f;
-        int x = pivotX + (int)(cosf(rad) * arcR);
-        int y = pivotY - (int)(sinf(rad) * arcR);
+        int x = pivotX + (int)(FastMath::fast_cos(rad) * arcR);
+        int y = pivotY - (int)(FastMath::fast_sin(rad) * arcR);
         u8g2.drawPixel(x, y);
 
         // Danger sector from 68 down to 30 deg (0 dB to +3 dB): reinforced double arc
         if (deg <= 68) {
-            int xIn = pivotX + (int)(cosf(rad) * (arcR - 1));
-            int yIn = pivotY - (int)(sinf(rad) * (arcR - 1));
+            int xIn = pivotX + (int)(FastMath::fast_cos(rad) * (arcR - 1));
+            int yIn = pivotY - (int)(FastMath::fast_sin(rad) * (arcR - 1));
             u8g2.drawPixel(xIn, yIn);
         }
     }
@@ -866,10 +905,10 @@ void SpectrumAnalyzer::drawAnalogVU() {
         float rad = ticks[i].deg * (float)M_PI / 180.0f;
         int rIn = arcR - (ticks[i].major ? 4 : 2);
         int rOut = arcR + (ticks[i].major ? 4 : 2);
-        int x0 = pivotX + (int)(cosf(rad) * rIn);
-        int y0 = pivotY - (int)(sinf(rad) * rIn);
-        int x1 = pivotX + (int)(cosf(rad) * rOut);
-        int y1 = pivotY - (int)(sinf(rad) * rOut);
+        int x0 = pivotX + (int)(FastMath::fast_cos(rad) * rIn);
+        int y0 = pivotY - (int)(FastMath::fast_sin(rad) * rIn);
+        int x1 = pivotX + (int)(FastMath::fast_cos(rad) * rOut);
+        int y1 = pivotY - (int)(FastMath::fast_sin(rad) * rOut);
         u8g2.drawLine(x0, y0, x1, y1);
     }
 
@@ -891,8 +930,8 @@ void SpectrumAnalyzer::drawAnalogVU() {
     if (clampedPos > 1.05f) clampedPos = 1.05f;
     float needleDeg = 150.0f - clampedPos * 120.0f;
     float needleRad = needleDeg * (float)M_PI / 180.0f;
-    int tipX = pivotX + (int)(cosf(needleRad) * needleR);
-    int tipY = pivotY - (int)(sinf(needleRad) * needleR);
+    int tipX = pivotX + (int)(FastMath::fast_cos(needleRad) * needleR);
+    int tipY = pivotY - (int)(FastMath::fast_sin(needleRad) * needleR);
 
     // Needle stroke with solid visual presence
     u8g2.drawLine(pivotX, pivotY, tipX, tipY);
@@ -1235,8 +1274,8 @@ void SpectrumAnalyzer::drawVinylVU() {
     static float strobeAngle = 0.0f;
     if (audioPlayer.isPlaying()) {
         strobeAngle += 0.22f; // ~33 1/3 RPM visual rotational rate
-        if (strobeAngle >= (float)(2.0 * M_PI)) {
-            strobeAngle -= (float)(2.0 * M_PI);
+        if (strobeAngle >= (2.0f * (float)M_PI)) {
+            strobeAngle -= (2.0f * (float)M_PI);
         }
     }
 
@@ -1246,9 +1285,9 @@ void SpectrumAnalyzer::drawVinylVU() {
     // 12 strobe calibration notches around perimeter
     const int numStrobes = 12;
     for (int s = 0; s < numStrobes; s++) {
-        float ang = strobeAngle + (float)s * ((float)(2.0 * M_PI) / (float)numStrobes);
-        int sx = platterX + (int)(cosf(ang) * (platterR - 1));
-        int sy = platterY + (int)(sinf(ang) * (platterR - 1));
+        float ang = strobeAngle + (float)s * ((2.0f * (float)M_PI) / (float)numStrobes);
+        int sx = platterX + (int)(FastMath::fast_cos(ang) * (platterR - 1));
+        int sy = platterY + (int)(FastMath::fast_sin(ang) * (platterR - 1));
         u8g2.drawPixel(sx, sy);
     }
 
@@ -1324,8 +1363,8 @@ void SpectrumAnalyzer::drawVinylVU() {
         jitter = ((millis() % 2 == 0) ? 0.6f : -0.6f);
     }
 
-    int stylusX = platterX + (int)(cosf(stylusAngle) * trackR + jitter);
-    int stylusY = platterY + (int)(sinf(stylusAngle) * trackR);
+    int stylusX = platterX + (int)(FastMath::fast_cos(stylusAngle) * trackR + jitter);
+    int stylusY = platterY + (int)(FastMath::fast_sin(stylusAngle) * trackR);
 
     // Tonearm S-Curve Wand (Curved two-segment arm tube from pivot to stylus)
     int elbowX = (pivX + stylusX) / 2 + 5;
@@ -1617,7 +1656,7 @@ void SpectrumAnalyzer::drawPlasma() {
     int startY = showBar ? 16 : 0;
     for (int x = 0; x < 128; x += 4) {
         for (int y = startY; y < 64; y += 4) {
-            float v = sinf(x * 0.1f + t) + cosf(y * 0.1f + t);
+            float v = FastMath::fast_sin(x * 0.1f + t) + FastMath::fast_cos(y * 0.1f + t);
             if (v > (0.5f - energy * 0.1f)) {
                 u8g2.drawBox(x, y, 3, 3);
             }
