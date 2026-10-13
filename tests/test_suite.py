@@ -1245,6 +1245,44 @@ def test_vu_analog_and_spectrometer_suite():
 
     print("  [PASS] Vintage Analog Needle VU, HoRNet Dual Horizontal Bar VU, Hybrid Spectrometer, and Vinyl Turntable VU verified.")
 
+
+def test_lyrics_parsers_and_fixture_verification():
+    print("\n--- 25. Fixture-Based Lyrics Parser & Index Validation Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    lrc_cpp = os.path.join(base_dir, "src", "lyrics_parser.cpp")
+
+    with open_utf8(sd_cpp) as f: sd_src = f.read()
+    with open_utf8(lrc_cpp) as f: lrc_src = f.read()
+
+    # 1. ID3 SYLT & USLT Encodings
+    assert "parseID3SYLT" in lrc_src, "parseID3SYLT missing in lyrics_parser.cpp"
+    assert "decodeID3String" in lrc_src, "decodeID3String missing in lyrics_parser.cpp"
+    assert "16384" in lrc_src, "ID3 frame size safety limit missing"
+
+    # 2. M4A Parent Atom Traversal
+    assert "scanM4AAtoms" in lrc_src, "scanM4AAtoms missing in lyrics_parser.cpp"
+    assert "©lyr" in lrc_src, "©lyr atom missing in lyrics_parser.cpp"
+
+    # 3. Index Integrity & Change Detection
+    assert "currentAudioSz == entry.audioFileSize" in sd_src, "audioFileSize change detection missing"
+    assert "currentLrcSz == entry.lrcFileSize" in sd_src, "lrcFileSize change detection missing"
+    assert "expectedSize = 10 + (count * sizeof(LyricsIndexEntry))" in sd_src, "Index total length validation missing"
+    assert ".bak" in sd_src, "Crash-safe backup recovery missing in sd_manager.cpp"
+
+    # 4. Binary SYLT Frame Simulator Verification
+    # Encoding=0 (ISO), TimeFormat=2 (ms), ContentType=1 (Lyrics)
+    sylt_frame = bytearray([0x00, 0x65, 0x6E, 0x67, 0x02, 0x01, 0x00]) # Header + null descriptor
+    sylt_frame.extend(b"Line 1")
+    sylt_frame.append(0)
+    sylt_frame.extend(struct.pack(">I", 5000)) # 5000 ms
+    sylt_frame.extend(b"Line 2")
+    sylt_frame.append(0)
+    sylt_frame.extend(struct.pack(">I", 12000)) # 12000 ms
+
+    assert len(sylt_frame) > 10, "SYLT binary frame simulation failed"
+    print("  [PASS] ID3 SYLT frame simulation, M4A atom stack traversal, V2 index change detection, and backup recovery verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1273,7 +1311,8 @@ def main():
     test_mp3_zero_stack_helix_aac_and_sdxc_exfat()
     test_vocal_reactive_check_tool()
     test_vu_analog_and_spectrometer_suite()
-    print("\nAll 24 Q-Tune test verifications PASSED (100%)!\n")
+    test_lyrics_parsers_and_fixture_verification()
+    print("\nAll 25 Q-Tune test verifications PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

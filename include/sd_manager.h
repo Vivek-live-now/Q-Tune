@@ -6,6 +6,20 @@
 #include <SD.h>
 #include <vector>
 #include "hw_config.h"
+#include "lyrics_parser.h"
+
+// Binary Persistent Lyrics Index Header (Version 2)
+constexpr uint32_t LYRICS_INDEX_MAGIC = 0x51544C59; // 'QTLY'
+constexpr uint16_t LYRICS_INDEX_VERSION = 2;
+
+struct LyricsIndexEntry {
+    char audioPath[128];             // Track relative path (max 127 chars + NULL)
+    uint8_t syncType;                // LyricsSyncType enum value
+    uint8_t sourcePriority;          // LyricsSourcePriority enum value
+    uint32_t audioFileSize;          // Audio file size for change detection
+    uint32_t lrcFileSize;            // External .lrc size (0 if none)
+    uint32_t txtFileSize;            // External .txt size (0 if none)
+};
 
 class SDManager {
 public:
@@ -20,6 +34,11 @@ public:
     bool hasLibraryIndex();
     bool buildLibraryIndex(void (*progressCallback)(int count) = nullptr);
     bool rescanLibrary(void (*progressCallback)(int count) = nullptr);
+
+    // Persistent Lyrics Scan Index Subsystem
+    bool hasLyricsIndex();
+    bool buildLyricsIndex(void (*progressCallback)(int count) = nullptr);
+    bool lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSync, LyricsSourcePriority &outPri);
 
     // Categorization & Navigation
     bool listFolder(const String &folderPath, std::vector<String> &subdirs, std::vector<String> &audioFiles);

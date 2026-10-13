@@ -12,6 +12,7 @@ UIPlayer::UIPlayer() :
     currentView(VIEW_CATEGORIES),
     previousView(VIEW_CATEGORIES),
     currentPage(PAGE_NOW_PLAYING),
+    manualLyricIndex(0),
     categorySelection(0),
     categoryScrollOffset(0),
     currentCategoryTitle("Q-TUNES MUSIC"),
@@ -43,6 +44,7 @@ void UIPlayer::openNowPlaying() {
     currentView = VIEW_PLAYER;
     inListMode = false;
     currentPage = PAGE_NOW_PLAYING;
+    manualLyricIndex = 0;
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
 }
@@ -455,10 +457,22 @@ bool UIPlayer::update() {
             cyclePage();
             ledManager.triggerButtonPulse(CRGB::Magenta, 1, 100);
         } else if (evt == BTN_EVENT_DN_PRESS) {
-            playNextTrack();
+            if (currentPage == PAGE_LYRICS && lyricsParser.hasLyrics() && !lyricsParser.isSynchronized()) {
+                if (manualLyricIndex + 1 < (int)lyricsParser.getLineCount()) {
+                    manualLyricIndex++;
+                }
+            } else {
+                playNextTrack();
+            }
             ledManager.triggerButtonPulse(CRGB::Cyan, 1, 100);
         } else if (evt == BTN_EVENT_UP_PRESS) {
-            playPreviousTrack();
+            if (currentPage == PAGE_LYRICS && lyricsParser.hasLyrics() && !lyricsParser.isSynchronized()) {
+                if (manualLyricIndex > 0) {
+                    manualLyricIndex--;
+                }
+            } else {
+                playPreviousTrack();
+            }
             ledManager.triggerButtonPulse(CRGB::Cyan, 1, 100);
         } else if (evt == BTN_EVENT_UP_HOLD) {
             audioPlayer.volumeUp(5);
@@ -937,7 +951,8 @@ void UIPlayer::renderPlayerPage3() {
 
     u8g2.setFont(u8g2_font_5x7_tr);
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "LYRICS  [3/3]  B:%d%%", battery.getPercentage());
+    const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]" : (lyricsParser.hasLyrics() ? "[MANUAL]" : "[NONE]");
+    snprintf(headerBuf, sizeof(headerBuf), "LYRICS %s B:%d%%", modeTag, battery.getPercentage());
     u8g2.drawStr(0, 8, headerBuf);
     u8g2.drawHLine(0, 10, 128);
 
@@ -946,18 +961,27 @@ void UIPlayer::renderPlayerPage3() {
     }
 
     if (lyricsParser.hasLyrics()) {
-        uint32_t curPos = audioPlayer.getPositionMs();
-        int curIdx = lyricsParser.getCurrentLineIndex(curPos);
+        int curIdx = 0;
+        if (lyricsParser.isSynchronized()) {
+            uint32_t curPos = audioPlayer.getPositionMs();
+            curIdx = lyricsParser.getCurrentLineIndex(curPos);
+        } else {
+            if (manualLyricIndex >= (int)lyricsParser.getLineCount()) {
+                manualLyricIndex = (int)lyricsParser.getLineCount() - 1;
+            }
+            if (manualLyricIndex < 0) manualLyricIndex = 0;
+            curIdx = manualLyricIndex;
+        }
 
         u8g2.setFont(u8g2_font_5x7_tr);
         if (curIdx > 0) {
             String prevText = lyricsParser.getLineText(curIdx - 1);
-            if (prevText.length() > 24) prevText = prevText.substring(0, 22) + "..";
+            prevText = LyricsParser::truncateUtf8CodePoints(prevText, 22);
             u8g2.drawStr(2, 22, prevText.c_str());
         }
 
         String curText = lyricsParser.getLineText(curIdx);
-        if (curText.length() > 20) curText = curText.substring(0, 18) + "..";
+        curText = LyricsParser::truncateUtf8CodePoints(curText, 20);
         u8g2.drawBox(0, 26, 128, 14);
         u8g2.setDrawColor(0);
         u8g2.setFont(u8g2_font_6x10_tr);
@@ -967,21 +991,26 @@ void UIPlayer::renderPlayerPage3() {
         u8g2.setFont(u8g2_font_5x7_tr);
         if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
             String nextText = lyricsParser.getLineText(curIdx + 1);
-            if (nextText.length() > 24) nextText = nextText.substring(0, 22) + "..";
+            nextText = LyricsParser::truncateUtf8CodePoints(nextText, 22);
             u8g2.drawStr(2, 51, nextText.c_str());
         }
 
-        uint32_t posSec = curPos / 1000;
-        char tsBuf[16];
-        snprintf(tsBuf, sizeof(tsBuf), "[%02u:%02u]", posSec / 60, posSec % 60);
+        char tsBuf[24];
+        if (lyricsParser.isSynchronized()) {
+            uint32_t curPos = audioPlayer.getPositionMs();
+            uint32_t posSec = curPos / 1000;
+            snprintf(tsBuf, sizeof(tsBuf), "[%02u:%02u] Sync Auto", posSec / 60, posSec % 60);
+        } else {
+            snprintf(tsBuf, sizeof(tsBuf), "Line %d/%d (UP/DN)", curIdx + 1, (int)lyricsParser.getLineCount());
+        }
         u8g2.drawStr(2, 62, tsBuf);
     } else {
         u8g2.setFont(u8g2_font_6x10_tr);
-        u8g2.drawStr(10, 26, "No .lrc File Found");
+        u8g2.drawStr(10, 26, "No Lyrics Available");
         u8g2.setFont(u8g2_font_5x7_tr);
-        u8g2.drawStr(6, 40, "Place [song].lrc next to");
-        u8g2.drawStr(6, 50, "audio file on SD card.");
-        u8g2.drawStr(6, 62, "HOLD OK: Page 1");
+        u8g2.drawStr(6, 40, "Place [song].lrc or .txt");
+        u8g2.drawStr(6, 50, "next to audio file on SD");
+        u8g2.drawStr(6, 62, "HOLD OK: Return");
     }
 
     display.sendBuffer();

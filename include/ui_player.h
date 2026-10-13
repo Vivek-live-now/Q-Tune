@@ -29,7 +29,7 @@ enum UIPlayerView {
 enum PlayerPage {
     PAGE_NOW_PLAYING = 0,  // Page 1: Progress, spectrum, elapsed/total, format / album art
     PAGE_TRACK_INFO = 1,   // Page 2: Audio engine & track technical details
-    PAGE_LYRICS = 2        // Page 3: Synchronized LRC lyrics
+    PAGE_LYRICS = 2        // Page 3: Synchronized LRC lyrics / Manual untimed lyrics
 };
 
 class UIPlayer {
@@ -62,6 +62,9 @@ private:
     UIPlayerView currentView;
     UIPlayerView previousView;
     PlayerPage currentPage;
+
+    // Manual Untimed Lyrics Page Index
+    int manualLyricIndex;
 
     // Category navigation
     int categorySelection;
