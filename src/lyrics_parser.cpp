@@ -420,6 +420,9 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
 
     file.seek(tagOffset);
 
+    bool foundUslt = false;
+    String candidateUsltText = "";
+
     while (file.position() + 10 < tagEnd) {
         uint8_t fHdr[10];
         if (file.read(fHdr, 10) != 10) break;
@@ -441,7 +444,7 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
         if (fSize == 0 || file.position() + fSize > tagEnd) break;
         uint32_t frameStart = file.position();
 
-        // 1. SYLT (Synchronised lyrics/text)
+        // 1. SYLT (Synchronised lyrics/text - takes priority over USLT)
         if (strcmp(fId, "SYLT") == 0 && fSize > 6 && fSize <= 16384) {
             uint8_t *syltBuf = (uint8_t*)malloc(fSize);
             if (syltBuf) {
@@ -481,11 +484,8 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
                 uint8_t *txtBuf = (uint8_t*)malloc(textLen);
                 if (txtBuf) {
                     if (file.read(txtBuf, textLen) == textLen) {
-                        outText = decodeID3String(txtBuf, textLen, encoding);
-                        free(txtBuf);
-                        outSync = LYRICS_SYNC_UNTIMED;
-                        outPriority = LYRICS_SRC_EMB_UNSYNC;
-                        return true;
+                        candidateUsltText = decodeID3String(txtBuf, textLen, encoding);
+                        foundUslt = (candidateUsltText.length() > 0);
                     }
                     free(txtBuf);
                 }
@@ -494,6 +494,14 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
 
         file.seek(frameStart + fSize);
     }
+
+    if (foundUslt) {
+        outText = candidateUsltText;
+        outSync = LYRICS_SYNC_UNTIMED;
+        outPriority = LYRICS_SRC_EMB_UNSYNC;
+        return true;
+    }
+
     return false;
 }
 
@@ -641,7 +649,7 @@ static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, S
         if (strcmp(aType, "moov") == 0 || strcmp(aType, "udta") == 0 || strcmp(aType, "meta") == 0 || strcmp(aType, "ilst") == 0 || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0) {
             uint32_t subStart = curPos + headerLen + (strcmp(aType, "meta") == 0 ? 4 : 0); // Skip version/flags for meta
             uint32_t subEnd = curPos + aSize;
-            const bool childInsideLyrics = insideLyricsItem || strcmp(aType, "\\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0;
+            const bool childInsideLyrics = insideLyricsItem || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0;
             if (scanM4AAtoms(file, subStart, subEnd, outText, outSync, outPriority, childInsideLyrics)) {
                 return true;
             }

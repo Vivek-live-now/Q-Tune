@@ -1260,9 +1260,11 @@ def test_lyrics_parsers_and_fixture_verification():
     assert "decodeID3String" in lrc_src, "decodeID3String missing in lyrics_parser.cpp"
     assert "16384" in lrc_src, "ID3 frame size safety limit missing"
 
-    # 2. M4A Parent Atom Traversal
+    # 2. M4A Parent Atom Traversal & Precedence Logic
     assert "scanM4AAtoms" in lrc_src, "scanM4AAtoms missing in lyrics_parser.cpp"
     assert "©lyr" in lrc_src, "©lyr atom missing in lyrics_parser.cpp"
+    assert r'childInsideLyrics = insideLyricsItem || strcmp(aType, "\xA9" "lyr") == 0' in lrc_src, "Single-backslash \xA9lyr check missing in childInsideLyrics"
+    assert "candidateUsltText" in lrc_src, "candidateUsltText deferral logic missing for ID3 SYLT precedence"
 
     # 3. Index Integrity & Change Detection
     assert "currentAudioSz == entry.audioFileSize" in sd_src, "audioFileSize change detection missing"
