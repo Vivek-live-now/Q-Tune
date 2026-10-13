@@ -1,6 +1,5 @@
 #include "lyrics_parser.h"
 #include "sd_manager.h"
-#include "lyrics_id3_codec.h"
 #include <SD.h>
 
 extern SemaphoreHandle_t spiBusMutex;
@@ -72,8 +71,68 @@ String LyricsParser::truncateUtf8CodePoints(const String &str, size_t maxCodePoi
 
 // Helper: Decode ID3 strings in ISO-8859-1, UTF-16 with BOM, UTF-16BE, UTF-8
 String LyricsParser::decodeID3String(const uint8_t *data, size_t len, uint8_t encoding) {
-    const std::string decoded = LyricsID3Codec::decodeString(data, len, encoding);
-    return String(decoded.c_str());
+    if (!data || len == 0) return "";
+
+    if (encoding == 0) { // ISO-8859-1 (Latin-1)
+        String out = "";
+        out.reserve(len);
+        for (size_t i = 0; i < len; i++) {
+            uint8_t c = data[i];
+            if (c == 0) break;
+            if (c < 128) {
+                out += (char)c;
+            } else { // Convert Latin-1 byte to UTF-8
+                out += (char)(0xC0 | (c >> 6));
+                out += (char)(0x80 | (c & 0x3F));
+            }
+        }
+        return out;
+    } else if (encoding == 3) { // UTF-8
+        String out = "";
+        out.reserve(len);
+        for (size_t i = 0; i < len; i++) {
+            if (data[i] == 0) break;
+            out += (char)data[i];
+        }
+        return out;
+    } else if (encoding == 1 || encoding == 2) { // UTF-16 (1: with BOM, 2: UTF-16BE without BOM)
+        if (len < 2) return "";
+        bool bigEndian = (encoding == 2);
+        size_t startIdx = 0;
+
+        if (encoding == 1) { // Check BOM
+            if (data[0] == 0xFE && data[1] == 0xFF) {
+                bigEndian = true;
+                startIdx = 2;
+            } else if (data[0] == 0xFF && data[1] == 0xFE) {
+                bigEndian = false;
+                startIdx = 2;
+            }
+        }
+
+        String out = "";
+        out.reserve(len);
+
+        for (size_t i = startIdx; i + 1 < len; i += 2) {
+            uint16_t ch = bigEndian ? ((uint16_t)data[i] << 8 | data[i + 1])
+                                    : ((uint16_t)data[i + 1] << 8 | data[i]);
+            if (ch == 0) break;
+
+            if (ch < 0x80) {
+                out += (char)ch;
+            } else if (ch < 0x800) {
+                out += (char)(0xC0 | (ch >> 6));
+                out += (char)(0x80 | (ch & 0x3F));
+            } else {
+                out += (char)(0xE0 | (ch >> 12));
+                out += (char)(0x80 | ((ch >> 6) & 0x3F));
+                out += (char)(0x80 | (ch & 0x3F));
+            }
+        }
+        return out;
+    }
+
+    return "";
 }
 
 bool LyricsParser::parseLRCLine(const String &line, uint32_t &timestampMs, String &text) {
@@ -205,17 +264,14 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         return false;
     }
 
-    if (loadedAudioPath == audioPath) {
-        return hasLyrics(); // Cached (whether track has lyrics or is known to have none)
+    if (loadedAudioPath == audioPath && hasLyrics()) {
+        return true; // Cached
     }
 
     clear();
     loadedAudioPath = audioPath;
 
-    if (!sdManager.isMounted()) {
-        loadedAudioPath = "";
-        return false;
-    }
+    if (!sdManager.isMounted()) return false;
 
     // 0. Query persistent index first to optimize loading path
     LyricsSyncType idxSync = LYRICS_SYNC_NONE;
@@ -339,10 +395,7 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         }
     }
 
-    lines.clear();
-    syncType = LYRICS_SYNC_NONE;
-    sourcePriority = LYRICS_SRC_NONE;
-    loadedAudioPath = audioPath;
+    clear();
     return false;
 }
 
@@ -403,20 +456,74 @@ bool LyricsParser::extractEmbeddedLyrics(File &file, const String &audioPath, St
 
 // ID3 SYLT Binary Parser
 bool LyricsParser::parseID3SYLT(const uint8_t *data, size_t size, std::vector<LyricLine> &outSyltLines) {
-    std::vector<LyricsID3Codec::Line> parsed;
-    if (!LyricsID3Codec::parseSYLT(data, size, parsed)) {
-        outSyltLines.clear();
-        return false;
+    if (!data || size < 6) return false;
+
+    uint8_t encoding = data[0];
+    // uint8_t lang[3] = {data[1], data[2], data[3]};
+    uint8_t timeFormat = data[4]; // 1 = MPEG frames, 2 = milliseconds
+    // uint8_t contentType = data[5];
+
+    size_t idx = 6;
+    // Skip content descriptor until NULL terminator according to encoding
+    if (encoding == 1 || encoding == 2) {
+        while (idx + 1 < size) {
+            if (data[idx] == 0 && data[idx + 1] == 0) { idx += 2; break; }
+            idx += 2;
+        }
+    } else {
+        while (idx < size) {
+            if (data[idx] == 0) { idx++; break; }
+            idx++;
+        }
     }
 
     outSyltLines.clear();
-    outSyltLines.reserve(parsed.size());
-    for (const auto &entry : parsed) {
-        LyricLine line;
-        line.timestampMs = entry.timestampMs;
-        line.text = String(entry.text.c_str());
-        outSyltLines.push_back(line);
+
+    // Parse synchronized text entries
+    while (idx < size && outSyltLines.size() < MAX_LYRIC_LINES) {
+        size_t strStart = idx;
+        // Find text string terminator
+        if (encoding == 1 || encoding == 2) {
+            while (idx + 1 < size && !(data[idx] == 0 && data[idx + 1] == 0)) {
+                idx += 2;
+            }
+            if (idx + 1 >= size) break;
+            size_t strLen = idx - strStart;
+            String lyricText = decodeID3String(data + strStart, strLen, encoding);
+            idx += 2; // skip double NULL
+
+            if (idx + 4 > size) break;
+            uint32_t ts = ((uint32_t)data[idx] << 24) | ((uint32_t)data[idx + 1] << 16) | ((uint32_t)data[idx + 2] << 8) | (uint32_t)data[idx + 3];
+            idx += 4;
+
+            if (timeFormat == 1) ts = (uint32_t)((ts * 1000ULL) / 38); // Approximate MPEG frame to ms
+
+            LyricLine line;
+            line.timestampMs = ts;
+            line.text = truncateUtf8CodePoints(lyricText, MAX_LINE_CODE_POINTS);
+            outSyltLines.push_back(line);
+        } else {
+            while (idx < size && data[idx] != 0) {
+                idx++;
+            }
+            if (idx >= size) break;
+            size_t strLen = idx - strStart;
+            String lyricText = decodeID3String(data + strStart, strLen, encoding);
+            idx++; // skip single NULL
+
+            if (idx + 4 > size) break;
+            uint32_t ts = ((uint32_t)data[idx] << 24) | ((uint32_t)data[idx + 1] << 16) | ((uint32_t)data[idx + 2] << 8) | (uint32_t)data[idx + 3];
+            idx += 4;
+
+            if (timeFormat == 1) ts = (uint32_t)((ts * 1000ULL) / 38); // Approximate MPEG frame to ms
+
+            LyricLine line;
+            line.timestampMs = ts;
+            line.text = truncateUtf8CodePoints(lyricText, MAX_LINE_CODE_POINTS);
+            outSyltLines.push_back(line);
+        }
     }
+
     return !outSyltLines.empty();
 }
 
@@ -425,9 +532,6 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
     if (tagEnd > file.size()) tagEnd = file.size();
 
     file.seek(tagOffset);
-
-    bool foundUslt = false;
-    String candidateUsltText = "";
 
     while (file.position() + 10 < tagEnd) {
         uint8_t fHdr[10];
@@ -450,7 +554,7 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
         if (fSize == 0 || file.position() + fSize > tagEnd) break;
         uint32_t frameStart = file.position();
 
-        // 1. SYLT (Synchronised lyrics/text - takes priority over USLT)
+        // 1. SYLT (Synchronised lyrics/text)
         if (strcmp(fId, "SYLT") == 0 && fSize > 6 && fSize <= 16384) {
             uint8_t *syltBuf = (uint8_t*)malloc(fSize);
             if (syltBuf) {
@@ -490,8 +594,11 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
                 uint8_t *txtBuf = (uint8_t*)malloc(textLen);
                 if (txtBuf) {
                     if (file.read(txtBuf, textLen) == textLen) {
-                        candidateUsltText = decodeID3String(txtBuf, textLen, encoding);
-                        foundUslt = (candidateUsltText.length() > 0);
+                        outText = decodeID3String(txtBuf, textLen, encoding);
+                        free(txtBuf);
+                        outSync = LYRICS_SYNC_UNTIMED;
+                        outPriority = LYRICS_SRC_EMB_UNSYNC;
+                        return true;
                     }
                     free(txtBuf);
                 }
@@ -500,14 +607,6 @@ bool LyricsParser::extractID3v2Lyrics(File &file, uint32_t tagOffset, uint32_t t
 
         file.seek(frameStart + fSize);
     }
-
-    if (foundUslt) {
-        outText = candidateUsltText;
-        outSync = LYRICS_SYNC_UNTIMED;
-        outPriority = LYRICS_SRC_EMB_UNSYNC;
-        return true;
-    }
-
     return false;
 }
 
@@ -623,7 +722,7 @@ bool LyricsParser::extractFLACLyrics(File &file, String &outText, LyricsSyncType
     return false;
 }
 
-static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority, bool insideLyricsItem = false) {
+static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, String &outText, LyricsSyncType &outSync, LyricsSourcePriority &outPriority) {
     if (startOffset >= endOffset || !file) return false;
 
     file.seek(startOffset);
@@ -655,11 +754,10 @@ static bool scanM4AAtoms(File &file, uint32_t startOffset, uint32_t endOffset, S
         if (strcmp(aType, "moov") == 0 || strcmp(aType, "udta") == 0 || strcmp(aType, "meta") == 0 || strcmp(aType, "ilst") == 0 || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0) {
             uint32_t subStart = curPos + headerLen + (strcmp(aType, "meta") == 0 ? 4 : 0); // Skip version/flags for meta
             uint32_t subEnd = curPos + aSize;
-            const bool childInsideLyrics = insideLyricsItem || strcmp(aType, "\xA9" "lyr") == 0 || strcmp(aType, "©lyr") == 0;
-            if (scanM4AAtoms(file, subStart, subEnd, outText, outSync, outPriority, childInsideLyrics)) {
+            if (scanM4AAtoms(file, subStart, subEnd, outText, outSync, outPriority)) {
                 return true;
             }
-        } else if (strcmp(aType, "data") == 0 && insideLyricsItem) {
+        } else if (strcmp(aType, "data") == 0) {
             file.seek(curPos + 16); // Skip header + flags
             size_t dataLen = (aSize > 16) ? (aSize - 16) : 0;
             if (dataLen > 0 && dataLen < MAX_LYRIC_FILE_SIZE && curPos + 16 + dataLen <= endOffset) {

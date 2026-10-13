@@ -44,7 +44,6 @@ public:
 
     // Queries
     bool hasLyrics() const;
-    const String& getLoadedAudioPath() const { return loadedAudioPath; }
     LyricsSyncType getSyncType() const;
     LyricsSourcePriority getSourcePriority() const;
     bool isSynchronized() const;

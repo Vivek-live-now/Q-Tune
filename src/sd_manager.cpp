@@ -658,19 +658,9 @@ bool SDManager::lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSy
                     String lrcPath = basePath + ".lrc";
                     String txtPath = basePath + ".txt";
 
-                    auto getFileSize = [](const String &path) -> uint32_t {
-                        if (!SD.exists(path)) return 0;
-                        File current = SD.open(path, FILE_READ);
-                        if (!current) return 0;
-                        uint32_t size = current.size();
-                        current.close();
-                        return size;
-                    };
-
-                    // Close each temporary handle before opening the next file.
-                    uint32_t currentAudioSz = getFileSize(audioPath);
-                    uint32_t currentLrcSz = getFileSize(lrcPath);
-                    uint32_t currentTxtSz = getFileSize(txtPath);
+                    uint32_t currentAudioSz = SD.exists(audioPath) ? SD.open(audioPath, FILE_READ).size() : 0;
+                    uint32_t currentLrcSz = SD.exists(lrcPath) ? SD.open(lrcPath, FILE_READ).size() : 0;
+                    uint32_t currentTxtSz = SD.exists(txtPath) ? SD.open(txtPath, FILE_READ).size() : 0;
 
                     if (currentAudioSz == entry.audioFileSize && currentLrcSz == entry.lrcFileSize && currentTxtSz == entry.txtFileSize) {
                         outSync = (LyricsSyncType)entry.syncType;
