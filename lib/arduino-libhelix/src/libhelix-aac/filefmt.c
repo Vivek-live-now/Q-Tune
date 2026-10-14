@@ -123,16 +123,24 @@ int UnpackADTSHeader(AACDecInfo *aacDecInfo, unsigned char **buf, int *bitOffset
 
 	/* update codec info */
 	psi->sampRateIdx = fhADTS->sampRateIdx;
-	if (!psi->useImpChanMap)
+	if (fhADTS->channelConfig != 0) {
+		psi->useImpChanMap = 0;
 		psi->nChans = channelMapTab[fhADTS->channelConfig];
+	} else if (!psi->useImpChanMap) {
+		psi->nChans = channelMapTab[0];	/* -1, implicit mapping required */
+	}
 
 	/* syntactic element fields will be read from bitstream for each element */
 	aacDecInfo->prevBlockID = AAC_ID_INVALID;
 	aacDecInfo->currBlockID = AAC_ID_INVALID;
 	aacDecInfo->currInstTag = -1;
 
-	/* fill in user-accessible data (TODO - calc bitrate, handle tricky channel config cases) */
-	aacDecInfo->bitRate = 0;
+	/* fill in user-accessible data */
+	if (fhADTS->numRawDataBlocks > 0 && sampRateTab[psi->sampRateIdx] > 0) {
+		aacDecInfo->bitRate = (int)(((long long)fhADTS->frameLength * 8 * sampRateTab[psi->sampRateIdx]) / (1024 * fhADTS->numRawDataBlocks));
+	} else {
+		aacDecInfo->bitRate = 0;
+	}
 	aacDecInfo->nChans = psi->nChans;
 	aacDecInfo->sampRate = sampRateTab[psi->sampRateIdx];
 	aacDecInfo->profile = fhADTS->profile;
@@ -364,7 +372,7 @@ int UnpackADIFHeader(AACDecInfo *aacDecInfo, unsigned char **buf, int *bitOffset
 	aacDecInfo->currInstTag = -1;
 
 	/* fill in user-accessible data */
-	aacDecInfo->bitRate = 0;
+	aacDecInfo->bitRate = fhADIF->bitRate;
 	aacDecInfo->nChans = psi->nChans;
 	aacDecInfo->sampRate = sampRateTab[psi->sampRateIdx];
 	aacDecInfo->profile = pce[0].profile;
