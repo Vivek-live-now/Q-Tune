@@ -306,7 +306,7 @@ static String htmlEscape(const String &input) {
             case '<':  escaped += "&lt;";   break;
             case '>':  escaped += "&gt;";   break;
             case '"':  escaped += "&quot;"; break;
-            case ''': escaped += "&#39;";  break;
+            case '\'': escaped += "&#39;";  break;
             default:   escaped += c;        break;
         }
     }
