@@ -235,11 +235,9 @@ void Diagnostics::testBattery() {
         if (buttonManager.update() == BTN_EVENT_SEL_PRESS) break;
         unsigned long lastBatPoll = millis();
         while (millis() - lastBatPoll < 100) {
-            if (buttonManager.update() == BTN_EVENT_SEL_PRESS) goto bat_exit;
+            if (buttonManager.update() == BTN_EVENT_SEL_PRESS) break;
             yield();
         }
-    }
-bat_exit:;
     }
 }
 
