@@ -296,6 +296,23 @@ void WiFiStreamer::handleSSDP() {
     }
 }
 
+static String htmlEscape(const String &input) {
+    String escaped = "";
+    escaped.reserve(input.length() + 16);
+    for (size_t i = 0; i < input.length(); i++) {
+        char c = input.charAt(i);
+        switch (c) {
+            case '&':  escaped += "&amp;";  break;
+            case '<':  escaped += "&lt;";   break;
+            case '>':  escaped += "&gt;";   break;
+            case '"':  escaped += "&quot;"; break;
+            case '\'': escaped += "&#39;";  break;
+            default:   escaped += c;        break;
+        }
+    }
+    return escaped;
+}
+
 void WiFiStreamer::setupConfigServer() {
     configServer.on("/", HTTP_GET, [this]() {
         IPAddress ip = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
@@ -309,16 +326,16 @@ void WiFiStreamer::setupConfigServer() {
                       "</style></head><body>"
                       "<div class='card'>"
                       "<h2>Q-TUNE AUDIOPHILE</h2>"
-                      "<p><b>Status:</b> <span class='badge'>" + (wifiState == WIFI_STATE_CONNECTED ? "Connected: " + savedSSID : "SoftAP Mode") + "</span></p>"
+                      "<p><b>Status:</b> <span class='badge'>" + (wifiState == WIFI_STATE_CONNECTED ? "Connected: " + htmlEscape(savedSSID) : "SoftAP Mode") + "</span></p>"
                       "<p><b>IP Address:</b> " + ip.toString() + "</p>"
                       "<p><b>Output Mode:</b> <span class='badge' style='background:#00e5ff;color:#000;'>" + String(audioPlayer.getOutputModeName()) + "</span></p>"
-                      "<p><b>Now Streaming:</b><br><i>" + currentTrackTitle + "</i><br><small>" + currentTrackArtist + "</small></p>"
+                      "<p><b>Now Streaming:</b><br><i>" + htmlEscape(currentTrackTitle) + "</i><br><small>" + htmlEscape(currentTrackArtist) + "</small></p>"
                       "<form method='POST' action='/toggle_output'><button type='submit'>Switch Output (SPKR/KA11)</button></form>"
                       "</div>"
                       "<div class='card'>"
                       "<h3>Wi-Fi Setup</h3>"
                       "<form method='POST' action='/save'>"
-                      "<input type='text' name='ssid' placeholder='Wi-Fi SSID' value='" + savedSSID + "' required><br>"
+                      "<input type='text' name='ssid' placeholder='Wi-Fi SSID' value='" + htmlEscape(savedSSID) + "' required><br>"
                       "<input type='password' name='pass' placeholder='Password'><br>"
                       "<button type='submit'>Save & Connect</button>"
                       "</form></div></body></html>";
