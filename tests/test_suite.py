@@ -928,6 +928,11 @@ def test_wifi_streaming_and_dlna_media_renderer():
     # 5. Verify Main Menu Integration
     assert "MODE_WIFI_STREAMER" in main_src, "main.cpp must include MODE_WIFI_STREAMER"
     assert "Wi-Fi Audio Stream" in main_src, "Main menu must include Wi-Fi Audio Stream label"
+
+    # 6. Verify HTML entity escaping for XSS prevention
+    assert "htmlEscape(savedSSID)" in wcpp_src, "WiFiStreamer must escape savedSSID against XSS"
+    assert "htmlEscape(currentTrackTitle)" in wcpp_src, "WiFiStreamer must escape currentTrackTitle against XSS"
+    assert "htmlEscape(currentTrackArtist)" in wcpp_src, "WiFiStreamer must escape currentTrackArtist against XSS"
     assert "wifiStreamer.updateUI()" in main_src, "main.cpp loop must update WiFiStreamer UI"
 
     print("  [PASS] Wi-Fi Audio Streaming, DLNA/UPnP MediaRenderer, 384KB PSRAM buffer, 4MB partition table, and dual output routing verified.")
