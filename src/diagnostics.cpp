@@ -79,8 +79,12 @@ void Diagnostics::testOLED() {
     u8g2.drawStr(10, 20, "OLED Display OK");
     u8g2.drawStr(10, 40, "Press SEL to exit");
     display.sendBuffer();
+    unsigned long lastPoll = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastPoll < 10) {
+            yield();
+        }
+        lastPoll = millis();
     }
 }
 
@@ -92,8 +96,12 @@ void Diagnostics::testSDDetect() {
     u8g2.drawStr(0, 35, mounted ? "STATUS: MOUNTED" : "STATUS: NOT FOUND");
     u8g2.drawStr(0, 55, "Press SEL to exit");
     display.sendBuffer();
+    unsigned long lastPoll = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastPoll < 10) {
+            yield();
+        }
+        lastPoll = millis();
     }
 }
 
@@ -115,8 +123,12 @@ void Diagnostics::testSDFilesystem() {
     }
     u8g2.drawStr(0, 60, "Press SEL to exit");
     display.sendBuffer();
+    unsigned long lastPoll = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastPoll < 10) {
+            yield();
+        }
+        lastPoll = millis();
     }
 }
 
@@ -137,8 +149,12 @@ void Diagnostics::testWAVDiscovery() {
     }
     u8g2.drawStr(0, 60, "Press SEL to exit");
     display.sendBuffer();
+    unsigned long lastPoll = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastPoll < 10) {
+            yield();
+        }
+        lastPoll = millis();
     }
 }
 
@@ -166,7 +182,8 @@ void Diagnostics::testButtons() {
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             u8g2.drawStr(0, 40, "Last: CANCEL Pressed");
             display.sendBuffer();
-            delay(300);
+            unsigned long t0 = millis();
+            while (millis() - t0 < 300) { yield(); }
             break;
         }
 
@@ -175,7 +192,8 @@ void Diagnostics::testButtons() {
         } else {
             selPressStart = 0;
         }
-        delay(10);
+        unsigned long tPoll = millis();
+        while (millis() - tPoll < 10) { yield(); }
     }
 }
 
@@ -190,8 +208,12 @@ void Diagnostics::testPinMap() {
     u8g2.drawStr(0, 51, "UART0: 43/44 (Freed)");
     u8g2.drawStr(0, 62, "SEL: Exit");
     display.sendBuffer();
+    unsigned long lastPoll = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastPoll < 10) {
+            yield();
+        }
+        lastPoll = millis();
     }
 }
 
@@ -211,7 +233,11 @@ void Diagnostics::testBattery() {
         display.sendBuffer();
 
         if (buttonManager.update() == BTN_EVENT_SEL_PRESS) break;
-        delay(100);
+        unsigned long lastBatPoll = millis();
+        while (millis() - lastBatPoll < 100) {
+            if (buttonManager.update() == BTN_EVENT_SEL_PRESS) break;
+            yield();
+        }
     }
 }
 
@@ -233,7 +259,14 @@ void Diagnostics::testRGBLED() {
                 ledManager.off();
                 return;
             }
-            delay(100);
+            unsigned long tLed = millis();
+            while (millis() - tLed < 100) {
+                if (buttonManager.update() == BTN_EVENT_SEL_PRESS) {
+                    ledManager.off();
+                    return;
+                }
+                yield();
+            }
         }
     }
 }
@@ -250,8 +283,12 @@ void Diagnostics::testI2SAudio() {
 
     u8g2.drawStr(0, 42, "Tone Finished!");
     display.sendBuffer();
+    unsigned long lastPoll = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastPoll < 10) {
+            yield();
+        }
+        lastPoll = millis();
     }
 }
 
@@ -262,7 +299,8 @@ void Diagnostics::testINMP441Mic() {
     u8g2.drawStr(0, 30, "DIN:15  SCK:17  WS:18");
     u8g2.drawStr(0, 50, "Tie L/R to GND or 3V3");
     display.sendBuffer();
-    delay(400);
+    unsigned long tMicStart = millis();
+    while (millis() - tMicStart < 400) { yield(); }
 
     audioPlayer.stopAudioTask();
     audioPlayer.stop();
@@ -279,7 +317,8 @@ void Diagnostics::testINMP441Mic() {
         if (evt == BTN_EVENT_DN_PRESS) {
             p = (VisualizerPreset)((p + 1) % PRESET_COUNT);
         }
-        delay(15);
+        unsigned long tMicPoll = millis();
+        while (millis() - tMicPoll < 15) { yield(); }
     }
 
     spectrumAnalyzer.stop();
@@ -328,7 +367,8 @@ void Diagnostics::testFiiOKA11USB() {
         } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
             inTest = false;
         }
-        delay(20);
+        unsigned long tUsbPoll = millis();
+        while (millis() - tUsbPoll < 20) { yield(); }
     }
 }
 
@@ -420,7 +460,8 @@ void Diagnostics::testVocalReactiveCheck() {
                 useMicrophone = true;
             }
         }
-        delay(25);
+        unsigned long tVocPoll = millis();
+        while (millis() - tVocPoll < 25) { yield(); }
     }
 
     if (useMicrophone) {
