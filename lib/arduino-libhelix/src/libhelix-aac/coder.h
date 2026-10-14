@@ -129,6 +129,12 @@
 #define DecodeSpectrumLong                              STATNAME(DecodeSpectrumLong)
 #define DecodeSpectrumShort                             STATNAME(DecodeSpectrumShort)
 #define DecodeICSInfo                                   STATNAME(DecodeICSInfo)
+#define DecodeSectionData                               STATNAME(DecodeSectionData)
+#define DecodeScaleFactors                              STATNAME(DecodeScaleFactors)
+#define DecodePulseInfo                                 STATNAME(DecodePulseInfo)
+#define DecodeTNSInfo                                   STATNAME(DecodeTNSInfo)
+#define DecodeGainControlInfo                           STATNAME(DecodeGainControlInfo)
+#define DecodeOneScaleFactor                            STATNAME(DecodeOneScaleFactor)
 #define DCT4                                                    STATNAME(DCT4)
 #define R4FFT                                                   STATNAME(R4FFT)
 
@@ -325,6 +331,12 @@ void DecodeSpectrumShort(PSInfoBase *psi, BitStreamInfo *bsi, int ch);
 
 /* noiseless.c */
 int DecodeICSInfo(BitStreamInfo *bsi, ICSInfo *icsInfo, int sampRateIdx);
+void DecodeSectionData(BitStreamInfo *bsi, int winSequence, int numWinGrp, int maxSFB, unsigned char *sfbCodeBook);
+void DecodeScaleFactors(BitStreamInfo *bsi, int numWinGrp, int maxSFB, int globalGain, unsigned char *sfbCodeBook, short *scaleFactors);
+void DecodePulseInfo(BitStreamInfo *bsi, PulseInfo *pi);
+void DecodeTNSInfo(BitStreamInfo *bsi, int winSequence, TNSInfo *ti, signed char *tnsCoef);
+void DecodeGainControlInfo(BitStreamInfo *bsi, int winSequence, GainControlInfo *gi);
+int DecodeOneScaleFactor(BitStreamInfo *bsi);
 
 /* dct4.c */
 void DCT4(int tabidx, int *coef, int gb);
