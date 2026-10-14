@@ -1,3 +1,5 @@
+import tempfile
+import subprocess
 def open_utf8(p, mode='r', **kw):
     return open(p, mode, encoding='utf-8', errors='replace', **kw)
 
@@ -1373,6 +1375,21 @@ def test_fpu_math_optimizations():
 
     print("  [PASS] Hardware FPU flags (-fno-math-errno, -ffast-math), precomputed Hanning/Twiddle LUTs, and FastMath acceleration verified.")
 
+def test_led_cycle_color_native():
+    print("\n--- 27. Native LEDManager::cycleColor() Test Suite ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    test_cpp = os.path.join(base_dir, "tests", "test_led_cycle_color.cpp")
+    exe_path = os.path.join(tempfile.gettempdir(), "test_led_cycle_color")
+
+    cmd_compile = f"g++ -std=c++17 -I{os.path.join(base_dir, 'include')} {test_cpp} -o {exe_path}"
+    res_compile = subprocess.run(cmd_compile, shell=True, capture_output=True, text=True)
+    assert res_compile.returncode == 0, f"Compilation failed:\n{res_compile.stderr}"
+
+    res_run = subprocess.run(exe_path, shell=True, capture_output=True, text=True)
+    assert res_run.returncode == 0, f"Native test execution failed:\n{res_run.stderr}"
+    assert "All LEDManager::cycleColor() unit tests PASSED" in res_run.stdout
+    print("  [PASS] Native LEDManager::cycleColor() palette progression, names, mode-conditional FastLED updates, and persistence verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1403,7 +1420,8 @@ def main():
     test_vu_analog_and_spectrometer_suite()
     test_lyrics_parsers_and_fixture_verification()
     test_fpu_math_optimizations()
-    print("\nAll 26 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_led_cycle_color_native()
+    print("\nAll 27 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()
