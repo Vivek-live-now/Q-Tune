@@ -132,7 +132,7 @@
  *
  * Notes:       sectCB, sectEnd, sfbCodeBook, ordered by window groups for short blocks
  **************************************************************************************/
-/* __attribute__ ((section (".data"))) */ static void DecodeSectionData(BitStreamInfo *bsi, int winSequence, int numWinGrp, int maxSFB, unsigned char *sfbCodeBook)
+/* __attribute__ ((section (".data"))) */ void DecodeSectionData(BitStreamInfo *bsi, int winSequence, int numWinGrp, int maxSFB, unsigned char *sfbCodeBook)
 {
 	int g, cb, sfb;
 	int sectLen, sectLenBits, sectLenIncr, sectEscapeVal;
@@ -177,7 +177,7 @@
  *
  * Return:      one decoded scalefactor, including index_offset of -60
  **************************************************************************************/
-static int DecodeOneScaleFactor(BitStreamInfo *bsi)
+int DecodeOneScaleFactor(BitStreamInfo *bsi)
 {
 	int nBits, val;
 	unsigned int bitBuf;
@@ -213,7 +213,7 @@ static int DecodeOneScaleFactor(BitStreamInfo *bsi)
  *              for section with codebook 14 or 15, scaleFactors buffer has intensity
  *                stereo weight instead of regular scalefactor
  **************************************************************************************/
-/* __attribute__ ((section (".data"))) */ static void DecodeScaleFactors(BitStreamInfo *bsi, int numWinGrp, int maxSFB, int globalGain,
+/* __attribute__ ((section (".data"))) */ void DecodeScaleFactors(BitStreamInfo *bsi, int numWinGrp, int maxSFB, int globalGain,
 								  unsigned char *sfbCodeBook, short *scaleFactors)
 {
 	int g, sfbCB, nrg, npf, val, sf, is;
@@ -266,7 +266,7 @@ static int DecodeOneScaleFactor(BitStreamInfo *bsi)
  *
  * Return:      none
  **************************************************************************************/
-/* __attribute__ ((section (".data"))) */ static void DecodePulseInfo(BitStreamInfo *bsi, PulseInfo *pi)
+/* __attribute__ ((section (".data"))) */ void DecodePulseInfo(BitStreamInfo *bsi, PulseInfo *pi)
 {
 	int i;
 
@@ -295,7 +295,7 @@ static int DecodeOneScaleFactor(BitStreamInfo *bsi)
 static const signed char sgnMask[3] = {0x02,  0x04,  0x08};
 static const signed char negMask[3] = {~0x03, ~0x07, ~0x0f};
 
-static void DecodeTNSInfo(BitStreamInfo *bsi, int winSequence, TNSInfo *ti, signed char *tnsCoef)
+void DecodeTNSInfo(BitStreamInfo *bsi, int winSequence, TNSInfo *ti, signed char *tnsCoef)
 {
 	int i, w, f, coefBits, compress;
 	signed char c, s, n;
@@ -381,7 +381,7 @@ static const unsigned char gainBits[4][3] = {
  *
  * Return:      none
  **************************************************************************************/
-static void DecodeGainControlInfo(BitStreamInfo *bsi, int winSequence, GainControlInfo *gi)
+void DecodeGainControlInfo(BitStreamInfo *bsi, int winSequence, GainControlInfo *gi)
 {
 	int bd, wd, ad;
 	int locBits, locBitsZero, maxWin;

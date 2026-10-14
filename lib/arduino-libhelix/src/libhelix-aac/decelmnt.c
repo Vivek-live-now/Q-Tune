@@ -137,6 +137,111 @@ static int DecodeChannelPairElement(AACDecInfo *aacDecInfo, BitStreamInfo *bsi)
 }
 
 /**************************************************************************************
+ * Function:    DecodeCouplingChannelElement
+ *
+ * Description: decode one CCE
+ *
+ * Inputs:      BitStreamInfo struct pointing to start of CCE (14496-3, table 4.4.6)
+ *
+ * Outputs:     updated element instance tag
+ *              parsed CCE bitstream element
+ *
+ * Return:      0 if successful, -1 if error
+ **************************************************************************************/
+static int DecodeCouplingChannelElement(AACDecInfo *aacDecInfo, BitStreamInfo *bsi)
+{
+	int i, g, gp, sfb, globalGain;
+	int couplingPoint, numCoupledElements, numGainElementLists;
+	int ccTargetIsCPE, ccTargetTagSelect, ccL, ccR;
+	int ccDomain, gainElementSign, gainElementScale;
+	PSInfoBase *psi;
+	ICSInfo *icsInfo;
+	PulseInfo *pi;
+	TNSInfo *ti;
+	GainControlInfo *gi;
+
+	/* validate pointers */
+	if (!aacDecInfo || !aacDecInfo->psInfoBase)
+		return -1;
+	psi = (PSInfoBase *)(aacDecInfo->psInfoBase);
+	icsInfo = psi->icsInfo;
+
+	/* read instance tag */
+	aacDecInfo->currInstTag = GetBits(bsi, NUM_INST_TAG_BITS);
+
+	couplingPoint = GetBits(bsi, 1);
+	numCoupledElements = GetBits(bsi, 3);
+
+	numGainElementLists = 0;
+	for (i = 0; i <= numCoupledElements; i++) {
+		numGainElementLists++;
+		ccTargetIsCPE = GetBits(bsi, 1);
+		ccTargetTagSelect = GetBits(bsi, 4);
+		if (ccTargetIsCPE) {
+			ccL = GetBits(bsi, 1);
+			ccR = GetBits(bsi, 1);
+			if (ccL && ccR)
+				numGainElementLists++;
+		}
+	}
+
+	ccDomain = GetBits(bsi, 1);
+	gainElementSign = GetBits(bsi, 1);
+	gainElementScale = GetBits(bsi, 2);
+
+	/* CCE individual_channel_stream(0) */
+	globalGain = GetBits(bsi, 8);
+	if (DecodeICSInfo(bsi, icsInfo, psi->sampRateIdx) < 0)
+		return -1;
+
+	DecodeSectionData(bsi, icsInfo->winSequence, icsInfo->numWinGroup, icsInfo->maxSFB, psi->sfbCodeBook[0]);
+	DecodeScaleFactors(bsi, icsInfo->numWinGroup, icsInfo->maxSFB, globalGain, psi->sfbCodeBook[0], psi->scaleFactors[0]);
+
+	pi = &psi->pulseInfo[0];
+	pi->pulseDataPresent = GetBits(bsi, 1);
+	if (pi->pulseDataPresent)
+		DecodePulseInfo(bsi, pi);
+
+	ti = &psi->tnsInfo[0];
+	ti->tnsDataPresent = GetBits(bsi, 1);
+	if (ti->tnsDataPresent)
+		DecodeTNSInfo(bsi, icsInfo->winSequence, ti, ti->coef);
+
+	gi = &psi->gainControlInfo[0];
+	gi->gainControlDataPresent = GetBits(bsi, 1);
+	if (gi->gainControlDataPresent)
+		DecodeGainControlInfo(bsi, icsInfo->winSequence, gi);
+
+	if (icsInfo->winSequence == 2)
+		DecodeSpectrumShort(psi, bsi, 0);
+	else
+		DecodeSpectrumLong(psi, bsi, 0);
+
+	/* additional gain element lists (g = 1..numGainElementLists-1) */
+	for (g = 1; g < numGainElementLists; g++) {
+		if (ccDomain == 0) {
+			for (gp = 0; gp < icsInfo->numWinGroup; gp++) {
+				for (sfb = 0; sfb < icsInfo->maxSFB; sfb++) {
+					if (psi->sfbCodeBook[0][gp * icsInfo->maxSFB + sfb] != 0) {
+						DecodeOneScaleFactor(bsi);
+					}
+				}
+			}
+		} else {
+			for (gp = 0; gp < icsInfo->numWinGroup; gp++) {
+				for (sfb = 0; sfb < icsInfo->maxSFB; sfb++) {
+					if (psi->sfbCodeBook[0][gp * icsInfo->maxSFB + sfb] != 0) {
+						GetBits(bsi, 3);
+					}
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+/**************************************************************************************
  * Function:    DecodeLFEChannelElement
  *
  * Description: decode one LFE
@@ -397,7 +502,7 @@ int DecodeNextElement(AACDecInfo *aacDecInfo, unsigned char **buf, int *bitOffse
 		err = DecodeChannelPairElement(aacDecInfo, &bsi);
 		break;
 	case AAC_ID_CCE:
-		/* TODO - implement CCE decoding */
+		err = DecodeCouplingChannelElement(aacDecInfo, &bsi);
 		break;
 	case AAC_ID_LFE:
 		err = DecodeLFEChannelElement(aacDecInfo, &bsi);
