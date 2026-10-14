@@ -9055,7 +9055,7 @@ DRFLAC_API drflac* drflac_open_memory(const void* pData, size_t dataSize, const 
 
     pFlac->memoryStream = memoryStream;
 
-    /* This is an awful hack... */
+    /* Bind memory stream user data pointer for Ogg or standard FLAC stream */
 #ifndef DR_FLAC_NO_OGG
     if (pFlac->container == drflac_container_ogg)
     {
@@ -9086,7 +9086,7 @@ DRFLAC_API drflac* drflac_open_memory_with_metadata(const void* pData, size_t da
 
     pFlac->memoryStream = memoryStream;
 
-    /* This is an awful hack... */
+    /* Bind memory stream user data pointer for Ogg or standard FLAC stream */
 #ifndef DR_FLAC_NO_OGG
     if (pFlac->container == drflac_container_ogg)
     {
