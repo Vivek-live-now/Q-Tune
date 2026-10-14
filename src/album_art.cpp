@@ -170,6 +170,29 @@ void AlbumArtManager::thresholdDither(const uint8_t *gray, int w, int h, uint8_t
     }
 }
 
+// Helper to scan for JPEG Start-Of-Image marker (0xFF, 0xD8) in a stream window
+static bool scanForJPEGHeader(File &file, uint32_t frameStart, uint32_t frameSize, uint32_t &jpegOffset, uint32_t &jpegSize) {
+    uint32_t scanLimit = frameStart + frameSize;
+    if (scanLimit > file.size()) scanLimit = file.size();
+
+    file.seek(frameStart);
+    uint8_t prev = 0;
+    while (file.position() < scanLimit) {
+        int b = file.read();
+        if (b < 0) break;
+        if (prev == 0xFF && (uint8_t)b == 0xD8) {
+            jpegOffset = file.position() - 2;
+            if (jpegOffset < frameStart + frameSize) {
+                jpegSize = (frameStart + frameSize) - jpegOffset;
+                return true;
+            }
+            return false;
+        }
+        prev = (uint8_t)b;
+    }
+    return false;
+}
+
 bool AlbumArtManager::findMP3Art(File &file, uint32_t &offset, uint32_t &size) {
     if (!file || file.size() < 128) return false;
     file.seek(0);
@@ -188,48 +211,51 @@ bool AlbumArtManager::findMP3Art(File &file, uint32_t &offset, uint32_t &size) {
 
     uint8_t ver = hdr[3];
 
-    while (file.position() + 10 < tagEnd) {
+    // Check for ID3v2 Extended Header
+    if (hdr[5] & 0x40) {
+        if (file.position() + 4 <= tagEnd) {
+            uint8_t extHdr[4];
+            if (file.read(extHdr, 4) == 4) {
+                uint32_t extSize = ((uint32_t)(extHdr[0] & 0x7F) << 21) |
+                                   ((uint32_t)(extHdr[1] & 0x7F) << 14) |
+                                   ((uint32_t)(extHdr[2] & 0x7F) << 7)  |
+                                   (uint32_t)(extHdr[3] & 0x7F);
+                if (10 + extSize < tagEnd) {
+                    file.seek(10 + extSize);
+                }
+            }
+        }
+    }
+
+    uint8_t headerLen = (ver == 2) ? 6 : 10;
+
+    while (file.position() + headerLen < tagEnd) {
         uint8_t fHdr[10];
-        if (file.read(fHdr, 10) != 10) break;
+        if (file.read(fHdr, headerLen) != headerLen) break;
 
         char fId[5] = {0};
-        memcpy(fId, fHdr, 4);
+        memcpy(fId, fHdr, (ver == 2) ? 3 : 4);
         if (fId[0] == 0) break; // Padding reached
 
         uint32_t fSize = 0;
-        if (ver == 4) {
+        if (ver == 2) {
+            fSize = ((uint32_t)fHdr[3] << 16) | ((uint32_t)fHdr[4] << 8) | (uint32_t)fHdr[5];
+        } else if (ver == 4) {
             fSize = ((uint32_t)(fHdr[4] & 0x7F) << 21) |
                     ((uint32_t)(fHdr[5] & 0x7F) << 14) |
                     ((uint32_t)(fHdr[6] & 0x7F) << 7)  |
                     (uint32_t)(fHdr[7] & 0x7F);
-        } else {
+        } else { // ID3v2.3
             fSize = ((uint32_t)fHdr[4] << 24) | ((uint32_t)fHdr[5] << 16) | ((uint32_t)fHdr[6] << 8) | (uint32_t)fHdr[7];
         }
 
         if (fSize == 0 || file.position() + fSize > tagEnd) break;
         uint32_t frameStart = file.position();
 
-        if (strcmp(fId, "APIC") == 0) {
-            // Found Attached Picture!
-            // Skip encoding (1 byte)
-            file.read();
-            // Read MIME type
-            while (file.available() && file.position() < frameStart + fSize) {
-                if (file.read() == 0) break;
-            }
-            // Skip picture type (1 byte)
-            file.read();
-            // Skip description string
-            while (file.available() && file.position() < frameStart + fSize) {
-                if (file.read() == 0) break;
-            }
-
-            offset = file.position();
-            if (frameStart + fSize > offset) {
-                size = (frameStart + fSize) - offset;
+        if (strcmp(fId, "APIC") == 0 || strcmp(fId, "PIC") == 0) {
+            if (scanForJPEGHeader(file, frameStart, fSize, offset, size)) {
                 return true;
             }
-            return false;
         }
 
         file.seek(frameStart + fSize);
@@ -256,30 +282,9 @@ bool AlbumArtManager::findFLACArt(File &file, uint32_t &offset, uint32_t &size) 
 
         uint32_t blockStart = file.position();
         if (blockType == 6) { // METADATA_BLOCK_PICTURE
-            // Skip picture type (4 bytes)
-            file.seek(blockStart + 4);
-
-            // Read MIME length
-            uint8_t buf4[4];
-            if (file.read(buf4, 4) != 4) break;
-            uint32_t mimeLen = ((uint32_t)buf4[0] << 24) | ((uint32_t)buf4[1] << 16) | ((uint32_t)buf4[2] << 8) | (uint32_t)buf4[3];
-            file.seek(file.position() + mimeLen);
-
-            // Read description length
-            if (file.read(buf4, 4) != 4) break;
-            uint32_t descLen = ((uint32_t)buf4[0] << 24) | ((uint32_t)buf4[1] << 16) | ((uint32_t)buf4[2] << 8) | (uint32_t)buf4[3];
-            file.seek(file.position() + descLen);
-
-            // Skip width(4), height(4), depth(4), colors(4) = 16 bytes
-            file.seek(file.position() + 16);
-
-            // Read picture data length
-            if (file.read(buf4, 4) != 4) break;
-            uint32_t picLen = ((uint32_t)buf4[0] << 24) | ((uint32_t)buf4[1] << 16) | ((uint32_t)buf4[2] << 8) | (uint32_t)buf4[3];
-
-            offset = file.position();
-            size = picLen;
-            return true;
+            if (scanForJPEGHeader(file, blockStart, blockLen, offset, size)) {
+                return true;
+            }
         }
 
         file.seek(blockStart + blockLen);
@@ -321,10 +326,7 @@ bool AlbumArtManager::findM4AArt(File &file, uint32_t &offset, uint32_t &size) {
                 memcpy(subType, &subHdr[4], 4);
 
                 if (strcmp(subType, "data") == 0) {
-                    // data atom has 8 bytes header + 8 bytes type/flags = 16 bytes
-                    offset = subPos + 16;
-                    if (subSize > 16) {
-                        size = subSize - 16;
+                    if (scanForJPEGHeader(file, subPos, subSize, offset, size)) {
                         return true;
                     }
                 }
