@@ -250,8 +250,12 @@ void Diagnostics::testI2SAudio() {
 
     u8g2.drawStr(0, 42, "Tone Finished!");
     display.sendBuffer();
+    uint32_t lastCheckMs = millis();
     while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        delay(10);
+        while (millis() - lastCheckMs < 10) {
+            // Non-blocking wait using millis()
+        }
+        lastCheckMs = millis();
     }
 }
 
