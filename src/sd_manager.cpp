@@ -1,3 +1,4 @@
+#include <unordered_set>
 #include "sd_manager.h"
 #include "audio_player.h"
 
@@ -796,19 +797,18 @@ bool SDManager::listFolder(const String &folderPath, std::vector<String> &subdir
 
 std::vector<String> SDManager::listArtists() {
     std::vector<String> artists;
+    std::unordered_set<std::string> seen;
     std::vector<String> allSongs = listMusicFiles();
     for (size_t i = 0; i < allSongs.size(); i++) {
-        String path = allSongs[i];
+        const String& path = allSongs[i];
         if (path.startsWith("/music/")) {
             String rel = path.substring(7);
             int slash = rel.indexOf('/');
             if (slash > 0) {
                 String artist = rel.substring(0, slash);
-                bool found = false;
-                for (size_t j = 0; j < artists.size(); j++) {
-                    if (artists[j] == artist) { found = true; break; }
+                if (seen.insert(artist.c_str()).second) {
+                    artists.push_back(artist);
                 }
-                if (!found) artists.push_back(artist);
             }
         }
     }
