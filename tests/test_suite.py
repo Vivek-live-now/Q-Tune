@@ -1395,6 +1395,33 @@ def test_led_cycle_color_native():
     assert "All LEDManager::cycleColor() unit tests PASSED" in res_run.stdout
     print("  [PASS] Native LEDManager::cycleColor() palette progression, names, mode-conditional FastLED updates, and persistence verified.")
 
+def test_aac_filefmt_native():
+    print("\n--- 28. Native AAC File Format Header Parsing & Bitrate Calculation Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    test_cpp = os.path.join(base_dir, "tests", "test_aac_filefmt.cpp")
+    aac_dir = os.path.join(base_dir, "lib", "arduino-libhelix", "src", "libhelix-aac")
+    lib_dir = os.path.join(base_dir, "lib", "arduino-libhelix", "src")
+    exe_path = os.path.join(tempfile.gettempdir(), "test_aac_filefmt")
+
+    c_files = ["filefmt.c", "aactabs.c", "bitstream.c"]
+    o_files = []
+    for c_file in c_files:
+        src_path = os.path.join(aac_dir, c_file)
+        o_path = os.path.join(tempfile.gettempdir(), f"{c_file}.o")
+        cmd_c = f"gcc -c -I{aac_dir} -I{lib_dir} {src_path} -o {o_path}"
+        res_c = subprocess.run(cmd_c, shell=True, capture_output=True, text=True)
+        assert res_c.returncode == 0, f"Compilation of {c_file} failed:\n{res_c.stderr}"
+        o_files.append(o_path)
+
+    cmd_compile = f"g++ -std=c++17 -I{aac_dir} -I{lib_dir} {test_cpp} {' '.join(o_files)} -o {exe_path}"
+    res_compile = subprocess.run(cmd_compile, shell=True, capture_output=True, text=True)
+    assert res_compile.returncode == 0, f"Compilation failed:\n{res_compile.stderr}"
+
+    res_run = subprocess.run(exe_path, shell=True, capture_output=True, text=True)
+    assert res_run.returncode == 0, f"Native test execution failed:\n{res_run.stderr}"
+    assert "All AAC filefmt unit tests PASSED" in res_run.stdout
+    print("  [PASS] Native AAC header parsing, bitrate calculation, and implicit/explicit channel config handling verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1426,7 +1453,8 @@ def main():
     test_lyrics_parsers_and_fixture_verification()
     test_fpu_math_optimizations()
     test_led_cycle_color_native()
-    print("\nAll 27 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_aac_filefmt_native()
+    print("\nAll 28 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()
