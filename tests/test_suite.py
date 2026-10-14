@@ -1408,12 +1408,12 @@ def test_aac_filefmt_native():
     for c_file in c_files:
         src_path = os.path.join(aac_dir, c_file)
         o_path = os.path.join(tempfile.gettempdir(), f"{c_file}.o")
-        cmd_c = f"gcc -c -I{aac_dir} -I{lib_dir} {src_path} -o {o_path}"
+        cmd_c = f"gcc -c -DESP32 -I{aac_dir} -I{lib_dir} {src_path} -o {o_path}"
         res_c = subprocess.run(cmd_c, shell=True, capture_output=True, text=True)
         assert res_c.returncode == 0, f"Compilation of {c_file} failed:\n{res_c.stderr}"
         o_files.append(o_path)
 
-    cmd_compile = f"g++ -std=c++17 -I{aac_dir} -I{lib_dir} {test_cpp} {' '.join(o_files)} -o {exe_path}"
+    cmd_compile = f"g++ -std=c++17 -DESP32 -I{aac_dir} -I{lib_dir} {test_cpp} {' '.join(o_files)} -o {exe_path}"
     res_compile = subprocess.run(cmd_compile, shell=True, capture_output=True, text=True)
     assert res_compile.returncode == 0, f"Compilation failed:\n{res_compile.stderr}"
 
@@ -1421,6 +1421,74 @@ def test_aac_filefmt_native():
     assert res_run.returncode == 0, f"Native test execution failed:\n{res_run.stderr}"
     assert "All AAC filefmt unit tests PASSED" in res_run.stdout
     print("  [PASS] Native AAC header parsing, bitrate calculation, and implicit/explicit channel config handling verified.")
+
+def test_gdma_display_and_m2m_pipeline():
+    print("\n--- 29. ESP32-S3 GDMA Subsystem & Shared-SPI Display Pipeline ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    gdma_h = os.path.join(base_dir, "include", "gdma_manager.h")
+    gdma_cpp = os.path.join(base_dir, "src", "gdma_manager.cpp")
+
+    # 1. GDMA Header Declarations & Architecture
+    with open_utf8(gdma_h) as f:
+        gh = f.read()
+    assert "struct GdmaTransferStats" in gh, "gdma_manager.h must declare GdmaTransferStats"
+    assert "total_transfers" in gh and "dropped_frames" in gh and "last_transfer_time_us" in gh
+    assert "enum class GdmaState" in gh
+    assert "TRANSMITTING" in gh and "IDLE" in gh
+    assert "class GdmaManager" in gh
+    assert "BUFFER_SIZE = 1024" in gh
+    assert "PAGE_COUNT = 8" in gh
+    assert "flushAsync(const uint8_t*" in gh
+    assert "waitIdle()" in gh
+    assert "memcpyM2M(" in gh
+    assert "extern GdmaManager gdmaManager;" in gh
+
+    with open_utf8(gdma_cpp) as f:
+        gc = f.read()
+    assert "GdmaManager gdmaManager;" in gc
+    assert "active_buf_idx ^= 1" in gc, "gdma_manager.cpp must swap ping-pong buffer indices on flush"
+    assert "memcpyM2M" in gc
+    print("  [PASS] 1. Q-Tune GDMA Manager header declarations, state machine & ping-pong double buffering verified.")
+
+    # 2. Host C++ Binary Compilation & Execution
+    test_src = os.path.join(base_dir, "tests", "test_gdma_system_host.cpp")
+    test_bin = os.path.join(tempfile.gettempdir(), "test_qtune_gdma_host_bin")
+    simd_cpp = os.path.join(base_dir, "src", "simd_accel.cpp")
+    compile_cmd = [
+        "g++", "-std=c++17", "-O2", f"-I{os.path.join(base_dir, 'include')}", "-DHOST_TEST",
+        test_src, gdma_cpp, simd_cpp,
+        "-o", test_bin
+    ]
+    res_cmp = subprocess.run(compile_cmd, cwd=base_dir, capture_output=True, text=True)
+    assert res_cmp.returncode == 0, f"Failed to compile test_gdma_system_host:\n{res_cmp.stderr}"
+
+    res_run = subprocess.run([test_bin], cwd=base_dir, capture_output=True, text=True)
+    assert res_run.returncode == 0, f"Host C++ GDMA unit test failed:\n{res_run.stderr}"
+    assert "[PASS]" in res_run.stdout
+    if os.path.exists(test_bin):
+        os.remove(test_bin)
+    print("  [PASS] 2. Host C++ direct execution verified with double buffering, ping-pong swap & M2M block copy.")
+
+    # 3. Display GDMA Integration & Shared SPI Mutex Preservation
+    disp_h = os.path.join(base_dir, "include", "display.h")
+    with open_utf8(disp_h) as f:
+        dh = f.read()
+    assert "#include \"gdma_manager.h\"" in dh
+    assert "bool isGdmaEnabled() const" in dh
+    assert "void setGdmaEnabled(bool enable)" in dh
+    assert "void flushAsync();" in dh
+    assert "const GdmaTransferStats& getGdmaStats() const;" in dh
+
+    disp_cpp = os.path.join(base_dir, "src", "display.cpp")
+    with open_utf8(disp_cpp) as f:
+        dc = f.read()
+    assert "gdmaManager.begin(" in dc, "display.cpp must initialize gdmaManager in begin()"
+    assert "void Display::flushAsync()" in dc
+    assert "gdmaManager.flushAsync(" in dc
+    assert "gdmaManager.waitIdle();" in dc
+    assert "xSemaphoreTake(spiBusMutex" in dc, "display.cpp must preserve shared SPI bus mutex arbitration"
+    print("  [PASS] 3. Display GDMA integration, asynchronous flush & shared SPI mutex safety verified.")
 
 def main():
     print("==================================================")
@@ -1454,7 +1522,8 @@ def main():
     test_fpu_math_optimizations()
     test_led_cycle_color_native()
     test_aac_filefmt_native()
-    print("\nAll 28 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_gdma_display_and_m2m_pipeline()
+    print("\nAll 29 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

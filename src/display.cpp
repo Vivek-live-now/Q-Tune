@@ -1,7 +1,8 @@
 #include "display.h"
 #include "simd_accel.h"
+#include "gdma_manager.h"
 
-Display::Display() : u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RST) {}
+Display::Display() : u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RST), gdma_enabled(true) {}
 
 bool Display::begin() {
     pinMode(OLED_CS, OUTPUT);
@@ -12,10 +13,11 @@ bool Display::begin() {
     SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, OLED_CS);
     u8g2.begin();
     u8g2.setBusClock(8000000UL);
+    gdmaManager.begin(SPI_SCK, SPI_MOSI, OLED_CS, OLED_DC, OLED_RST, 8000000UL);
     clear();
     u8g2.setFont(u8g2_font_ncenB08_tr);
     u8g2.drawStr(0, 10, "Q-Tune Init...");
-    u8g2.sendBuffer();
+    sendBuffer();
     return true;
 }
 
@@ -43,15 +45,49 @@ void Display::invertBuffer() {
     }
 }
 
-void Display::sendBuffer() {
-    if (spiBusMutex != NULL) {
-        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+void Display::flushAsync() {
+    if (gdma_enabled && gdmaManager.isInitialized()) {
+        if (spiBusMutex != NULL) {
+            xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        }
+        digitalWrite(SD_CS, HIGH);
+        gdmaManager.flushAsync(u8g2.getBufferPtr());
+        gdmaManager.waitIdle();
+        digitalWrite(OLED_CS, HIGH);
+        if (spiBusMutex != NULL) {
+            xSemaphoreGive(spiBusMutex);
+        }
+    } else {
+        sendBuffer();
     }
-    digitalWrite(SD_CS, HIGH);
-    u8g2.sendBuffer();
-    digitalWrite(OLED_CS, HIGH);
-    if (spiBusMutex != NULL) {
-        xSemaphoreGive(spiBusMutex);
+}
+
+const GdmaTransferStats& Display::getGdmaStats() const {
+    return gdmaManager.getStats();
+}
+
+void Display::sendBuffer() {
+    if (gdma_enabled && gdmaManager.isInitialized()) {
+        if (spiBusMutex != NULL) {
+            xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        }
+        digitalWrite(SD_CS, HIGH);
+        gdmaManager.flushAsync(u8g2.getBufferPtr());
+        gdmaManager.waitIdle();
+        digitalWrite(OLED_CS, HIGH);
+        if (spiBusMutex != NULL) {
+            xSemaphoreGive(spiBusMutex);
+        }
+    } else {
+        if (spiBusMutex != NULL) {
+            xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        }
+        digitalWrite(SD_CS, HIGH);
+        u8g2.sendBuffer();
+        digitalWrite(OLED_CS, HIGH);
+        if (spiBusMutex != NULL) {
+            xSemaphoreGive(spiBusMutex);
+        }
     }
 }
 

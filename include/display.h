@@ -5,6 +5,7 @@
 #include <U8g2lib.h>
 #include <SPI.h>
 #include "hw_config.h"
+#include "gdma_manager.h"
 
 class Display {
 public:
@@ -15,6 +16,12 @@ public:
     void clearBufferFast();
     void invertBuffer();
     void sendBuffer();
+
+    // Hardware GDMA Asynchronous Display Refresh
+    bool isGdmaEnabled() const { return gdma_enabled; }
+    void setGdmaEnabled(bool enable) { gdma_enabled = enable; }
+    void flushAsync();
+    const GdmaTransferStats& getGdmaStats() const;
 
     // Q-Watch Signature Menu System Implementation
     void drawScrollBar(int offset, int item_count);
@@ -28,6 +35,7 @@ public:
 
 private:
     U8G2_SH1106_128X64_NONAME_F_4W_HW_SPI u8g2;
+    bool gdma_enabled;
 };
 
 extern Display display;
