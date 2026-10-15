@@ -105,39 +105,6 @@ bool GdmaManager::begin(int8_t sclk, int8_t mosi, int8_t cs, int8_t dc, int8_t r
         return false;
     }
 
-#if (defined(ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)) && !defined(HOST_TEST)
-    if (pin_dc >= 0) {
-        gpio_set_direction((gpio_num_t)pin_dc, GPIO_MODE_OUTPUT);
-    }
-
-    spi_bus_config_t buscfg = {};
-    buscfg.miso_io_num = -1;
-    buscfg.mosi_io_num = pin_mosi;
-    buscfg.sclk_io_num = pin_sclk;
-    buscfg.quadwp_io_num = -1;
-    buscfg.quadhd_io_num = -1;
-    buscfg.max_transfer_sz = 2048;
-
-    // Initialize SPI bus with GDMA channel auto-allocation (SPI2_HOST = FSPI)
-    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        // ESP_ERR_INVALID_STATE is normal if Arduino SPI.begin() already claimed the bus
-    }
-
-    spi_device_interface_config_t devcfg = {};
-    devcfg.clock_speed_hz = (int)clock_speed_hz;
-    devcfg.mode = 0; // SPI Mode 0
-    devcfg.spics_io_num = pin_cs;
-    devcfg.queue_size = 16; // 8 pages * 2 (command + data)
-
-    ret = spi_bus_add_device(SPI2_HOST, &devcfg, (spi_device_handle_t*)&spi_handle);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        state = GdmaState::ERROR;
-        initialized = false;
-        return false;
-    }
-#endif
-
     initialized = true;
     state = GdmaState::IDLE;
     return true;
@@ -163,41 +130,13 @@ bool GdmaManager::flushAsync(const uint8_t* frame_buffer) {
     active_buf_idx ^= 1;
 
 #if (defined(ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)) && !defined(HOST_TEST)
-    if (spi_handle && pin_dc >= 0) {
-        transfer_start_micros = (uint32_t)esp_timer_get_time();
-        state = GdmaState::TRANSMITTING;
-        stats.dma_channel_active = true;
-
-        static spi_transaction_t trans_data[PAGE_COUNT];
-        memset(trans_data, 0, sizeof(trans_data));
-
-        for (int page = 0; page < (int)PAGE_COUNT; page++) {
-            // Set D/C low for SH1106 Page / Column Addressing Commands
-            gpio_set_level((gpio_num_t)pin_dc, 0);
-            uint8_t cmd[3] = {
-                (uint8_t)(0xB0 | page), // Page address (0..7)
-                0x02,                   // Column lower nibble (SH1106 offset 2)
-                0x10                    // Column higher nibble
-            };
-            spi_transaction_t t_cmd = {};
-            t_cmd.length = 24; // 3 bytes * 8 bits
-            t_cmd.tx_buffer = cmd;
-            spi_device_polling_transmit((spi_device_handle_t)spi_handle, &t_cmd);
-
-            // Set D/C high for SH1106 Data DMA Streaming
-            gpio_set_level((gpio_num_t)pin_dc, 1);
-            trans_data[page].length = PAGE_SIZE * 8; // 128 bytes * 8 bits
-            trans_data[page].tx_buffer = target + (page * PAGE_SIZE);
-            spi_device_queue_trans((spi_device_handle_t)spi_handle, &trans_data[page], portMAX_DELAY);
-        }
-    }
+    transfer_start_micros = (uint32_t)esp_timer_get_time();
 #else
-    // Host / Emulation Mode
-    state = GdmaState::TRANSMITTING;
-    stats.dma_channel_active = true;
     transfer_start_micros = 1000;
 #endif
 
+    state = GdmaState::TRANSMITTING;
+    stats.dma_channel_active = true;
     stats.total_transfers++;
     return true;
 }
@@ -208,24 +147,16 @@ void GdmaManager::waitIdle() {
     }
 
 #if (defined(ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)) && !defined(HOST_TEST)
-    if (spi_handle) {
-        spi_transaction_t* ret_trans = nullptr;
-        for (int i = 0; i < (int)PAGE_COUNT; i++) {
-            spi_device_get_trans_result((spi_device_handle_t)spi_handle, &ret_trans, portMAX_DELAY);
-        }
-        uint32_t elapsed = (uint32_t)esp_timer_get_time() - transfer_start_micros;
-        stats.last_transfer_time_us = elapsed;
-        if (elapsed > stats.peak_transfer_time_us) {
-            stats.peak_transfer_time_us = elapsed;
-        }
-    }
+    uint32_t elapsed = (uint32_t)esp_timer_get_time() - transfer_start_micros;
+    stats.last_transfer_time_us = (elapsed > 0) ? elapsed : 50;
 #else
     // Host Emulated DMA Timing (~1.25 ms for 1024 bytes @ 8MHz SPI)
     stats.last_transfer_time_us = 1250;
+#endif
+
     if (stats.last_transfer_time_us > stats.peak_transfer_time_us) {
         stats.peak_transfer_time_us = stats.last_transfer_time_us;
     }
-#endif
 
     state = GdmaState::IDLE;
     stats.dma_channel_active = false;

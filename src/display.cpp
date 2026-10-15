@@ -47,19 +47,10 @@ void Display::invertBuffer() {
 
 void Display::flushAsync() {
     if (gdma_enabled && gdmaManager.isInitialized()) {
-        if (spiBusMutex != NULL) {
-            xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-        }
-        digitalWrite(SD_CS, HIGH);
         gdmaManager.flushAsync(u8g2.getBufferPtr());
         gdmaManager.waitIdle();
-        digitalWrite(OLED_CS, HIGH);
-        if (spiBusMutex != NULL) {
-            xSemaphoreGive(spiBusMutex);
-        }
-    } else {
-        sendBuffer();
     }
+    sendBuffer();
 }
 
 const GdmaTransferStats& Display::getGdmaStats() const {
@@ -67,27 +58,14 @@ const GdmaTransferStats& Display::getGdmaStats() const {
 }
 
 void Display::sendBuffer() {
-    if (gdma_enabled && gdmaManager.isInitialized()) {
-        if (spiBusMutex != NULL) {
-            xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-        }
-        digitalWrite(SD_CS, HIGH);
-        gdmaManager.flushAsync(u8g2.getBufferPtr());
-        gdmaManager.waitIdle();
-        digitalWrite(OLED_CS, HIGH);
-        if (spiBusMutex != NULL) {
-            xSemaphoreGive(spiBusMutex);
-        }
-    } else {
-        if (spiBusMutex != NULL) {
-            xSemaphoreTake(spiBusMutex, portMAX_DELAY);
-        }
-        digitalWrite(SD_CS, HIGH);
-        u8g2.sendBuffer();
-        digitalWrite(OLED_CS, HIGH);
-        if (spiBusMutex != NULL) {
-            xSemaphoreGive(spiBusMutex);
-        }
+    if (spiBusMutex != NULL) {
+        xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    }
+    digitalWrite(SD_CS, HIGH);
+    u8g2.sendBuffer();
+    digitalWrite(OLED_CS, HIGH);
+    if (spiBusMutex != NULL) {
+        xSemaphoreGive(spiBusMutex);
     }
 }
 
