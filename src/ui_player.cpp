@@ -20,7 +20,8 @@ UIPlayer::UIPlayer() :
     folderSelection(0),
     folderScrollOffset(0),
     settingsSelection(0),
-    settingsScrollOffset(0) {}
+    settingsScrollOffset(0),
+    eqBandSelection(0) {}
 
 void UIPlayer::begin() {
     if (!sdManager.isMounted() && !sdManager.isExFAT() && !sdManager.isGPT()) sdManager.begin();
@@ -278,7 +279,7 @@ bool UIPlayer::update() {
 
     } else if (currentView == VIEW_PLAYER_SETTINGS) {
         // --- Customization Settings Menu ---
-        const int SETTINGS_COUNT = 5;
+        const int SETTINGS_COUNT = 6;
         if (evt == BTN_EVENT_UP_PRESS) {
             Display::navigateMenu(settingsSelection, settingsScrollOffset, SETTINGS_COUNT, -1);
             ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
@@ -292,7 +293,11 @@ bool UIPlayer::update() {
                 case 1: playerConfig.cycleArtSource(); break;
                 case 2: playerConfig.cycleDitherMode(); break;
                 case 3: playerConfig.toggleLyricsAutoScroll(); break;
-                case 4: currentView = VIEW_CATEGORIES; break;
+                case 4:
+                    currentView = VIEW_EQ_SETTINGS;
+                    eqBandSelection = 0;
+                    break;
+                case 5: currentView = VIEW_CATEGORIES; break;
             }
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             currentView = VIEW_CATEGORIES;
@@ -302,6 +307,44 @@ bool UIPlayer::update() {
         if (evt != BTN_EVENT_NONE || (nowSettings - lastSetRender >= 250)) {
             lastSetRender = nowSettings;
             renderPlayerSettings();
+        }
+
+    } else if (currentView == VIEW_EQ_SETTINGS) {
+        // --- Audiophile 5-Band Equalizer & Crossfeed ---
+        if (evt == BTN_EVENT_UP_PRESS || evt == BTN_EVENT_UP_HOLD) {
+            if (eqBandSelection < 5) {
+                int8_t g = playerConfig.getEqBand(eqBandSelection);
+                if (g < 12) {
+                    playerConfig.setEqBand(eqBandSelection, g + 1);
+                }
+            } else {
+                playerConfig.cycleCrossfeedMode();
+            }
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+        } else if (evt == BTN_EVENT_DN_PRESS || evt == BTN_EVENT_DN_HOLD) {
+            if (eqBandSelection < 5) {
+                int8_t g = playerConfig.getEqBand(eqBandSelection);
+                if (g > -12) {
+                    playerConfig.setEqBand(eqBandSelection, g - 1);
+                }
+            } else {
+                playerConfig.cycleCrossfeedMode();
+            }
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+        } else if (evt == BTN_EVENT_SEL_PRESS) {
+            eqBandSelection = (eqBandSelection + 1) % 6;
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+        } else if (evt == BTN_EVENT_OK_HOLD) {
+            playerConfig.cycleEqPreset();
+            ledManager.triggerButtonPulse(CRGB::Magenta, 1, 100);
+        } else if (evt == BTN_EVENT_CANCEL_PRESS) {
+            currentView = VIEW_PLAYER_SETTINGS;
+        }
+        static unsigned long lastEqRender = 0;
+        unsigned long nowEq = millis();
+        if (evt != BTN_EVENT_NONE || (nowEq - lastEqRender >= 50)) {
+            lastEqRender = nowEq;
+            renderEqSettings();
         }
 
     } else if (currentView == VIEW_TRACK_LIST) {
@@ -535,12 +578,13 @@ void UIPlayer::renderPlayerSettings() {
     char batBuf[16];
     snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
 
-    const int SETTINGS_COUNT = 5;
+    const int SETTINGS_COUNT = 6;
     const char* labels[SETTINGS_COUNT] = {
         "Now Playing",
         "Art Source",
         "Dithering",
         "Lyrics Sync",
+        "Equalizer (DSP)",
         "Back to Menu"
     };
 
@@ -549,9 +593,84 @@ void UIPlayer::renderPlayerSettings() {
     vals[1] = String("[") + playerConfig.getArtSourceName() + "]";
     vals[2] = String("[") + playerConfig.getDitherName() + "]";
     vals[3] = String("[") + playerConfig.getLyricsAutoScrollName() + "]";
-    vals[4] = "[EXIT]";
+    vals[4] = String("[") + playerConfig.getEqPresetName() + "]";
+    vals[5] = "[EXIT]";
 
     display.drawStandardMenu("SETTINGS", labels, SETTINGS_COUNT, settingsSelection, settingsScrollOffset, vals, batBuf);
+    display.sendBuffer();
+}
+
+void UIPlayer::renderEqSettings() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+
+    // Top status line
+    u8g2.setFont(u8g2_font_5x7_tr);
+    char headerBuf[32];
+    snprintf(headerBuf, sizeof(headerBuf), "DSP EQ: %s", playerConfig.getEqPresetName());
+    u8g2.drawStr(0, 8, headerBuf);
+
+    char batBuf[16];
+    snprintf(batBuf, sizeof(batBuf), "B:%d%%", battery.getPercentage());
+    u8g2.drawStr(98, 8, batBuf);
+    u8g2.drawHLine(0, 10, 128);
+
+    // 5 Frequency Bars: 60Hz, 250Hz, 1kHz, 4kHz, 12kHz
+    // Gain range: -12dB .. +12dB
+    // Zero baseline at y = 29
+    u8g2.drawHLine(4, 29, 120);
+
+    const char* bandLabels[5] = { "60", "250", "1K", "4K", "12K" };
+    const int barX[5] = { 6, 31, 56, 81, 106 };
+    const int barW = 16;
+
+    for (int b = 0; b < 5; b++) {
+        int8_t gain = playerConfig.getEqBand(b);
+        int x = barX[b];
+
+        if (gain > 0) {
+            int h = gain;
+            u8g2.drawBox(x + 2, 29 - h, barW - 4, h);
+        } else if (gain < 0) {
+            int h = -gain;
+            u8g2.drawBox(x + 2, 30, barW - 4, h);
+        } else {
+            u8g2.drawHLine(x + 2, 29, barW - 4);
+        }
+
+        if (eqBandSelection == b) {
+            u8g2.drawFrame(x, 15, barW, 31);
+            u8g2.setFont(u8g2_font_4x6_tr);
+            char gStr[8];
+            snprintf(gStr, sizeof(gStr), "%+d", gain);
+            int gw = u8g2.getStrWidth(gStr);
+            u8g2.drawStr(x + (barW - gw) / 2, 14, gStr);
+        }
+
+        u8g2.setFont(u8g2_font_4x6_tr);
+        int textW = u8g2.getStrWidth(bandLabels[b]);
+        u8g2.drawStr(x + (barW - textW) / 2, 45, bandLabels[b]);
+    }
+
+    // Crossfeed status row
+    u8g2.setFont(u8g2_font_5x7_tr);
+    char xfeedBuf[32];
+    snprintf(xfeedBuf, sizeof(xfeedBuf), "X-Feed: %s", playerConfig.getCrossfeedModeName());
+
+    if (eqBandSelection == 5) {
+        u8g2.drawBox(0, 48, 128, 9);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(2, 55, xfeedBuf);
+        u8g2.drawStr(74, 55, "[UP/DN:Chg]");
+        u8g2.setDrawColor(1);
+    } else {
+        u8g2.drawStr(2, 55, xfeedBuf);
+    }
+
+    // Footer hint line
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(2, 63, "OK:Band  HOLD:Pre  CANCEL:Back");
+
     display.sendBuffer();
 }
 

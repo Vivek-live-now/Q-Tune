@@ -23,7 +23,8 @@ enum UIPlayerView {
     VIEW_TRACK_LIST,       // List of tracks (All Songs, Artist tracks, Album tracks, etc.)
     VIEW_FOLDER_BROWSER,   // Hierarchical directory browser
     VIEW_PLAYER,           // Player screens (Pages 1, 2, 3)
-    VIEW_PLAYER_SETTINGS   // Customization settings menu
+    VIEW_PLAYER_SETTINGS,  // Customization settings menu
+    VIEW_EQ_SETTINGS       // Audiophile 5-Band Equalizer & Crossfeed
 };
 
 enum PlayerPage {
@@ -82,6 +83,9 @@ private:
     int settingsSelection;
     int settingsScrollOffset;
 
+    // Equalizer navigation
+    int eqBandSelection;
+
     void refreshTrackList();
     void renderCategories();
     void renderTrackList();
@@ -93,6 +97,7 @@ private:
     void renderPlayerSplitArt();
     void renderPlayerCoverHero();
     void renderPlayerSettings();
+    void renderEqSettings();
     void showVolumeOverlay();
     void enterFolder(const String &folderPath);
     void refreshCurrentFolder();

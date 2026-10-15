@@ -49,11 +49,33 @@ public:
     void toggleLyricsAutoScroll();
     const char* getLyricsAutoScrollName() const;
 
+    // Audiophile DSP Configuration
+    bool isEqEnabled() const;
+    void setEqEnabled(bool enable);
+    void toggleEq();
+
+    uint8_t getEqPreset() const;
+    void setEqPreset(uint8_t preset);
+    void cycleEqPreset();
+    const char* getEqPresetName() const;
+
+    int8_t getEqBand(uint8_t band) const;
+    void setEqBand(uint8_t band, int8_t gain);
+
+    uint8_t getCrossfeedMode() const;
+    void setCrossfeedMode(uint8_t mode);
+    void cycleCrossfeedMode();
+    const char* getCrossfeedModeName() const;
+
 private:
     PlayerLayout layout;
     DitherMode dither;
     ArtSource artSource;
     bool lyricsAutoScroll;
+    bool eqEnabled;
+    uint8_t eqPreset;
+    int8_t eqBands[5];
+    uint8_t crossfeedMode;
     Preferences prefs;
 };
 

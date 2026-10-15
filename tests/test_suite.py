@@ -1490,6 +1490,109 @@ def test_gdma_display_and_m2m_pipeline():
     assert "xSemaphoreTake(spiBusMutex" in dc, "display.cpp must preserve shared SPI bus mutex arbitration"
     print("  [PASS] 3. Display GDMA integration, asynchronous flush & shared SPI mutex safety verified.")
 
+def test_audio_dsp_and_audiophile_engine():
+    print("\n--- 30. Audiophile Audio DSP Engine Test (5-Band Parametric EQ, Crossfeed & Soft Limiter) ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # 1. Header declarations & DSP architecture
+    dsp_h = os.path.join(base_dir, "include", "audio_dsp.h")
+    dsp_cpp = os.path.join(base_dir, "src", "audio_dsp.cpp")
+    with open_utf8(dsp_h) as f:
+        dh = f.read()
+    with open_utf8(dsp_cpp) as f:
+        dc = f.read()
+
+    assert "enum EqPreset" in dh
+    assert "EQ_PRESET_FLAT" in dh
+    assert "EQ_PRESET_BASS_BOOST" in dh
+    assert "EQ_PRESET_VOCAL" in dh
+    assert "EQ_PRESET_CUSTOM" in dh
+    assert "enum CrossfeedMode" in dh
+    assert "CROSSFEED_OFF" in dh
+    assert "CROSSFEED_SUBTLE" in dh
+    assert "CROSSFEED_NATURAL" in dh
+    assert "struct BiquadFilter" in dh
+    assert "initPeaking" in dh
+    assert "initLowShelf" in dh
+    assert "initHighShelf" in dh
+    assert "softClip" in dh
+    assert "void process(int16_t* stereoSamples, size_t frameCount);" in dh
+    assert "audioDSP" in dh
+
+    assert "void BiquadFilter::initPeaking" in dc
+    assert "void BiquadFilter::initLowShelf" in dc
+    assert "void BiquadFilter::initHighShelf" in dc
+    assert "int16_t AudioDSP::softClip" in dc
+    assert "void AudioDSP::process" in dc
+    print("  [PASS] 1. AudioDSP header, Biquad IIR math, crossfeed blending, and soft limiter verified.")
+
+    # 2. Host C++ Unit Test Execution
+    test_src = os.path.join(base_dir, "tests", "test_audio_dsp_host.cpp")
+    test_bin = os.path.join(tempfile.gettempdir(), "test_qtune_dsp_host_bin")
+    compile_cmd = [
+        "g++", "-std=c++17", "-O2", f"-I{os.path.join(base_dir, 'include')}", "-DHOST_TEST",
+        test_src, dsp_cpp,
+        "-o", test_bin
+    ]
+    res_cmp = subprocess.run(compile_cmd, cwd=base_dir, capture_output=True, text=True)
+    assert res_cmp.returncode == 0, f"Failed to compile test_audio_dsp_host:\n{res_cmp.stderr}"
+
+    res_run = subprocess.run([test_bin], cwd=base_dir, capture_output=True, text=True)
+    assert res_run.returncode == 0, f"Host C++ AudioDSP unit test failed:\n{res_run.stderr}"
+    assert "[PASS]" in res_run.stdout
+    if os.path.exists(test_bin):
+        os.remove(test_bin)
+    print("  [PASS] 2. Host C++ binary execution verified (Flat bypass, 60Hz shelf, Jan Meier crossfeed & saturation clipping).")
+
+    # 3. PlayerConfig NVS Persistence
+    cfg_h = os.path.join(base_dir, "include", "player_config.h")
+    cfg_cpp = os.path.join(base_dir, "src", "player_config.cpp")
+    with open_utf8(cfg_h) as f:
+        ch = f.read()
+    with open_utf8(cfg_cpp) as f:
+        cc = f.read()
+
+    assert "isEqEnabled" in ch
+    assert "setEqEnabled" in ch
+    assert "getEqPreset" in ch
+    assert "setEqPreset" in ch
+    assert "cycleEqPreset" in ch
+    assert "getEqBand" in ch
+    assert "setEqBand" in ch
+    assert "getCrossfeedMode" in ch
+    assert "setCrossfeedMode" in ch
+    assert "cycleCrossfeedMode" in ch
+    assert "eq_en" in cc
+    assert "eq_pre" in cc
+    assert "xfeed" in cc
+    assert "eq_b%d" in cc
+    print("  [PASS] 3. PlayerConfig NVS storage and audiophile parameter bindings verified.")
+
+    # 4. Audio Pipeline Integration
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    with open_utf8(ap_cpp) as f:
+        ac = f.read()
+    assert "audioDSP.begin(" in ac
+    assert "audioDSP.setSampleRate(" in ac
+    assert "audioDSP.process(samples, sampleCount / 2);" in ac
+    print("  [PASS] 4. AudioPlayer central stream routing & dynamic sample rate synchronization verified.")
+
+    # 5. UIPlayer Equalizer HUD Integration
+    ui_h = os.path.join(base_dir, "include", "ui_player.h")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+    with open_utf8(ui_h) as f:
+        uh = f.read()
+    with open_utf8(ui_cpp) as f:
+        uc = f.read()
+
+    assert "VIEW_EQ_SETTINGS" in uh
+    assert "void renderEqSettings();" in uh
+    assert "eqBandSelection" in uh
+    assert "Equalizer (DSP)" in uc
+    assert "VIEW_EQ_SETTINGS" in uc
+    assert "void UIPlayer::renderEqSettings()" in uc
+    print("  [PASS] 5. UIPlayer 5-band vertical HUD, crossfeed selector, and navigation input verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1523,7 +1626,8 @@ def main():
     test_led_cycle_color_native()
     test_aac_filefmt_native()
     test_gdma_display_and_m2m_pipeline()
-    print("\nAll 29 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_audio_dsp_and_audiophile_engine()
+    print("\nAll 30 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

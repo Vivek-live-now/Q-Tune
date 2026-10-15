@@ -1,10 +1,16 @@
 #include "player_config.h"
+#include "audio_dsp.h"
 
 PlayerConfig::PlayerConfig() :
     layout(LAYOUT_AUTO),
     dither(DITHER_ATKINSON),
     artSource(ART_SRC_EMBEDDED_FIRST),
-    lyricsAutoScroll(true) {}
+    lyricsAutoScroll(true),
+    eqEnabled(true),
+    eqPreset(0),
+    crossfeedMode(0) {
+    for (int b = 0; b < 5; b++) eqBands[b] = 0;
+}
 
 void PlayerConfig::begin() {
     prefs.begin("qtune_cfg", false);
@@ -12,7 +18,25 @@ void PlayerConfig::begin() {
     dither = (DitherMode)prefs.getUChar("dither", (uint8_t)DITHER_ATKINSON);
     artSource = (ArtSource)prefs.getUChar("art_src", (uint8_t)ART_SRC_EMBEDDED_FIRST);
     lyricsAutoScroll = prefs.getBool("lrc_scroll", true);
+    eqEnabled = prefs.getBool("eq_en", true);
+    eqPreset = prefs.getUChar("eq_pre", 0);
+    crossfeedMode = prefs.getUChar("xfeed", 0);
+    for (int b = 0; b < 5; b++) {
+        char key[8];
+        snprintf(key, sizeof(key), "eq_b%d", b);
+        eqBands[b] = (int8_t)prefs.getChar(key, 0);
+    }
     prefs.end();
+
+    audioDSP.setEqEnabled(eqEnabled);
+    if (eqPreset == 8) {
+        for (uint8_t b = 0; b < 5; b++) {
+            audioDSP.setBandGain(b, eqBands[b]);
+        }
+    } else {
+        audioDSP.setPreset((EqPreset)eqPreset);
+    }
+    audioDSP.setCrossfeedMode((CrossfeedMode)crossfeedMode);
 }
 
 void PlayerConfig::save() {
@@ -21,6 +45,14 @@ void PlayerConfig::save() {
     prefs.putUChar("dither", (uint8_t)dither);
     prefs.putUChar("art_src", (uint8_t)artSource);
     prefs.putBool("lrc_scroll", lyricsAutoScroll);
+    prefs.putBool("eq_en", eqEnabled);
+    prefs.putUChar("eq_pre", eqPreset);
+    prefs.putUChar("xfeed", crossfeedMode);
+    for (int b = 0; b < 5; b++) {
+        char key[8];
+        snprintf(key, sizeof(key), "eq_b%d", b);
+        prefs.putChar(key, eqBands[b]);
+    }
     prefs.end();
 }
 
@@ -102,6 +134,59 @@ void PlayerConfig::toggleLyricsAutoScroll() {
 
 const char* PlayerConfig::getLyricsAutoScrollName() const {
     return lyricsAutoScroll ? "AUTO" : "MANUAL";
+}
+
+bool PlayerConfig::isEqEnabled() const { return eqEnabled; }
+void PlayerConfig::setEqEnabled(bool enable) {
+    eqEnabled = enable;
+    audioDSP.setEqEnabled(enable);
+    save();
+}
+void PlayerConfig::toggleEq() {
+    setEqEnabled(!eqEnabled);
+}
+
+uint8_t PlayerConfig::getEqPreset() const { return eqPreset; }
+void PlayerConfig::setEqPreset(uint8_t preset) {
+    eqPreset = preset;
+    audioDSP.setPreset((EqPreset)preset);
+    for (uint8_t b = 0; b < 5; b++) {
+        eqBands[b] = audioDSP.getBandGain(b);
+    }
+    save();
+}
+void PlayerConfig::cycleEqPreset() {
+    uint8_t next = (eqPreset + 1) % 9;
+    setEqPreset(next);
+}
+const char* PlayerConfig::getEqPresetName() const {
+    return audioDSP.getPresetName();
+}
+
+int8_t PlayerConfig::getEqBand(uint8_t band) const {
+    return audioDSP.getBandGain(band);
+}
+void PlayerConfig::setEqBand(uint8_t band, int8_t gain) {
+    if (band < 5) {
+        eqBands[band] = gain;
+        audioDSP.setBandGain(band, gain);
+        eqPreset = 8; // CUSTOM
+        save();
+    }
+}
+
+uint8_t PlayerConfig::getCrossfeedMode() const { return crossfeedMode; }
+void PlayerConfig::setCrossfeedMode(uint8_t mode) {
+    crossfeedMode = mode;
+    audioDSP.setCrossfeedMode((CrossfeedMode)mode);
+    save();
+}
+void PlayerConfig::cycleCrossfeedMode() {
+    uint8_t next = (crossfeedMode + 1) % 3;
+    setCrossfeedMode(next);
+}
+const char* PlayerConfig::getCrossfeedModeName() const {
+    return audioDSP.getCrossfeedModeName();
 }
 
 PlayerConfig playerConfig;

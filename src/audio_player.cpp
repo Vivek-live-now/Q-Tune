@@ -3,6 +3,7 @@
 #include "sd_manager.h"
 #include "usb_manager.h"
 #include "simd_accel.h"
+#include "audio_dsp.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
@@ -12,6 +13,7 @@ AudioPlayer::AudioPlayer() :
     audioTaskHandle(NULL), taskRunning(false) {}
 
 bool AudioPlayer::begin() {
+    audioDSP.begin(44100);
     i2s_config_t i2s_config = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
         .sample_rate = 44100,
@@ -50,6 +52,7 @@ bool AudioPlayer::begin() {
 
 void AudioPlayer::setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample) {
     i2s_set_sample_rates(I2S_NUM, sampleRate);
+    audioDSP.setSampleRate(sampleRate);
 }
 
 bool AudioPlayer::parseWAVHeader(File &file, WAVHeader &header) {
@@ -655,11 +658,16 @@ void AudioPlayer::playStreamChunk(const int16_t *stereoSamples, size_t frameCoun
 }
 
 void AudioPlayer::routeAudioOutput(const void *stereoData, size_t sampleCount, size_t byteCount) {
+    int16_t* samples = (int16_t*)stereoData;
+    if (samples && sampleCount >= 2) {
+        audioDSP.process(samples, sampleCount / 2);
+    }
+
     if (outputMode == OUTPUT_MODE_FIIO_USB_DAC && usbManager.isMounted()) {
-        usbManager.writeSamples((const int16_t*)stereoData, sampleCount);
+        usbManager.writeSamples(samples, sampleCount);
     } else {
         size_t bytesWritten = 0;
-        i2s_write(I2S_NUM, stereoData, byteCount, &bytesWritten, portMAX_DELAY);
+        i2s_write(I2S_NUM, samples, byteCount, &bytesWritten, portMAX_DELAY);
     }
 }
 
