@@ -811,6 +811,8 @@ const char* SpectrumAnalyzer::getPresetName() const {
         case PRESET_HORIZ_BAR_VU:    return "HORIZ VU";
         case PRESET_VU_SPECTROMETER: return "VU+SPEC";
         case PRESET_VINYL_VU:        return "VINYL VU";
+        case PRESET_CASSETTE_PLAYER: return "CASSETTE";
+        case PRESET_CD_PLAYER:       return "CD PLAYER";
         case PRESET_BAR_SPECTRUM:    return "BARS";
         case PRESET_WAVEFORM:        return "WAVE";
         case PRESET_MILKDROP_PLASMA: return "PLASMA";
@@ -829,6 +831,8 @@ void SpectrumAnalyzer::render(VisualizerPreset preset) {
         case PRESET_HORIZ_BAR_VU: drawHorizontalBarVU(); break;
         case PRESET_VU_SPECTROMETER: drawVUSpectrometer(); break;
         case PRESET_VINYL_VU: drawVinylVU(); break;
+        case PRESET_CASSETTE_PLAYER: drawCassettePlayer(); break;
+        case PRESET_CD_PLAYER: drawCdPlayer(); break;
         case PRESET_BAR_SPECTRUM: drawBars(); break;
         case PRESET_WAVEFORM: drawWaveform(); break;
         case PRESET_MILKDROP_PLASMA: drawPlasma(); break;
@@ -1699,6 +1703,277 @@ void SpectrumAnalyzer::drawStarfield() {
             u8g2.drawPixel(x, y);
         }
     }
+    display.sendBuffer();
+}
+
+void SpectrumAnalyzer::drawCassettePlayer() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_6x10_tr);
+
+    bool showBar = isTopBarVisible();
+    if (showBar) {
+        String track = audioPlayer.getCurrentTrackName();
+        if (track.length() == 0) {
+            track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        }
+        if (track.length() > 13) {
+            track = track.substring(0, 11) + "..";
+        }
+        char headerBuf[32];
+        if (millis() < sensToastExpiryMs) {
+            snprintf(headerBuf, sizeof(headerBuf), "SENS: %s (%.1fx)", getSensitivityName(), getSensitivityMultiplier());
+        } else {
+            snprintf(headerBuf, sizeof(headerBuf), "[CAS:%s] %s", getSensitivityShortName(), track.c_str());
+        }
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+    }
+
+    int topY = showBar ? 14 : 2;
+    int cassetteH = showBar ? 49 : 60;
+
+    // Outer Cassette Tape Shell
+    u8g2.drawFrame(2, topY, 124, cassetteH);
+    // Outer Corner Notch Details
+    u8g2.drawPixel(2, topY); u8g2.drawPixel(125, topY);
+    u8g2.drawPixel(2, topY + cassetteH - 1); u8g2.drawPixel(125, topY + cassetteH - 1);
+
+    // Cassette Top Label Strip (Displays Track Title & Format)
+    u8g2.setFont(u8g2_font_4x6_tr);
+    String songName = audioPlayer.getCurrentTrackName();
+    if (songName.length() == 0) {
+        songName = audioPlayer.isPlaying() ? "CASSETTE TAPE" : "NO TRACK";
+    }
+    if (songName.length() > 18) songName = songName.substring(0, 16) + "..";
+    u8g2.drawStr(8, topY + 8, songName.c_str());
+
+    // Tape Type / Format Badge
+    char fmtBuf[16];
+    snprintf(fmtBuf, sizeof(fmtBuf), "TYPE-II %s", audioPlayer.getFormatName());
+    u8g2.drawStr(82, topY + 8, fmtBuf);
+    u8g2.drawHLine(6, topY + 11, 116);
+
+    // Center Cassette View Window
+    int winX = 18;
+    int winY = topY + 14;
+    int winW = 92;
+    int winH = showBar ? 22 : 28;
+    u8g2.drawFrame(winX, winY, winW, winH);
+
+    // Spool Centers & Reel Progress Animation
+    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+    uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+    float progress = (durSec > 0) ? ((float)posSec / (float)durSec) : 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    int leftReelX = winX + 20;
+    int rightReelX = winX + winW - 20;
+    int reelY = winY + (winH / 2);
+
+    // Tape thickness radii transfer from left spool to right spool as song plays
+    int maxR = showBar ? 10 : 12;
+    int minR = 4;
+    int leftTapeR = minR + (int)((1.0f - progress) * (maxR - minR));
+    int rightTapeR = minR + (int)(progress * (maxR - minR));
+
+    // Outer Tape Roll circles on spools
+    u8g2.drawCircle(leftReelX, reelY, leftTapeR);
+    u8g2.drawCircle(rightReelX, reelY, rightTapeR);
+
+    // Inner Hub Spools
+    u8g2.drawCircle(leftReelX, reelY, minR);
+    u8g2.drawCircle(rightReelX, reelY, minR);
+
+    // Spool teeth rotational spinning when playing
+    static float spoolAngle = 0.0f;
+    if (audioPlayer.isPlaying()) {
+        spoolAngle += 0.18f;
+        if (spoolAngle >= (2.0f * (float)M_PI)) spoolAngle -= (2.0f * (float)M_PI);
+    }
+
+    const int numTeeth = 4;
+    for (int t = 0; t < numTeeth; t++) {
+        float ang = spoolAngle + (float)t * ((2.0f * (float)M_PI) / (float)numTeeth);
+        int lx = leftReelX + (int)(FastMath::fast_cos(ang) * (minR - 1));
+        int ly = reelY + (int)(FastMath::fast_sin(ang) * (minR - 1));
+        u8g2.drawPixel(lx, ly);
+
+        int rx = rightReelX + (int)(FastMath::fast_cos(ang) * (minR - 1));
+        int ry = reelY + (int)(FastMath::fast_sin(ang) * (minR - 1));
+        u8g2.drawPixel(rx, ry);
+    }
+
+    // Tape Ribbon Line connecting spools
+    u8g2.drawLine(leftReelX, reelY + leftTapeR, rightReelX, reelY + rightTapeR);
+
+    // Cassette Bottom Trapdoor & Pressure Pad area
+    int botSectionY = winY + winH + 3;
+    u8g2.drawFrame(winX + 10, botSectionY, winW - 20, cassetteH - (winY - topY + winH + 5));
+
+    // Time Elapsed / Total & Stereo Mini VU Bars in Cassette Bottom Frame
+    u8g2.setFont(u8g2_font_4x6_tr);
+    char timeBuf[24];
+    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+    u8g2.drawStr(winX + 14, botSectionY + 7, timeBuf);
+
+    // Audio State Badge
+    const char* stStr = audioPlayer.isPlaying() ? "▶PLAY" : (audioPlayer.isPaused() ? "❚❚PAUS" : "■STOP");
+    u8g2.drawStr(winX + 60, botSectionY + 7, stStr);
+
+    // Stereo VU Level Bars inside bottom cassette window
+    int vuBarX = winX + 14;
+    int vuBarY = botSectionY + 9;
+    int vuBarW = winW - 28;
+    int lWidth = (int)(((leftDb + 20.0f) / 23.0f) * vuBarW);
+    int rWidth = (int)(((rightDb + 20.0f) / 23.0f) * vuBarW);
+    if (lWidth < 0) lWidth = 0; if (lWidth > vuBarW) lWidth = vuBarW;
+    if (rWidth < 0) rWidth = 0; if (rWidth > vuBarW) rWidth = vuBarW;
+
+    if (vuBarY + 3 <= topY + cassetteH - 2) {
+        u8g2.drawFrame(vuBarX, vuBarY, vuBarW, 2);
+        if (lWidth > 0) u8g2.drawBox(vuBarX, vuBarY, lWidth, 2);
+    }
+
+    display.sendBuffer();
+}
+
+void SpectrumAnalyzer::drawCdPlayer() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_6x10_tr);
+
+    bool showBar = isTopBarVisible();
+    if (showBar) {
+        String track = audioPlayer.getCurrentTrackName();
+        if (track.length() == 0) {
+            track = audioPlayer.isPlaying() ? (audioPlayer.isFLAC() ? "FLAC Audio" : "Live Audio") : (audioPlayer.isPaused() ? "PAUSED" : "IDLE");
+        }
+        if (track.length() > 13) {
+            track = track.substring(0, 11) + "..";
+        }
+        char headerBuf[32];
+        if (millis() < sensToastExpiryMs) {
+            snprintf(headerBuf, sizeof(headerBuf), "SENS: %s (%.1fx)", getSensitivityName(), getSensitivityMultiplier());
+        } else {
+            snprintf(headerBuf, sizeof(headerBuf), "[CDP:%s] %s", getSensitivityShortName(), track.c_str());
+        }
+        u8g2.drawStr(0, 10, headerBuf);
+        u8g2.drawHLine(0, 12, 128);
+    }
+
+    int topY = showBar ? 14 : 2;
+    int frameH = showBar ? 49 : 60;
+
+    // --- Dynamic Outer Striking Boundaries ---
+    // Boundaries pulse, strike, and bounce outwards responding to peak/bass audio transients
+    float strikeAmp = (peakLevel > 15.0f) ? (peakLevel / 120.0f) : 0.0f;
+    if (bassLevel > 25.0f) strikeAmp += (bassLevel / 100.0f);
+    if (strikeAmp > 1.0f) strikeAmp = 1.0f;
+
+    int strikeOffset = (int)(strikeAmp * 5.0f); // Up to 5px outward striking explosion
+
+    // Outer Boundary Shockwave Frame
+    int bX = 1 - strikeOffset;
+    int bY = topY - (strikeOffset > 2 ? 1 : 0);
+    int bW = 126 + strikeOffset * 2;
+    int bH = frameH + (strikeOffset > 2 ? 2 : 0);
+    if (bX < 0) bX = 0;
+    if (bY < 0) bY = 0;
+    if (bW > 128) bW = 128;
+    if (bY + bH > 64) bH = 64 - bY;
+
+    u8g2.drawFrame(bX, bY, bW, bH);
+
+    // Corner Striking Brackets (Bouncing outward on beats)
+    int bracketLen = 6 + strikeOffset;
+    // Top-Left Corner
+    u8g2.drawHLine(bX, bY, bracketLen);
+    u8g2.drawVLine(bX, bY, bracketLen);
+    // Top-Right Corner
+    u8g2.drawHLine(bX + bW - bracketLen, bY, bracketLen);
+    u8g2.drawVLine(bX + bW - 1, bY, bracketLen);
+    // Bottom-Left Corner
+    u8g2.drawHLine(bX, bY + bH - 1, bracketLen);
+    u8g2.drawVLine(bX, bY + bH - bracketLen, bracketLen);
+    // Bottom-Right Corner
+    u8g2.drawHLine(bX + bW - bracketLen, bY + bH - 1, bracketLen);
+    u8g2.drawVLine(bX + bW - 1, bY + bH - bracketLen, bracketLen);
+
+    // --- CD Disc Geometry & Rotation ---
+    int cdCenterX = 38;
+    int cdCenterY = topY + (frameH / 2);
+    int cdRadius = showBar ? 20 : 25;
+
+    // Outer CD Rim
+    u8g2.drawCircle(cdCenterX, cdCenterY, cdRadius);
+
+    // Center Spindle Hole & Plastic Hub
+    u8g2.drawCircle(cdCenterX, cdCenterY, 7);
+    u8g2.drawCircle(cdCenterX, cdCenterY, 3);
+    u8g2.drawPixel(cdCenterX, cdCenterY);
+
+    // Rotating CD Reflective Spokes aware of music playing
+    static float cdAngle = 0.0f;
+    if (audioPlayer.isPlaying()) {
+        cdAngle += 0.22f;
+        if (cdAngle >= (2.0f * (float)M_PI)) cdAngle -= (2.0f * (float)M_PI);
+    }
+
+    const int numSpokes = 6;
+    for (int s = 0; s < numSpokes; s++) {
+        float ang = cdAngle + (float)s * ((2.0f * (float)M_PI) / (float)numSpokes);
+        int xInner = cdCenterX + (int)(FastMath::fast_cos(ang) * 8);
+        int yInner = cdCenterY + (int)(FastMath::fast_sin(ang) * 8);
+        int xOuter = cdCenterX + (int)(FastMath::fast_cos(ang) * (cdRadius - 2));
+        int yOuter = cdCenterY + (int)(FastMath::fast_sin(ang) * (cdRadius - 2));
+        u8g2.drawLine(xInner, yInner, xOuter, yOuter);
+    }
+
+    // --- Optical Laser Pickup Mechanism ---
+    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+    uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+    float progress = (durSec > 0) ? ((float)posSec / (float)durSec) : 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    int railX1 = cdCenterX + 8;
+    int railX2 = cdCenterX + cdRadius + 10;
+    u8g2.drawHLine(railX1, cdCenterY + 2, railX2 - railX1);
+
+    // Laser Sled tracking progress
+    int sledX = railX1 + (int)(progress * (railX2 - railX1 - 4));
+    u8g2.drawBox(sledX, cdCenterY, 4, 5);
+    // Laser Beam Dot touching CD surface
+    if (audioPlayer.isPlaying() && (millis() % 200 < 100)) {
+        u8g2.drawPixel(sledX + 2, cdCenterY - 1);
+    }
+
+    // --- Right Info Panel (Song Name, Details, Time) ---
+    int infoX = cdCenterX + cdRadius + 14;
+    u8g2.setFont(u8g2_font_4x6_tr);
+
+    String trackTitle = audioPlayer.getCurrentTrackName();
+    if (trackTitle.length() == 0) {
+        trackTitle = audioPlayer.isPlaying() ? "CD AUDIO" : "NO DISC";
+    }
+    if (trackTitle.length() > 11) trackTitle = trackTitle.substring(0, 9) + "..";
+
+    u8g2.drawStr(infoX, topY + 8, trackTitle.c_str());
+
+    char timeBuf[20];
+    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u", posSec / 60, posSec % 60);
+    u8g2.drawStr(infoX, topY + 18, timeBuf);
+
+    char fmtBuf[16];
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s", audioPlayer.getFormatName());
+    u8g2.drawStr(infoX, topY + 28, fmtBuf);
+
+    const char* stBadge = audioPlayer.isPlaying() ? "▶PLAY" : (audioPlayer.isPaused() ? "❚❚PAUS" : "■STOP");
+    u8g2.drawStr(infoX, topY + 38, stBadge);
+
+    // Mini Spectrum Bars in CD Player info pane
+    renderMiniBars(u8g2, infoX, topY + 42, 128 - infoX - 4, 10);
+
     display.sendBuffer();
 }
 

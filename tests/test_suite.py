@@ -1269,6 +1269,8 @@ def test_vu_analog_and_spectrometer_suite():
     assert "PRESET_HORIZ_BAR_VU" in sa_h_text, "Missing PRESET_HORIZ_BAR_VU in spectrum_analyzer.h"
     assert "PRESET_VU_SPECTROMETER" in sa_h_text, "Missing PRESET_VU_SPECTROMETER in spectrum_analyzer.h"
     assert "PRESET_VINYL_VU" in sa_h_text, "Missing PRESET_VINYL_VU in spectrum_analyzer.h"
+    assert "PRESET_CASSETTE_PLAYER" in sa_h_text, "Missing PRESET_CASSETTE_PLAYER in spectrum_analyzer.h"
+    assert "PRESET_CD_PLAYER" in sa_h_text, "Missing PRESET_CD_PLAYER in spectrum_analyzer.h"
     assert "PRESET_COUNT" in sa_h_text, "Missing PRESET_COUNT in spectrum_analyzer.h"
 
     # 2. Verify stereo channel sample tap buffers and getters
@@ -1281,6 +1283,8 @@ def test_vu_analog_and_spectrometer_suite():
     assert "drawHorizontalBarVU()" in sa_cpp_text, "drawHorizontalBarVU missing in spectrum_analyzer.cpp"
     assert "drawVUSpectrometer()" in sa_cpp_text, "drawVUSpectrometer missing in spectrum_analyzer.cpp"
     assert "drawVinylVU()" in sa_cpp_text, "drawVinylVU missing in spectrum_analyzer.cpp"
+    assert "drawCassettePlayer()" in sa_cpp_text, "drawCassettePlayer missing in spectrum_analyzer.cpp"
+    assert "drawCdPlayer()" in sa_cpp_text, "drawCdPlayer missing in spectrum_analyzer.cpp"
 
     # 4. Mathematical verification of ANSI C16.5 VU Ballistics simulation
     dt = 0.020  # 50 Hz update

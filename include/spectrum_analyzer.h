@@ -12,11 +12,13 @@ enum VisualizerPreset {
     PRESET_HORIZ_BAR_VU = 1,
     PRESET_VU_SPECTROMETER = 2,
     PRESET_VINYL_VU = 3,
-    PRESET_BAR_SPECTRUM = 4,
-    PRESET_WAVEFORM = 5,
-    PRESET_MILKDROP_PLASMA = 6,
-    PRESET_STARFIELD = 7,
-    PRESET_COUNT = 8
+    PRESET_CASSETTE_PLAYER = 4,
+    PRESET_CD_PLAYER = 5,
+    PRESET_BAR_SPECTRUM = 6,
+    PRESET_WAVEFORM = 7,
+    PRESET_MILKDROP_PLASMA = 8,
+    PRESET_STARFIELD = 9,
+    PRESET_COUNT = 10
 };
 
 enum VisualizerSensitivity {
@@ -148,6 +150,8 @@ private:
     void drawHorizontalBarVU();
     void drawVUSpectrometer();
     void drawVinylVU();
+    void drawCassettePlayer();
+    void drawCdPlayer();
     void drawBars();
     void drawWaveform();
     void drawPlasma();
