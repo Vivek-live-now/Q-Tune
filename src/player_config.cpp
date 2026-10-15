@@ -6,6 +6,7 @@ PlayerConfig::PlayerConfig() :
     dither(DITHER_ATKINSON),
     artSource(ART_SRC_EMBEDDED_FIRST),
     lyricsAutoScroll(true),
+    lyricsFont(LYRICS_FONT_CLASSIC),
     eqEnabled(true),
     eqPreset(0),
     crossfeedMode(0) {
@@ -18,6 +19,8 @@ void PlayerConfig::begin() {
     dither = (DitherMode)prefs.getUChar("dither", (uint8_t)DITHER_ATKINSON);
     artSource = (ArtSource)prefs.getUChar("art_src", (uint8_t)ART_SRC_EMBEDDED_FIRST);
     lyricsAutoScroll = prefs.getBool("lrc_scroll", true);
+    lyricsFont = (LyricsFont)prefs.getUChar("lrc_font", (uint8_t)LYRICS_FONT_CLASSIC);
+    lyricsSize = (LyricsSize)prefs.getUChar("lrc_size", (uint8_t)LYRICS_SIZE_MEDIUM);
     eqEnabled = prefs.getBool("eq_en", true);
     eqPreset = prefs.getUChar("eq_pre", 0);
     crossfeedMode = prefs.getUChar("xfeed", 0);
@@ -45,6 +48,8 @@ void PlayerConfig::save() {
     prefs.putUChar("dither", (uint8_t)dither);
     prefs.putUChar("art_src", (uint8_t)artSource);
     prefs.putBool("lrc_scroll", lyricsAutoScroll);
+    prefs.putUChar("lrc_font", (uint8_t)lyricsFont);
+    prefs.putUChar("lrc_size", (uint8_t)lyricsSize);
     prefs.putBool("eq_en", eqEnabled);
     prefs.putUChar("eq_pre", eqPreset);
     prefs.putUChar("xfeed", crossfeedMode);
@@ -187,6 +192,51 @@ void PlayerConfig::cycleCrossfeedMode() {
 }
 const char* PlayerConfig::getCrossfeedModeName() const {
     return audioDSP.getCrossfeedModeName();
+}
+
+LyricsFont PlayerConfig::getLyricsFont() const { return lyricsFont; }
+
+void PlayerConfig::setLyricsFont(LyricsFont font) {
+    lyricsFont = font;
+    save();
+}
+
+void PlayerConfig::cycleLyricsFont() {
+    lyricsFont = (LyricsFont)((lyricsFont + 1) % LYRICS_FONT_COUNT);
+    save();
+}
+
+const char* PlayerConfig::getLyricsFontName() const {
+    switch (lyricsFont) {
+        case LYRICS_FONT_CLASSIC:    return "CLASSIC";
+        case LYRICS_FONT_CUTE:       return "CUTE";
+        case LYRICS_FONT_CHIPTUNE:   return "CHIPTUNE";
+        case LYRICS_FONT_TYPEWRITER: return "TYPEWRITER";
+        case LYRICS_FONT_ARCADE:     return "ARCADE";
+        default:                     return "CLASSIC";
+    }
+}
+
+// --- LyricsSize methods ---
+LyricsSize PlayerConfig::getLyricsSize() const { return lyricsSize; }
+
+void PlayerConfig::setLyricsSize(LyricsSize size) {
+    lyricsSize = size;
+    save();
+}
+
+void PlayerConfig::cycleLyricsSize() {
+    lyricsSize = (LyricsSize)((lyricsSize + 1) % LYRICS_SIZE_COUNT);
+    save();
+}
+
+const char* PlayerConfig::getLyricsSizeName() const {
+    switch (lyricsSize) {
+        case LYRICS_SIZE_SMALL:  return "SMALL";
+        case LYRICS_SIZE_MEDIUM: return "MEDIUM";
+        case LYRICS_SIZE_LARGE:  return "LARGE";
+        default:                 return "MEDIUM";
+    }
 }
 
 PlayerConfig playerConfig;

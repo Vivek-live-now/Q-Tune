@@ -2,6 +2,7 @@
 #include "sd_manager.h"
 #include "lyrics_id3_codec.h"
 #include <SD.h>
+#include <algorithm>
 
 extern SemaphoreHandle_t spiBusMutex;
 
@@ -147,17 +148,51 @@ bool LyricsParser::parseLRCContent(const String &content) {
         uint32_t ts = 0;
         String text = "";
         if (parseLRCLine(rawLine, ts, text)) {
-            LyricLine item;
-            item.timestampMs = ts;
-            item.text = truncateUtf8CodePoints(text, MAX_LINE_CODE_POINTS);
-            lines.push_back(item);
+            // ── Multi-timestamp support ──────────────────────────────────────
+            // Some LRC files place multiple timestamps before one lyric text:
+            // [00:12.00][02:45.00]Chorus line
+            // parseLRCLine() extracts the first timestamp; strip any
+            // remaining leading [mm:ss.xx] brackets from 'text' and collect
+            // all timestamps, creating one LyricLine entry per timestamp.
+            std::vector<uint32_t> allTs;
+            allTs.push_back(ts);
+
+            // Strip additional leading timestamp brackets from text
+            while (text.length() > 0 && text[0] == '[') {
+                uint32_t extraTs = 0;
+                String remainder = "";
+                if (parseLRCLine(text, extraTs, remainder)) {
+                    allTs.push_back(extraTs);
+                    text = remainder;
+                    text.trim();
+                } else {
+                    break; // Not a timestamp bracket — stop stripping
+                }
+            }
+
+            // Skip lines where lyrics text is empty (section markers etc.)
+            if (text.isEmpty()) { start = nextNewline + 1; continue; }
+
+            String truncated = truncateUtf8CodePoints(text, MAX_LINE_CODE_POINTS);
+            for (uint32_t t : allTs) {
+                if (lines.size() >= MAX_LYRIC_LINES) break;
+                LyricLine item;
+                item.timestampMs = t;
+                item.text = truncated;
+                lines.push_back(item);
+            }
             foundTimedLine = true;
+
         } else if (!rawLine.startsWith("[")) { // Plain line without timestamp bracket
-            LyricLine item;
-            item.timestampMs = 0;
-            item.text = truncateUtf8CodePoints(rawLine, MAX_LINE_CODE_POINTS);
-            lines.push_back(item);
+            if (!rawLine.isEmpty()) {
+                LyricLine item;
+                item.timestampMs = 0;
+                item.text = truncateUtf8CodePoints(rawLine, MAX_LINE_CODE_POINTS);
+                lines.push_back(item);
+            }
         }
+        // Lines starting with '[' but not a valid timestamp (metadata like [ti:Title])
+        // are silently skipped — no change needed here.
     }
 
     if (lines.empty()) {
@@ -165,9 +200,19 @@ bool LyricsParser::parseLRCContent(const String &content) {
         return false;
     }
 
+    // Sort by timestamp so binary-search getCurrentLineIndex() is always valid.
+    // std::stable_sort preserves file order for lines with equal timestamps.
+    if (foundTimedLine) {
+        std::stable_sort(lines.begin(), lines.end(),
+            [](const LyricLine &a, const LyricLine &b) {
+                return a.timestampMs < b.timestampMs;
+            });
+    }
+
     syncType = foundTimedLine ? LYRICS_SYNC_TIMED : LYRICS_SYNC_UNTIMED;
     return true;
 }
+
 
 bool LyricsParser::parseTXTContent(const String &content) {
     lines.clear();
@@ -348,17 +393,22 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
 
 int LyricsParser::getCurrentLineIndex(uint32_t positionMs) const {
     if (lines.empty()) return -1;
+    // Before the first lyric timestamp — show line 0 as pre-intro
     if (positionMs < lines[0].timestampMs) return 0;
 
-    int lastMatch = 0;
-    for (size_t i = 0; i < lines.size(); i++) {
-        if (lines[i].timestampMs <= positionMs) {
-            lastMatch = (int)i;
+    // Binary search: find the last line whose timestampMs <= positionMs.
+    // Lines are guaranteed sorted by parseLRCContent() stable_sort.
+    int lo = 0, hi = (int)lines.size() - 1, result = 0;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (lines[mid].timestampMs <= positionMs) {
+            result = mid;
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid - 1;
         }
     }
-    return lastMatch;
+    return result;
 }
 
 String LyricsParser::getLineText(int index) const {

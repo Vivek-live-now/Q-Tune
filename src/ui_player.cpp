@@ -279,7 +279,7 @@ bool UIPlayer::update() {
 
     } else if (currentView == VIEW_PLAYER_SETTINGS) {
         // --- Customization Settings Menu ---
-        const int SETTINGS_COUNT = 6;
+        const int SETTINGS_COUNT = 8;
         if (evt == BTN_EVENT_UP_PRESS) {
             Display::navigateMenu(settingsSelection, settingsScrollOffset, SETTINGS_COUNT, -1);
             ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
@@ -293,11 +293,14 @@ bool UIPlayer::update() {
                 case 1: playerConfig.cycleArtSource(); break;
                 case 2: playerConfig.cycleDitherMode(); break;
                 case 3: playerConfig.toggleLyricsAutoScroll(); break;
-                case 4:
+                case 4: playerConfig.cycleLyricsFont(); break;
+                case 5: playerConfig.cycleLyricsSize(); break;
+                case 6: {
                     currentView = VIEW_EQ_SETTINGS;
                     eqBandSelection = 0;
                     break;
-                case 5: currentView = VIEW_CATEGORIES; break;
+                }
+                case 7: currentView = VIEW_CATEGORIES; break;
             }
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             currentView = VIEW_CATEGORIES;
@@ -578,12 +581,14 @@ void UIPlayer::renderPlayerSettings() {
     char batBuf[16];
     snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
 
-    const int SETTINGS_COUNT = 6;
+    const int SETTINGS_COUNT = 8;
     const char* labels[SETTINGS_COUNT] = {
         "Now Playing",
         "Art Source",
         "Dithering",
         "Lyrics Sync",
+        "Lyrics Font",
+        "Lyrics Size",
         "Equalizer (DSP)",
         "Back to Menu"
     };
@@ -593,8 +598,10 @@ void UIPlayer::renderPlayerSettings() {
     vals[1] = String("[") + playerConfig.getArtSourceName() + "]";
     vals[2] = String("[") + playerConfig.getDitherName() + "]";
     vals[3] = String("[") + playerConfig.getLyricsAutoScrollName() + "]";
-    vals[4] = String("[") + playerConfig.getEqPresetName() + "]";
-    vals[5] = "[EXIT]";
+    vals[4] = String("[") + playerConfig.getLyricsFontName() + "]";
+    vals[5] = String("[") + playerConfig.getLyricsSizeName() + "]";
+    vals[6] = String("[") + playerConfig.getEqPresetName() + "]";
+    vals[7] = "[EXIT]";
 
     display.drawStandardMenu("SETTINGS", labels, SETTINGS_COUNT, settingsSelection, settingsScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -1075,9 +1082,11 @@ void UIPlayer::renderPlayerPage3() {
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 
+    // ── Header ───────────────────────────────────────────────────────────────
     u8g2.setFont(u8g2_font_5x7_tr);
     char headerBuf[32];
-    const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]" : (lyricsParser.hasLyrics() ? "[MANUAL]" : "[NONE]");
+    const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]"
+                        : (lyricsParser.hasLyrics()     ? "[MANUAL]" : "[NONE]");
     snprintf(headerBuf, sizeof(headerBuf), "LYRICS %s B:%d%%", modeTag, battery.getPercentage());
     u8g2.drawStr(0, 8, headerBuf);
     u8g2.drawHLine(0, 10, 128);
@@ -1095,38 +1104,110 @@ void UIPlayer::renderPlayerPage3() {
             curIdx = manualLyricIndex;
         }
 
-        u8g2.setFont(u8g2_font_5x7_tr);
+        // ── Font pair selection driven by playerConfig ──────────────────────
+        // Each entry: { smallFont (prev/next lines), largeFont (current line) }
+        struct LyricsFontPair { const uint8_t *small; const uint8_t *large; };
+        static const LyricsFontPair FONT_PAIRS[5] = {
+            { u8g2_font_5x7_tr,         u8g2_font_6x10_tr        }, // 0 CLASSIC
+            { u8g2_font_04b_03_tr,       u8g2_font_baby_tr         }, // 1 CUTE
+            { u8g2_font_blipfest_07_tr,  u8g2_font_nokiafc22_tr    }, // 2 CHIPTUNE
+            { u8g2_font_4x6_tr,          u8g2_font_courB08_tr      }, // 3 TYPEWRITER
+            { u8g2_font_5x7_tr,          u8g2_font_pressstart2p_8u }, // 4 ARCADE
+        };
+        uint8_t fontIdx = (uint8_t)playerConfig.getLyricsFont();
+        if (fontIdx >= 5) fontIdx = 0;
+        const LyricsFontPair &fp = FONT_PAIRS[fontIdx];
+
+        // ── Previous line (y=12–19) ─────────────────────────────────────────
+        u8g2.setFont(fp.small);
         if (curIdx > 0) {
             String prevText = lyricsParser.getLineText(curIdx - 1);
-            prevText = LyricsParser::truncateUtf8CodePoints(prevText, 22);
-            u8g2.drawStr(2, 22, prevText.c_str());
+            // Pixel-based truncation: shrink until fits within 124px
+            while (prevText.length() > 0 && u8g2.getStrWidth(prevText.c_str()) > 124) {
+                size_t cp = LyricsParser::countUtf8CodePoints(prevText);
+                if (cp == 0) break;
+                prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+            }
+            u8g2.drawStr(2, 19, prevText.c_str());
         }
 
+        // ── Current line — pixel word-wrap in 22px highlight box (y=21–43) ──
         String curText = lyricsParser.getLineText(curIdx);
-        curText = LyricsParser::truncateUtf8CodePoints(curText, 20);
-        u8g2.drawBox(0, 26, 128, 14);
-        u8g2.setDrawColor(0);
-        u8g2.setFont(u8g2_font_6x10_tr);
-        u8g2.drawStr(2, 37, curText.c_str());
+        // Choose font for current line based on size setting
+LyricsSize sz = playerConfig.getLyricsSize();
+const uint8_t *curFont = (sz == LYRICS_SIZE_SMALL) ? fp.small : fp.large;
+u8g2.setFont(curFont);
+
+        // Pixel-based word-wrap: split at last space before 124px width boundary
+        String wrapL1 = curText;
+        String wrapL2 = "";
+        if (u8g2.getStrWidth(curText.c_str()) > 124) {
+            String candidate = "";
+            int lastSpaceByteIdx = -1;
+            for (int bi = 0; bi < (int)curText.length(); ) {
+                uint8_t c = (uint8_t)curText[bi];
+                int cpLen = (c < 0x80) ? 1 : (c < 0xE0) ? 2 : (c < 0xF0) ? 3 : 4;
+                String next = curText.substring(0, bi + cpLen);
+                if (u8g2.getStrWidth(next.c_str()) > 124) break;
+                candidate = next;
+                if (curText[bi] == ' ') lastSpaceByteIdx = bi;
+                bi += cpLen;
+            }
+            if (lastSpaceByteIdx > 0) {
+                wrapL1 = curText.substring(0, lastSpaceByteIdx);
+                wrapL2 = curText.substring(lastSpaceByteIdx + 1);
+                // Truncate second line to fit
+                while (wrapL2.length() > 0 && u8g2.getStrWidth(wrapL2.c_str()) > 124) {
+                    size_t cp = LyricsParser::countUtf8CodePoints(wrapL2);
+                    if (cp == 0) break;
+                    wrapL2 = LyricsParser::truncateUtf8CodePoints(wrapL2, cp - 1);
+                }
+            } else {
+                wrapL1 = candidate; // hard split, no second line shown
+                wrapL2 = "";
+            }
+        }
+
+        u8g2.drawBox(0, 21, 128, 22);  // 22px highlight box (y=21 to y=43)
+        u8g2.setDrawColor(0);          // white-on-black (inverted)
+        if (wrapL2.isEmpty()) {
+            // Single line: vertically centred in box (baseline ~y=34)
+            u8g2.drawStr(2, 34, wrapL1.c_str());
+        } else {
+            // Two wrapped lines within box
+            u8g2.drawStr(2, 31, wrapL1.c_str());
+            u8g2.drawStr(2, 42, wrapL2.c_str());
+        }
         u8g2.setDrawColor(1);
 
-        u8g2.setFont(u8g2_font_5x7_tr);
+        // ── Next line (y=46–53) ─────────────────────────────────────────────
+        u8g2.setFont(fp.small);
         if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
             String nextText = lyricsParser.getLineText(curIdx + 1);
-            nextText = LyricsParser::truncateUtf8CodePoints(nextText, 22);
-            u8g2.drawStr(2, 51, nextText.c_str());
+            while (nextText.length() > 0 && u8g2.getStrWidth(nextText.c_str()) > 124) {
+                size_t cp = LyricsParser::countUtf8CodePoints(nextText);
+                if (cp == 0) break;
+                nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+            }
+            u8g2.drawStr(2, 53, nextText.c_str());
         }
 
-        char tsBuf[24];
+        // ── Footer row (y=56–63) ────────────────────────────────────────────
+        // Sync mode: show active font name — NO live clock (removed per UX)
+        // Manual mode: show line counter + navigation hint
+        char footBuf[28];
         if (lyricsParser.isSynchronized()) {
-            uint32_t curPos = audioPlayer.getPositionMs();
-            uint32_t posSec = curPos / 1000;
-            snprintf(tsBuf, sizeof(tsBuf), "[%02u:%02u] Sync Auto", posSec / 60, posSec % 60);
+            snprintf(footBuf, sizeof(footBuf), "> Synced [%s]",
+                     playerConfig.getLyricsFontName());
         } else {
-            snprintf(tsBuf, sizeof(tsBuf), "Line %d/%d (UP/DN)", curIdx + 1, (int)lyricsParser.getLineCount());
+            snprintf(footBuf, sizeof(footBuf), "Line %d/%d (UP/DN)",
+                     curIdx + 1, (int)lyricsParser.getLineCount());
         }
-        u8g2.drawStr(2, 62, tsBuf);
+        u8g2.setFont(u8g2_font_5x7_tr);
+        u8g2.drawStr(2, 63, footBuf);
+
     } else {
+        // No lyrics fallback
         u8g2.setFont(u8g2_font_6x10_tr);
         u8g2.drawStr(10, 26, "No Lyrics Available");
         u8g2.setFont(u8g2_font_5x7_tr);

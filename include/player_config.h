@@ -23,6 +23,21 @@ enum ArtSource {
     ART_SRC_DISABLED = 2       // Disable album art decoding
 };
 
+enum LyricsFont {
+    LYRICS_FONT_CLASSIC     = 0,  // Clean standard monochrome
+    LYRICS_FONT_CUTE        = 1,  // Cute Japanese pixel art & baby
+    LYRICS_FONT_CHIPTUNE    = 2,  // 8-bit demoparty & chiptune
+    LYRICS_FONT_TYPEWRITER  = 3,  // Retro typewriter monospace
+    LYRICS_FONT_ARCADE      = 4,  // 80s arcade gaming
+    LYRICS_FONT_PIXIE       = 5   // Fairytale tiny pixie
+};
+
+enum LyricsSize {
+    LYRICS_SIZE_SMALL       = 0,  // Compact / small text (more characters per line)
+    LYRICS_SIZE_MEDIUM      = 1,  // Medium / standard text (default)
+    LYRICS_SIZE_LARGE       = 2   // Large / bold prominent text
+};
+
 class PlayerConfig {
 public:
     PlayerConfig();
@@ -49,6 +64,18 @@ public:
     void toggleLyricsAutoScroll();
     const char* getLyricsAutoScrollName() const;
 
+    LyricsFont getLyricsFont() const;
+    void setLyricsFont(LyricsFont font);
+    void cycleLyricsFont();
+    const char* getLyricsFontName() const;
+    static constexpr uint8_t LYRICS_FONT_COUNT = 5;
+
+    LyricsSize getLyricsSize() const;
+    void setLyricsSize(LyricsSize size);
+    void cycleLyricsSize();
+    const char* getLyricsSizeName() const;
+    static constexpr uint8_t LYRICS_SIZE_COUNT = 3;
+
     // Audiophile DSP Configuration
     bool isEqEnabled() const;
     void setEqEnabled(bool enable);
@@ -72,6 +99,8 @@ private:
     DitherMode dither;
     ArtSource artSource;
     bool lyricsAutoScroll;
+    LyricsFont lyricsFont;
+    LyricsSize lyricsSize;
     bool eqEnabled;
     uint8_t eqPreset;
     int8_t eqBands[5];
