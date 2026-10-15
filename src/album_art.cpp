@@ -5,21 +5,20 @@
 
 extern SemaphoreHandle_t spiBusMutex;
 
-struct JpegStream {
+struct JpegDecodeSession {
     File *file;
     uint32_t startOffset;
     uint32_t maxBytes;
     uint32_t bytesRead;
-};
-
-struct DecodeContext {
     uint8_t *grayBuffer;
     int targetW;
     int targetH;
+    int cropX;
+    int cropY;
 };
 
 static size_t jd_input_func(JDEC *jdec, uint8_t *buf, size_t len) {
-    JpegStream *s = (JpegStream*)jdec->device;
+    JpegDecodeSession *s = (JpegDecodeSession*)jdec->device;
     if (!s || !s->file || s->bytesRead >= s->maxBytes) return 0;
 
     size_t toRead = len;
@@ -43,18 +42,24 @@ static size_t jd_input_func(JDEC *jdec, uint8_t *buf, size_t len) {
 }
 
 static int jd_output_func(JDEC *jdec, void *bitmap, JRECT *rect) {
-    DecodeContext *ctx = (DecodeContext*)jdec->device;
+    JpegDecodeSession *session = (JpegDecodeSession*)jdec->device;
+    if (!session || !session->grayBuffer) return 0;
+
     const uint8_t *src = (const uint8_t*)bitmap;
     int rw = rect->right - rect->left + 1;
     int rh = rect->bottom - rect->top + 1;
 
     for (int y = 0; y < rh; y++) {
-        int dstY = rect->top + y;
-        if (dstY >= ctx->targetH) break;
+        int srcY = rect->top + y;
+        int dstY = srcY - session->cropY;
+        if (dstY < 0 || dstY >= session->targetH) continue;
+
         for (int x = 0; x < rw; x++) {
-            int dstX = rect->left + x;
-            if (dstX >= ctx->targetW) break;
-            ctx->grayBuffer[dstY * ctx->targetW + dstX] = src[y * rw + x];
+            int srcX = rect->left + x;
+            int dstX = srcX - session->cropX;
+            if (dstX < 0 || dstX >= session->targetW) continue;
+
+            session->grayBuffer[dstY * session->targetW + dstX] = src[y * rw + x];
         }
     }
     return 1;
@@ -176,19 +181,30 @@ static bool scanForJPEGHeader(File &file, uint32_t frameStart, uint32_t frameSiz
     if (scanLimit > file.size()) scanLimit = file.size();
 
     file.seek(frameStart);
+    uint8_t buf[256];
     uint8_t prev = 0;
-    while (file.position() < scanLimit) {
-        int b = file.read();
-        if (b < 0) break;
-        if (prev == 0xFF && (uint8_t)b == 0xD8) {
-            jpegOffset = file.position() - 2;
-            if (jpegOffset < frameStart + frameSize) {
-                jpegSize = (frameStart + frameSize) - jpegOffset;
-                return true;
-            }
-            return false;
+    uint32_t curPos = frameStart;
+
+    while (curPos < scanLimit) {
+        size_t toRead = sizeof(buf);
+        if (curPos + toRead > scanLimit) {
+            toRead = scanLimit - curPos;
         }
-        prev = (uint8_t)b;
+        size_t bytesRead = file.read(buf, toRead);
+        if (bytesRead == 0) break;
+
+        for (size_t i = 0; i < bytesRead; i++) {
+            if (prev == 0xFF && buf[i] == 0xD8) {
+                jpegOffset = curPos + i - 1;
+                if (jpegOffset < frameStart + frameSize) {
+                    jpegSize = (frameStart + frameSize) - jpegOffset;
+                    return true;
+                }
+                return false;
+            }
+            prev = buf[i];
+        }
+        curPos += bytesRead;
     }
     return false;
 }
@@ -260,6 +276,15 @@ bool AlbumArtManager::findMP3Art(File &file, uint32_t &offset, uint32_t &size) {
 
         file.seek(frameStart + fSize);
     }
+
+    // Fallback: If APIC frame wasn't parsed (e.g. malformed frame header or syncsafe quirk),
+    // scan the ID3 tag payload for embedded JPEG SOI marker
+    if (tagEnd > 10) {
+        if (scanForJPEGHeader(file, 10, tagEnd - 10, offset, size)) {
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -375,19 +400,24 @@ bool AlbumArtManager::decodeJPEGFromStream(File &file, uint32_t offset, uint32_t
     file.seek(offset);
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
-    JpegStream stream;
-    stream.file = &file;
-    stream.startOffset = offset;
-    stream.maxBytes = size;
-    stream.bytesRead = 0;
+    JpegDecodeSession session;
+    session.file = &file;
+    session.startOffset = offset;
+    session.maxBytes = size;
+    session.bytesRead = 0;
+    session.grayBuffer = nullptr;
+    session.targetW = 0;
+    session.targetH = 0;
+    session.cropX = 0;
+    session.cropY = 0;
 
     void *pool = malloc(TJPGD_WORKSPACE_SIZE);
     if (!pool) return false;
 
     JDEC jdec;
-    jdec.device = &stream;
+    jdec.device = &session;
 
-    JRESULT res = jd_prepare(&jdec, jd_input_func, pool, TJPGD_WORKSPACE_SIZE, &stream);
+    JRESULT res = jd_prepare(&jdec, jd_input_func, pool, TJPGD_WORKSPACE_SIZE, &session);
     if (res != JDR_OK) {
         free(pool);
         return false;
@@ -407,18 +437,24 @@ bool AlbumArtManager::decodeJPEGFromStream(File &file, uint32_t offset, uint32_t
     if (scaledW < targetW) targetW = scaledW;
     if (scaledH < targetH) targetH = scaledH;
 
+    int cropX = 0;
+    int cropY = 0;
+    if (scaledW > targetW) cropX = (scaledW - targetW) / 2;
+    if (scaledH > targetH) cropY = (scaledH - targetH) / 2;
+
     uint8_t *grayBuf = (uint8_t*)calloc(targetW * targetH, sizeof(uint8_t));
     if (!grayBuf) {
         free(pool);
         return false;
     }
 
-    DecodeContext ctx;
-    ctx.grayBuffer = grayBuf;
-    ctx.targetW = targetW;
-    ctx.targetH = targetH;
-    jdec.device = &ctx;
+    session.grayBuffer = grayBuf;
+    session.targetW = targetW;
+    session.targetH = targetH;
+    session.cropX = cropX;
+    session.cropY = cropY;
 
+    // jdec.device remains &session throughout decompression
     res = jd_decomp(&jdec, jd_output_func, scale);
     free(pool);
 
@@ -463,17 +499,15 @@ bool AlbumArtManager::loadForTrack(const String &audioPath) {
     PlayerLayout layout = playerConfig.getLayout();
     int targetDim = (layout == LAYOUT_COVER_HERO) ? 64 : 56;
 
-    uint32_t artOffset = 0;
-    uint32_t artSize = 0;
-    bool foundArt = false;
-
-    // Check embedded art first if configured
-    if (playerConfig.getArtSource() == ART_SRC_EMBEDDED_FIRST) {
+    auto tryLoadEmbedded = [&]() -> bool {
         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
         File audioFile = SD.open(audioPath, FILE_READ);
         if (audioFile) {
             String lower = audioPath;
             lower.toLowerCase();
+            uint32_t artOffset = 0;
+            uint32_t artSize = 0;
+            bool foundArt = false;
             if (lower.endsWith(".mp3")) {
                 foundArt = findMP3Art(audioFile, artOffset, artSize);
             } else if (lower.endsWith(".flac")) {
@@ -490,10 +524,10 @@ bool AlbumArtManager::loadForTrack(const String &audioPath) {
             audioFile.close();
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
-    }
+        return artLoaded;
+    };
 
-    // If not found yet, check external folder art
-    if (!artLoaded) {
+    auto tryLoadFolder = [&]() -> bool {
         String folderArtPath = "";
         if (findFolderArt(audioPath, folderArtPath)) {
             if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
@@ -505,6 +539,17 @@ bool AlbumArtManager::loadForTrack(const String &audioPath) {
                 imgFile.close();
                 if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
             }
+        }
+        return artLoaded;
+    };
+
+    if (playerConfig.getArtSource() == ART_SRC_EMBEDDED_FIRST) {
+        if (!tryLoadEmbedded()) {
+            tryLoadFolder();
+        }
+    } else if (playerConfig.getArtSource() == ART_SRC_FOLDER_FIRST) {
+        if (!tryLoadFolder()) {
+            tryLoadEmbedded();
         }
     }
 
