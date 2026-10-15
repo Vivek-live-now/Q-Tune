@@ -1862,117 +1862,176 @@ void SpectrumAnalyzer::drawCdPlayer() {
         u8g2.drawHLine(0, 12, 128);
     }
 
-    int topY = showBar ? 14 : 2;
-    int frameH = showBar ? 49 : 60;
+    // --- Screensaver Bouncing Boundary Dynamics ---
+    const int boxW = 56;
+    const int boxH = 26;
+    int minX = 0;
+    int maxX = 128 - boxW;
+    int minY = showBar ? 13 : 0;
+    int maxY = 64 - boxH;
 
-    // --- Dynamic Outer Striking Boundaries ---
-    // Boundaries pulse, strike, and bounce outwards responding to peak/bass audio transients
-    float strikeAmp = (peakLevel > 15.0f) ? (peakLevel / 120.0f) : 0.0f;
-    if (bassLevel > 25.0f) strikeAmp += (bassLevel / 100.0f);
-    if (strikeAmp > 1.0f) strikeAmp = 1.0f;
-
-    int strikeOffset = (int)(strikeAmp * 5.0f); // Up to 5px outward striking explosion
-
-    // Outer Boundary Shockwave Frame
-    int bX = 1 - strikeOffset;
-    int bY = topY - (strikeOffset > 2 ? 1 : 0);
-    int bW = 126 + strikeOffset * 2;
-    int bH = frameH + (strikeOffset > 2 ? 2 : 0);
-    if (bX < 0) bX = 0;
-    if (bY < 0) bY = 0;
-    if (bW > 128) bW = 128;
-    if (bY + bH > 64) bH = 64 - bY;
-
-    u8g2.drawFrame(bX, bY, bW, bH);
-
-    // Corner Striking Brackets (Bouncing outward on beats)
-    int bracketLen = 6 + strikeOffset;
-    // Top-Left Corner
-    u8g2.drawHLine(bX, bY, bracketLen);
-    u8g2.drawVLine(bX, bY, bracketLen);
-    // Top-Right Corner
-    u8g2.drawHLine(bX + bW - bracketLen, bY, bracketLen);
-    u8g2.drawVLine(bX + bW - 1, bY, bracketLen);
-    // Bottom-Left Corner
-    u8g2.drawHLine(bX, bY + bH - 1, bracketLen);
-    u8g2.drawVLine(bX, bY + bH - bracketLen, bracketLen);
-    // Bottom-Right Corner
-    u8g2.drawHLine(bX + bW - bracketLen, bY + bH - 1, bracketLen);
-    u8g2.drawVLine(bX + bW - 1, bY + bH - bracketLen, bracketLen);
-
-    // --- CD Disc Geometry & Rotation ---
-    int cdCenterX = 38;
-    int cdCenterY = topY + (frameH / 2);
-    int cdRadius = showBar ? 20 : 25;
-
-    // Outer CD Rim
-    u8g2.drawCircle(cdCenterX, cdCenterY, cdRadius);
-
-    // Center Spindle Hole & Plastic Hub
-    u8g2.drawCircle(cdCenterX, cdCenterY, 7);
-    u8g2.drawCircle(cdCenterX, cdCenterY, 3);
-    u8g2.drawPixel(cdCenterX, cdCenterY);
-
-    // Rotating CD Reflective Spokes aware of music playing
+    static float posX = 16.0f;
+    static float posY = 18.0f;
+    static float velX = 0.95f;
+    static float velY = 0.72f;
     static float cdAngle = 0.0f;
-    if (audioPlayer.isPlaying()) {
-        cdAngle += 0.22f;
-        if (cdAngle >= (2.0f * (float)M_PI)) cdAngle -= (2.0f * (float)M_PI);
+    static unsigned long lastUpdateMs = 0;
+    static unsigned long hitExpiryMs = 0;
+    static int hitWall = 0; // 1: Left, 2: Right, 3: Top, 4: Bottom
+
+    unsigned long now = millis();
+    if (lastUpdateMs == 0) lastUpdateMs = now;
+    float dt = (float)(now - lastUpdateMs) / 1000.0f;
+    lastUpdateMs = now;
+    if (dt <= 0.0f || dt > 0.1f) dt = 0.025f;
+
+    // Movement speed reactive to audio rhythm / beats
+    float speed = 28.0f;
+    if (audioPlayer.isPlaying() && bassLevel > 20.0f) {
+        speed += (bassLevel / 100.0f) * 18.0f;
+        if (speed > 48.0f) speed = 48.0f;
     }
 
-    const int numSpokes = 6;
+    posX += velX * dt * speed;
+    posY += velY * dt * speed;
+
+    // Boundary Collisions & Random Deflections (Screensaver Physics)
+    if (posX <= (float)minX) {
+        posX = (float)minX;
+        velX = fabsf(velX);
+        float jitter = (float)((rand() % 100) - 50) / 150.0f;
+        velY += jitter;
+        if (fabsf(velY) < 0.45f) velY = (velY < 0.0f ? -0.65f : 0.65f);
+        if (fabsf(velY) > 1.30f) velY = (velY < 0.0f ? -1.10f : 1.10f);
+        hitWall = 1; // Left
+        hitExpiryMs = now + 160;
+    } else if (posX >= (float)maxX) {
+        posX = (float)maxX;
+        velX = -fabsf(velX);
+        float jitter = (float)((rand() % 100) - 50) / 150.0f;
+        velY += jitter;
+        if (fabsf(velY) < 0.45f) velY = (velY < 0.0f ? -0.65f : 0.65f);
+        if (fabsf(velY) > 1.30f) velY = (velY < 0.0f ? -1.10f : 1.10f);
+        hitWall = 2; // Right
+        hitExpiryMs = now + 160;
+    }
+
+    if (posY <= (float)minY) {
+        posY = (float)minY;
+        velY = fabsf(velY);
+        float jitter = (float)((rand() % 100) - 50) / 150.0f;
+        velX += jitter;
+        if (fabsf(velX) < 0.45f) velX = (velX < 0.0f ? -0.65f : 0.65f);
+        if (fabsf(velX) > 1.30f) velX = (velX < 0.0f ? -1.10f : 1.10f);
+        hitWall = 3; // Top
+        hitExpiryMs = now + 160;
+    } else if (posY >= (float)maxY) {
+        posY = (float)maxY;
+        velY = -fabsf(velY);
+        float jitter = (float)((rand() % 100) - 50) / 150.0f;
+        velX += jitter;
+        if (fabsf(velX) < 0.45f) velX = (velX < 0.0f ? -0.65f : 0.65f);
+        if (fabsf(velX) > 1.30f) velX = (velX < 0.0f ? -1.10f : 1.10f);
+        hitWall = 4; // Bottom
+        hitExpiryMs = now + 160;
+    }
+
+    int bx = (int)posX;
+    int by = (int)posY;
+
+    // --- Boundary Collision Strike Effect ---
+    bool isHitting = (now < hitExpiryMs);
+    if (isHitting) {
+        // Strike spark line on the screen wall that was hit
+        if (hitWall == 1) { // Left edge
+            int y1 = max(minY, by - 4);
+            int y2 = min(63, by + boxH + 4);
+            u8g2.drawVLine(0, y1, y2 - y1 + 1);
+            u8g2.drawVLine(1, y1 + 2, max(1, y2 - y1 - 3));
+        } else if (hitWall == 2) { // Right edge
+            int y1 = max(minY, by - 4);
+            int y2 = min(63, by + boxH + 4);
+            u8g2.drawVLine(127, y1, y2 - y1 + 1);
+            u8g2.drawVLine(126, y1 + 2, max(1, y2 - y1 - 3));
+        } else if (hitWall == 3) { // Top edge
+            int x1 = max(0, bx - 4);
+            int x2 = min(127, bx + boxW + 4);
+            u8g2.drawHLine(x1, minY, x2 - x1 + 1);
+            u8g2.drawHLine(x1 + 2, minY + 1, max(1, x2 - x1 - 3));
+        } else if (hitWall == 4) { // Bottom edge
+            int x1 = max(0, bx - 4);
+            int x2 = min(127, bx + boxW + 4);
+            u8g2.drawHLine(x1, 63, x2 - x1 + 1);
+            u8g2.drawHLine(x1 + 2, 62, max(1, x2 - x1 - 3));
+        }
+    }
+
+    // --- Draw the Moving Boundary Box ---
+    u8g2.drawFrame(bx, by, boxW, boxH);
+    if (isHitting) {
+        // Double-line highlighted frame when striking boundary
+        u8g2.drawFrame(bx + 1, by + 1, boxW - 2, boxH - 2);
+    } else {
+        // Stylized corner ticks
+        u8g2.drawPixel(bx + 1, by + 1);
+        u8g2.drawPixel(bx + boxW - 2, by + 1);
+        u8g2.drawPixel(bx + 1, by + boxH - 2);
+        u8g2.drawPixel(bx + boxW - 2, by + boxH - 2);
+    }
+
+    // --- Compact Spinning CD Disc inside Moving Boundary ---
+    int cdX = bx + 13;
+    int cdY = by + 13;
+    u8g2.drawCircle(cdX, cdY, 10);
+    u8g2.drawCircle(cdX, cdY, 3);
+    u8g2.drawPixel(cdX, cdY);
+
+    if (audioPlayer.isPlaying()) {
+        cdAngle += 0.24f;
+        if (cdAngle >= 2.0f * (float)M_PI) cdAngle -= 2.0f * (float)M_PI;
+    }
+
+    const int numSpokes = 4;
     for (int s = 0; s < numSpokes; s++) {
-        float ang = cdAngle + (float)s * ((2.0f * (float)M_PI) / (float)numSpokes);
-        int xInner = cdCenterX + (int)(FastMath::fast_cos(ang) * 8);
-        int yInner = cdCenterY + (int)(FastMath::fast_sin(ang) * 8);
-        int xOuter = cdCenterX + (int)(FastMath::fast_cos(ang) * (cdRadius - 2));
-        int yOuter = cdCenterY + (int)(FastMath::fast_sin(ang) * (cdRadius - 2));
+        float ang = cdAngle + (float)s * ((float)M_PI / 2.0f);
+        int xInner = cdX + (int)(FastMath::fast_cos(ang) * 4);
+        int yInner = cdY + (int)(FastMath::fast_sin(ang) * 4);
+        int xOuter = cdX + (int)(FastMath::fast_cos(ang) * 9);
+        int yOuter = cdY + (int)(FastMath::fast_sin(ang) * 9);
         u8g2.drawLine(xInner, yInner, xOuter, yOuter);
     }
 
-    // --- Optical Laser Pickup Mechanism ---
-    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
-    uint32_t durSec = audioPlayer.getDurationMs() / 1000;
-    float progress = (durSec > 0) ? ((float)posSec / (float)durSec) : 0.0f;
-    if (progress > 1.0f) progress = 1.0f;
-
-    int railX1 = cdCenterX + 8;
-    int railX2 = cdCenterX + cdRadius + 10;
-    u8g2.drawHLine(railX1, cdCenterY + 2, railX2 - railX1);
-
-    // Laser Sled tracking progress
-    int sledX = railX1 + (int)(progress * (railX2 - railX1 - 4));
-    u8g2.drawBox(sledX, cdCenterY, 4, 5);
-    // Laser Beam Dot touching CD surface
-    if (audioPlayer.isPlaying() && (millis() % 200 < 100)) {
-        u8g2.drawPixel(sledX + 2, cdCenterY - 1);
+    // Pulsing laser read dot on disc
+    if (audioPlayer.isPlaying() && (now % 250 < 125)) {
+        u8g2.drawPixel(cdX + 6, cdY - 2);
     }
 
-    // --- Right Info Panel (Song Name, Details, Time) ---
-    int infoX = cdCenterX + cdRadius + 14;
+    // --- CD HUD Info inside Moving Boundary ---
     u8g2.setFont(u8g2_font_4x6_tr);
+    const char* fmt = audioPlayer.isPlaying() ? audioPlayer.getFormatName() : "CD";
+    u8g2.drawStr(bx + 27, by + 7, fmt);
 
-    String trackTitle = audioPlayer.getCurrentTrackName();
-    if (trackTitle.length() == 0) {
-        trackTitle = audioPlayer.isPlaying() ? "CD AUDIO" : "NO DISC";
-    }
-    if (trackTitle.length() > 11) trackTitle = trackTitle.substring(0, 9) + "..";
-
-    u8g2.drawStr(infoX, topY + 8, trackTitle.c_str());
-
-    char timeBuf[20];
+    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+    char timeBuf[12];
     snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u", posSec / 60, posSec % 60);
-    u8g2.drawStr(infoX, topY + 18, timeBuf);
+    u8g2.drawStr(bx + 27, by + 14, timeBuf);
 
-    char fmtBuf[16];
-    snprintf(fmtBuf, sizeof(fmtBuf), "%s", audioPlayer.getFormatName());
-    u8g2.drawStr(infoX, topY + 28, fmtBuf);
-
-    const char* stBadge = audioPlayer.isPlaying() ? "▶PLAY" : (audioPlayer.isPaused() ? "❚❚PAUS" : "■STOP");
-    u8g2.drawStr(infoX, topY + 38, stBadge);
-
-    // Mini Spectrum Bars in CD Player info pane
-    renderMiniBars(u8g2, infoX, topY + 42, 128 - infoX - 4, 10);
+    if (audioPlayer.isPlaying()) {
+        // Mini 4-band music reactive spectrum equalizer
+        for (int b = 0; b < 4; b++) {
+            int h = (bands[b * 2] * 7) / 255;
+            if (h < 1) h = 1;
+            if (h > 7) h = 7;
+            int barX = bx + 27 + b * 6;
+            int barY = by + 23;
+            u8g2.drawVLine(barX, barY - h, h);
+            u8g2.drawVLine(barX + 1, barY - h, h);
+        }
+    } else if (audioPlayer.isPaused()) {
+        u8g2.drawStr(bx + 27, by + 23, "PAUS");
+    } else {
+        u8g2.drawStr(bx + 27, by + 23, "STOP");
+    }
 
     display.sendBuffer();
 }
