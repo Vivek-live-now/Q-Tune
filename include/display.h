@@ -30,6 +30,11 @@ public:
     void drawMenu(const char* title, const char** items, int item_count, int selection, int offset, const char* headerRight = nullptr);
     void drawTopStatusBar(const char* title, int batteryPct);
 
+    // Dynamic Text Scrolling Engine (starts scrolling after 3s on active pointer/item)
+    static void drawScrollingText(U8G2 &u8g2, const char* text, int x, int y, int maxW, unsigned long activeStartMs, bool isSelected = true);
+    static bool isMenuScrolling();
+    static void resetMenuScrolling();
+
     // Menu Navigation & Windowing engine (identical to Q-Watch processNavUp / processNavDown)
     static void navigateMenu(int &selection, int &offset, int count, int dir, bool wrap = true);
 

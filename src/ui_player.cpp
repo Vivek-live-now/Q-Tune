@@ -23,6 +23,8 @@ UIPlayer::UIPlayer() :
     settingsScrollOffset(0),
     eqBandSelection(0),
     artSettingsRow(0),
+    playerTrackStartTime(0),
+    lastTrackPath(""),
     topBarExpiryMs(0) {}
 
 void UIPlayer::begin() {
@@ -48,6 +50,7 @@ void UIPlayer::openNowPlaying() {
     currentView = VIEW_PLAYER;
     inListMode = false;
     currentPage = PAGE_NOW_PLAYING;
+    playerTrackStartTime = millis();
     manualLyricIndex = 0;
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
@@ -60,11 +63,13 @@ PlayerPage UIPlayer::getCurrentPage() const {
 
 void UIPlayer::setPage(PlayerPage page) {
     currentPage = page;
+    playerTrackStartTime = millis();
     wakeTopBar(5000);
 }
 
 void UIPlayer::cyclePage() {
     currentPage = (PlayerPage)((currentPage + 1) % 3);
+    playerTrackStartTime = millis();
     wakeTopBar(5000);
     if (currentPage == PAGE_LYRICS) {
         manualLyricIndex = 0;
@@ -210,6 +215,12 @@ bool UIPlayer::update() {
 
     ButtonEvent evt = buttonManager.update();
 
+    String curTrack = audioPlayer.getCurrentTrackPath();
+    if (curTrack != lastTrackPath) {
+        lastTrackPath = curTrack;
+        playerTrackStartTime = millis();
+    }
+
     // Global Long-Press CANCEL returns to Main Menu from anywhere
     if (evt == BTN_EVENT_CANCEL_HOLD) {
         return false;
@@ -324,7 +335,8 @@ bool UIPlayer::update() {
         }
         static unsigned long lastCatRender = 0;
         unsigned long now = millis();
-        if (evt != BTN_EVENT_NONE || (now - lastCatRender >= 250)) {
+        unsigned long catInterval = Display::isMenuScrolling() ? 60 : 250;
+        if (evt != BTN_EVENT_NONE || (now - lastCatRender >= catInterval)) {
             lastCatRender = now;
             renderCategories();
         }
@@ -363,7 +375,8 @@ bool UIPlayer::update() {
         }
         static unsigned long lastSetRender = 0;
         unsigned long nowSettings = millis();
-        if (evt != BTN_EVENT_NONE || (nowSettings - lastSetRender >= 250)) {
+        unsigned long setInterval = Display::isMenuScrolling() ? 60 : 250;
+        if (evt != BTN_EVENT_NONE || (nowSettings - lastSetRender >= setInterval)) {
             lastSetRender = nowSettings;
             renderPlayerSettings();
         }
@@ -516,7 +529,8 @@ bool UIPlayer::update() {
         }
         static unsigned long lastTrkRender = 0;
         unsigned long nowTrk = millis();
-        if (evt != BTN_EVENT_NONE || (nowTrk - lastTrkRender >= 250)) {
+        unsigned long trkInterval = Display::isMenuScrolling() ? 60 : 250;
+        if (evt != BTN_EVENT_NONE || (nowTrk - lastTrkRender >= trkInterval)) {
             lastTrkRender = nowTrk;
             renderTrackList();
         }
@@ -600,7 +614,8 @@ bool UIPlayer::update() {
         }
         static unsigned long lastFldRender = 0;
         unsigned long nowFld = millis();
-        if (evt != BTN_EVENT_NONE || (nowFld - lastFldRender >= 250)) {
+        unsigned long fldInterval = Display::isMenuScrolling() ? 60 : 250;
+        if (evt != BTN_EVENT_NONE || (nowFld - lastFldRender >= fldInterval)) {
             lastFldRender = nowFld;
             renderFolderBrowser();
         }
@@ -947,7 +962,6 @@ void UIPlayer::renderTrackList() {
                 name = "▶ " + name;
             }
 
-            if (name.length() > 18) name = name.substring(0, 16) + "..";
             displayNames[i] = name;
             itemPtrs[i] = displayNames[i].c_str();
         }
@@ -995,7 +1009,6 @@ void UIPlayer::renderFolderBrowser() {
     }
     for (size_t i = 0; i < currentFolderDirs.size(); i++) {
         String name = "[" + currentFolderDirs[i] + "]";
-        if (name.length() > 18) name = name.substring(0, 16) + "..";
         displayNames.push_back(name);
     }
     for (size_t i = 0; i < currentFolderFiles.size(); i++) {
@@ -1006,7 +1019,6 @@ void UIPlayer::renderFolderBrowser() {
         if (fullPath == currentPlaying && (audioPlayer.isPlaying() || audioPlayer.isPaused())) {
             name = "▶ " + name;
         }
-        if (name.length() > 18) name = name.substring(0, 16) + "..";
         displayNames.push_back(name);
     }
 
@@ -1063,8 +1075,7 @@ void UIPlayer::renderPlayerPage1() {
                     int slash = displayName.lastIndexOf('/');
                     if (slash >= 0) displayName = displayName.substring(slash + 1);
                 }
-                if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-                u8g2.drawStr(0, 23, displayName.c_str());
+                Display::drawScrollingText(u8g2, displayName.c_str(), 0, 23, 126, playerTrackStartTime, true);
 
                 String stateStr = "■ STOP";
                 if (audioPlayer.isPlaying()) {
@@ -1097,8 +1108,7 @@ void UIPlayer::renderPlayerPage1() {
                     int slash = displayName.lastIndexOf('/');
                     if (slash >= 0) displayName = displayName.substring(slash + 1);
                 }
-                if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-                u8g2.drawStr(0, 11, displayName.c_str());
+                Display::drawScrollingText(u8g2, displayName.c_str(), 0, 11, 126, playerTrackStartTime, true);
 
                 uint32_t posSec = audioPlayer.getPositionMs() / 1000;
                 uint32_t durSec = audioPlayer.getDurationMs() / 1000;
@@ -1157,8 +1167,7 @@ void UIPlayer::renderPlayerPage1() {
                 int slash = displayName.lastIndexOf('/');
                 if (slash >= 0) displayName = displayName.substring(slash + 1);
             }
-            if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-            u8g2.drawStr(0, 23, displayName.c_str());
+            Display::drawScrollingText(u8g2, displayName.c_str(), 0, 23, 126, playerTrackStartTime, true);
 
             String stateStr = "■ STOP";
             if (audioPlayer.isPlaying()) {
@@ -1191,8 +1200,7 @@ void UIPlayer::renderPlayerPage1() {
                 int slash = displayName.lastIndexOf('/');
                 if (slash >= 0) displayName = displayName.substring(slash + 1);
             }
-            if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-            u8g2.drawStr(0, 11, displayName.c_str());
+            Display::drawScrollingText(u8g2, displayName.c_str(), 0, 11, 126, playerTrackStartTime, true);
 
             uint32_t posSec = audioPlayer.getPositionMs() / 1000;
             uint32_t durSec = audioPlayer.getDurationMs() / 1000;
@@ -1258,8 +1266,7 @@ void UIPlayer::renderPlayerSplitArt() {
             int slash = displayName.lastIndexOf('/');
             if (slash >= 0) displayName = displayName.substring(slash + 1);
         }
-        if (displayName.length() > 11) displayName = displayName.substring(0, 10) + ".";
-        u8g2.drawStr(60, 18, displayName.c_str());
+        Display::drawScrollingText(u8g2, displayName.c_str(), 60, 18, 66, playerTrackStartTime, true);
 
         // Playback state
         String stateStr = audioPlayer.isPlaying() ? ("▶ " + String(audioPlayer.getFormatName())) : "❚❚ PAUS";
@@ -1296,8 +1303,7 @@ void UIPlayer::renderPlayerSplitArt() {
             int slash = displayName.lastIndexOf('/');
             if (slash >= 0) displayName = displayName.substring(slash + 1);
         }
-        if (displayName.length() > 11) displayName = displayName.substring(0, 10) + ".";
-        u8g2.drawStr(60, 12, displayName.c_str());
+        Display::drawScrollingText(u8g2, displayName.c_str(), 60, 12, 66, playerTrackStartTime, true);
 
         String stateStr = audioPlayer.isPlaying() ? ("▶ " + String(audioPlayer.getFormatName())) : "❚❚ PAUS";
         u8g2.drawStr(60, 23, stateStr.c_str());
@@ -1338,8 +1344,12 @@ void UIPlayer::renderPlayerCoverHero() {
     if (showBar) {
         u8g2.setFont(u8g2_font_5x7_tr);
         String displayName = audioPlayer.getCurrentTrackName();
-        if (displayName.length() > 14) displayName = displayName.substring(0, 12) + "..";
-        u8g2.drawStr(0, 56, displayName.c_str());
+        if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+            displayName = trackList[currentTrackIndex];
+            int slash = displayName.lastIndexOf('/');
+            if (slash >= 0) displayName = displayName.substring(slash + 1);
+        }
+        Display::drawScrollingText(u8g2, displayName.c_str(), 0, 56, 96, playerTrackStartTime, true);
 
         uint32_t posSec = audioPlayer.getPositionMs() / 1000;
         char timeBuf[12];
@@ -1403,10 +1413,8 @@ void UIPlayer::renderPlayerPage2() {
             int slash = displayName.lastIndexOf('/');
             if (slash >= 0) displayName = displayName.substring(slash + 1);
         }
-        if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-
         u8g2.setFont(u8g2_font_6x10_tr);
-        u8g2.drawStr(2, 10, displayName.c_str());
+        Display::drawScrollingText(u8g2, displayName.c_str(), 2, 10, 124, playerTrackStartTime, true);
         u8g2.drawHLine(0, 13, 128);
 
         u8g2.setFont(u8g2_font_5x7_tr);

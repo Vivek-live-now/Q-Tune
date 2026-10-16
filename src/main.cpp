@@ -61,7 +61,9 @@ void updateMainMenu() {
     static int lastSel = -1, lastOff = -1;
     ButtonEvent evt = buttonManager.update();
     unsigned long now = millis();
-    if (evt != BTN_EVENT_NONE || menuSelection != lastSel || menuScrollOffset != lastOff || (now - lastMainRender >= 300)) {
+    bool scrolling = Display::isMenuScrolling();
+    unsigned long refreshRate = scrolling ? 60 : 300;
+    if (evt != BTN_EVENT_NONE || menuSelection != lastSel || menuScrollOffset != lastOff || (now - lastMainRender >= refreshRate)) {
         lastMainRender = now;
         lastSel = menuSelection;
         lastOff = menuScrollOffset;
@@ -130,7 +132,9 @@ void updateRgbEffectsMode() {
     static int lastSel = -1;
     ButtonEvent evt = buttonManager.update();
     unsigned long now = millis();
-    if (evt != BTN_EVENT_NONE || rgbMenuSelection != lastSel || (now - lastRgbRender >= 250)) {
+    bool scrolling = Display::isMenuScrolling();
+    unsigned long refreshRate = scrolling ? 60 : 250;
+    if (evt != BTN_EVENT_NONE || rgbMenuSelection != lastSel || (now - lastRgbRender >= refreshRate)) {
         lastRgbRender = now;
         lastSel = rgbMenuSelection;
 

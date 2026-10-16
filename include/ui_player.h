@@ -94,6 +94,10 @@ private:
     int eqBandSelection;
     int artSettingsRow; // 0=dither, 1=brightness, 2=contrast, 3=threshold
 
+    // Dynamic track title scrolling state
+    unsigned long playerTrackStartTime;
+    String lastTrackPath;
+
     void refreshTrackList();
     void renderCategories();
     void renderTrackList();

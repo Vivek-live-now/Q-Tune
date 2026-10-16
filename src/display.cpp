@@ -82,6 +82,101 @@ void Display::drawScrollBar(int offset, int item_count) {
     }
 }
 
+static String s_lastMenuTitle = "";
+static int s_lastMenuSelection = -1;
+static String s_lastSelectedItemText = "";
+static unsigned long s_selectionStartTime = 0;
+static bool s_menuScrollingActive = false;
+
+bool Display::isMenuScrolling() {
+    return s_menuScrollingActive;
+}
+
+void Display::resetMenuScrolling() {
+    s_lastMenuSelection = -1;
+    s_lastSelectedItemText = "";
+    s_selectionStartTime = millis();
+    s_menuScrollingActive = false;
+}
+
+void Display::drawScrollingText(U8G2 &u8g2, const char* text, int x, int y, int maxW, unsigned long activeStartMs, bool isSelected) {
+    if (!text || text[0] == '\0') return;
+
+    int fullW = u8g2.getStrWidth(text);
+    if (fullW <= maxW) {
+        u8g2.drawStr(x, y, text);
+        return;
+    }
+
+    unsigned long now = millis();
+    unsigned long elapsed = (now >= activeStartMs) ? (now - activeStartMs) : 0;
+
+    // First 3 seconds or unselected: show static starting text truncated to maxW
+    if (elapsed < 3000 || !isSelected) {
+        String label = text;
+        while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxW) {
+            label.remove(label.length() - 1);
+        }
+        if (label.length() > 0) label += ".";
+        u8g2.drawStr(x, y, label.c_str());
+        return;
+    }
+
+    // Active scrolling after 3 seconds on pointer/item
+    int strLen = strlen(text);
+    unsigned long scrollElapsed = elapsed - 3000;
+
+    int charIndices[128];
+    int totalChars = 0;
+    for (int bi = 0; bi < strLen && totalChars < 127; ) {
+        charIndices[totalChars++] = bi;
+        uint8_t c = (uint8_t)text[bi];
+        int cpLen = (c < 0x80) ? 1 : (c < 0xE0) ? 2 : (c < 0xF0) ? 3 : 4;
+        bi += cpLen;
+    }
+    charIndices[totalChars] = strLen;
+
+    int maxStartChar = 0;
+    for (int i = 0; i < totalChars; i++) {
+        const char* sub = text + charIndices[i];
+        if (u8g2.getStrWidth(sub) > maxW) {
+            maxStartChar = i + 1;
+        } else {
+            break;
+        }
+    }
+    if (maxStartChar <= 0) {
+        u8g2.drawStr(x, y, text);
+        return;
+    }
+
+    const unsigned long STEP_MS = 180;
+    const unsigned long PAUSE_MS = 1500;
+    unsigned long scrollDuration = (unsigned long)maxStartChar * STEP_MS;
+    unsigned long cycleDuration = scrollDuration + PAUSE_MS + PAUSE_MS;
+    unsigned long cycleTime = scrollElapsed % cycleDuration;
+
+    int curStartChar = 0;
+    if (cycleTime < scrollDuration) {
+        curStartChar = (int)(cycleTime / STEP_MS);
+    } else if (cycleTime < scrollDuration + PAUSE_MS) {
+        curStartChar = maxStartChar;
+    } else {
+        curStartChar = 0;
+    }
+
+    if (curStartChar > maxStartChar) curStartChar = maxStartChar;
+    int startByte = charIndices[curStartChar];
+    const char* visibleSub = text + startByte;
+
+    String visibleStr = visibleSub;
+    while (visibleStr.length() > 0 && u8g2.getStrWidth(visibleStr.c_str()) > maxW) {
+        visibleStr.remove(visibleStr.length() - 1);
+    }
+
+    u8g2.drawStr(x, y, visibleStr.c_str());
+}
+
 void Display::drawStandardMenu(const char* title, const char** items, int item_count, int selection, int offset, const String* values, const char* headerRight) {
     u8g2.setFont(u8g2_font_5x7_tr);
     int hw = (headerRight && headerRight[0] != '\0') ? u8g2.getStrWidth(headerRight) : 0;
@@ -100,6 +195,16 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
     u8g2.drawLine(0, 9, 128, 9);
     u8g2.setFont(u8g2_font_6x10_tr);
 
+    const char* curSelItem = (items && selection >= 0 && selection < item_count && items[selection]) ? items[selection] : "";
+    String curTitle = title ? title : "";
+    if (curTitle != s_lastMenuTitle || selection != s_lastMenuSelection || curSelItem != s_lastSelectedItemText) {
+        s_lastMenuTitle = curTitle;
+        s_lastMenuSelection = selection;
+        s_lastSelectedItemText = curSelItem;
+        s_selectionStartTime = millis();
+        s_menuScrollingActive = false;
+    }
+
     int y_pos = 21;
 
     for (int i = offset; i < offset + 4 && i < item_count; i++) {
@@ -109,23 +214,33 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
         int maxLabelW = (valStr && vw > 0) ? (valX - 4 - 3) : 114;
         if (maxLabelW < 24) maxLabelW = 24;
 
-        String label = (items && items[i]) ? items[i] : "";
-        if (u8g2.getStrWidth(label.c_str()) > maxLabelW) {
-            while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxLabelW) {
-                label.remove(label.length() - 1);
-            }
-            if (label.length() > 0) label += ".";
-        }
+        const char* rawLabel = (items && items[i]) ? items[i] : "";
+        int fullW = u8g2.getStrWidth(rawLabel);
 
         if (i == selection) {
             u8g2.drawBox(2, y_pos - 9, 118, 11);
             u8g2.setDrawColor(0);
-            u8g2.drawStr(4, y_pos, label.c_str());
+            if (fullW > maxLabelW) {
+                unsigned long elapsed = (millis() >= s_selectionStartTime) ? (millis() - s_selectionStartTime) : 0;
+                if (elapsed >= 3000) {
+                    s_menuScrollingActive = true;
+                }
+                drawScrollingText(u8g2, rawLabel, 4, y_pos, maxLabelW, s_selectionStartTime, true);
+            } else {
+                u8g2.drawStr(4, y_pos, rawLabel);
+            }
             if (valStr) {
                 u8g2.drawStr(valX, y_pos, valStr);
             }
             u8g2.setDrawColor(1);
         } else {
+            String label = rawLabel;
+            if (fullW > maxLabelW) {
+                while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxLabelW) {
+                    label.remove(label.length() - 1);
+                }
+                if (label.length() > 0) label += ".";
+            }
             u8g2.drawStr(4, y_pos, label.c_str());
             if (valStr) {
                 u8g2.drawStr(valX, y_pos, valStr);
@@ -155,6 +270,16 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
     u8g2.drawLine(0, 9, 128, 9);
     u8g2.setFont(u8g2_font_6x10_tr);
 
+    const char* curSelItem = (items && selection >= 0 && selection < item_count && items[selection]) ? items[selection] : "";
+    String curTitle = title ? title : "";
+    if (curTitle != s_lastMenuTitle || selection != s_lastMenuSelection || curSelItem != s_lastSelectedItemText) {
+        s_lastMenuTitle = curTitle;
+        s_lastMenuSelection = selection;
+        s_lastSelectedItemText = curSelItem;
+        s_selectionStartTime = millis();
+        s_menuScrollingActive = false;
+    }
+
     int y_pos = 21;
 
     for (int i = offset; i < offset + 4 && i < item_count; i++) {
@@ -164,23 +289,33 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
         int maxLabelW = (valStr && vw > 0) ? (valX - 4 - 3) : 114;
         if (maxLabelW < 24) maxLabelW = 24;
 
-        String label = (items && items[i]) ? items[i] : "";
-        if (u8g2.getStrWidth(label.c_str()) > maxLabelW) {
-            while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxLabelW) {
-                label.remove(label.length() - 1);
-            }
-            if (label.length() > 0) label += ".";
-        }
+        const char* rawLabel = (items && items[i]) ? items[i] : "";
+        int fullW = u8g2.getStrWidth(rawLabel);
 
         if (i == selection) {
             u8g2.drawBox(2, y_pos - 9, 118, 11);
             u8g2.setDrawColor(0);
-            u8g2.drawStr(4, y_pos, label.c_str());
+            if (fullW > maxLabelW) {
+                unsigned long elapsed = (millis() >= s_selectionStartTime) ? (millis() - s_selectionStartTime) : 0;
+                if (elapsed >= 3000) {
+                    s_menuScrollingActive = true;
+                }
+                drawScrollingText(u8g2, rawLabel, 4, y_pos, maxLabelW, s_selectionStartTime, true);
+            } else {
+                u8g2.drawStr(4, y_pos, rawLabel);
+            }
             if (valStr) {
                 u8g2.drawStr(valX, y_pos, valStr);
             }
             u8g2.setDrawColor(1);
         } else {
+            String label = rawLabel;
+            if (fullW > maxLabelW) {
+                while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxLabelW) {
+                    label.remove(label.length() - 1);
+                }
+                if (label.length() > 0) label += ".";
+            }
             u8g2.drawStr(4, y_pos, label.c_str());
             if (valStr) {
                 u8g2.drawStr(valX, y_pos, valStr);
