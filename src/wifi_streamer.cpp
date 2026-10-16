@@ -174,6 +174,7 @@ bool WiFiStreamer::start() {
     audioPlayer.prepareForStream(44100);
 
     // Wi-Fi RF & power stabilization
+    WiFi.setHostname("q-tunes");
     WiFi.persistent(false);
     WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);                 // Disable modem sleep to prevent latency jitter and dropped frames
@@ -210,6 +211,14 @@ bool WiFiStreamer::start() {
     // Start Captive Portal DNS server (port 53)
     dnsServer.start(53, "*", WiFi.softAPIP());
 
+    // Initialize mDNS responder (http://q-tunes.local)
+    if (MDNS.begin("q-tunes")) {
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addService("upnp", "tcp", 8080);
+        MDNS.addServiceTxt("http", "tcp", "device", "Q-Tune");
+        MDNS.addServiceTxt("http", "tcp", "version", "1.0");
+    }
+
     // SSDP multicast listener on UDP port 1900
     ssdpUdp.beginMulticast(IPAddress(239, 255, 255, 250), 1900);
     sendSSDPAnnounce();
@@ -239,6 +248,7 @@ void WiFiStreamer::stop() {
         streamTaskHandle = NULL;
     }
 
+    MDNS.end();
     dnsServer.stop();
     configServer.stop();
     upnpServer.stop();
@@ -264,6 +274,25 @@ void WiFiStreamer::reconnect() {
     } else {
         startAPMode();
     }
+}
+
+String WiFiStreamer::getMDNSHostname() const {
+    return "q-tunes.local";
+}
+
+void WiFiStreamer::playStreamUrl(const String &url) {
+    if (url.length() == 0) return;
+    activeStreamUrl = url;
+    currentTrackTitle = "Direct Stream";
+    currentTrackArtist = url;
+    if (currentTrackArtist.startsWith("http://")) currentTrackArtist = currentTrackArtist.substring(7);
+    int slash = currentTrackArtist.indexOf('/');
+    if (slash != -1) currentTrackArtist = currentTrackArtist.substring(0, slash);
+    if (activeStreamClient.connected()) {
+        activeStreamClient.stop();
+    }
+    hasActiveStream = true;
+    streamState = STREAM_BUFFERING;
 }
 
 void WiFiStreamer::setCredentials(const String &ssid, const String &password) {
@@ -408,29 +437,127 @@ static String htmlEscape(const String &input) {
 void WiFiStreamer::setupConfigServer() {
     configServer.on("/", HTTP_GET, [this]() {
         IPAddress ip = (wifiState == WIFI_STATE_CONNECTED) ? WiFi.localIP() : WiFi.softAPIP();
-        String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                      "<title>Q-Tune Audiophile Portal</title>"
-                      "<style>body{font-family:sans-serif;background:#121212;color:#eee;padding:20px;text-align:center;}"
-                      ".card{background:#1e1e1e;border-radius:10px;padding:20px;margin:15px auto;max-width:380px;box-shadow:0 4px 10px rgba(0,0,0,0.5);}"
-                      "h2{color:#00e5ff;}input[type=text],input[type=password]{width:90%;padding:10px;margin:8px 0;border-radius:5px;border:none;background:#2a2a2a;color:#fff;}"
-                      "button{background:#00e5ff;color:#000;border:none;padding:12px 20px;font-size:16px;border-radius:5px;cursor:pointer;font-weight:bold;margin:5px;}"
-                      ".badge{display:inline-block;padding:4px 10px;border-radius:12px;background:#333;font-size:13px;margin:4px;}"
-                      "</style></head><body>"
+        String html = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                      "<title>Q-Tune Audiophile Remote</title>"
+                      "<style>"
+                      ":root{--bg:#121214;--card:#1e1e24;--accent:#00e5ff;--pink:#ff007f;--green:#00e676;--text:#f0f0f5;--sub:#8e8e9a;--border:#2c2c36;}"
+                      "*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,sans-serif;}"
+                      "body{background:var(--bg);color:var(--text);padding:16px;display:flex;flex-direction:column;align-items:center;min-height:100vh;}"
+                      ".container{width:100%;max-width:440px;display:flex;flex-direction:column;gap:16px;}"
+                      ".header{text-align:center;padding:12px 0 6px;}"
+                      ".header h1{font-size:22px;letter-spacing:2px;color:var(--accent);font-weight:800;}"
+                      ".header .badge{display:inline-block;background:#1a2b35;color:var(--accent);font-size:12px;padding:3px 10px;border-radius:12px;border:1px solid rgba(0,229,255,0.3);margin-top:4px;text-decoration:none;}"
+                      ".card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,0.4);}"
+                      ".card h2{font-size:15px;text-transform:uppercase;letter-spacing:1px;color:var(--sub);margin-bottom:12px;}"
+                      ".now-playing{text-align:center;padding:20px 16px;}"
+                      ".track-title{font-size:18px;font-weight:700;color:#fff;margin-bottom:4px;word-break:break-word;}"
+                      ".track-artist{font-size:14px;color:var(--sub);margin-bottom:12px;}"
+                      ".status-pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;background:#2a2a38;color:var(--green);border:1px solid var(--green);}"
+                      ".status-pill.buffering{color:#ffea00;border-color:#ffea00;}"
+                      ".status-pill.idle{color:var(--sub);border-color:var(--sub);}"
+                      ".bar-wrap{background:#141418;border-radius:6px;height:8px;overflow:hidden;margin:12px 0 4px;border:1px solid var(--border);}"
+                      ".bar-fill{background:linear-gradient(90deg,var(--accent),var(--pink));height:100%;width:0%;transition:width 0.3s;}"
+                      ".bar-label{font-size:11px;color:var(--sub);display:flex;justify-content:space-between;}"
+                      ".controls{display:flex;gap:10px;margin-top:14px;justify-content:center;}"
+                      "button,.btn{background:#2a2a36;color:var(--text);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;}"
+                      "button:hover,.btn:hover{background:#353545;border-color:var(--accent);}"
+                      "button.primary{background:var(--accent);color:#000;border:none;}"
+                      "button.primary:hover{background:#33ebff;}"
+                      ".vol-box{display:flex;align-items:center;gap:12px;margin-top:14px;}"
+                      ".vol-box input[type=range]{flex:1;accent-color:var(--accent);height:6px;cursor:pointer;}"
+                      ".info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #252530;font-size:13px;}"
+                      ".info-row:last-child{border-bottom:none;}"
+                      ".info-label{color:var(--sub);}"
+                      ".input-group{margin-bottom:12px;}"
+                      ".input-group label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px;}"
+                      "input[type=text],input[type=password]{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:#16161c;color:#fff;font-size:14px;}"
+                      "input[type=text]:focus,input[type=password]:focus{outline:none;border-color:var(--accent);}"
+                      ".scan-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}"
+                      ".scan-item{background:#282834;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;border:1px solid var(--border);}"
+                      ".scan-item:hover{border-color:var(--accent);color:var(--accent);}"
+                      ".guide-box{font-size:12px;line-height:1.5;color:var(--sub);background:#17171e;padding:12px;border-radius:8px;}"
+                      ".guide-box b{color:var(--text);}"
+                      "</style></head><body><div class='container'>"
+                      "<div class='header'>"
+                      "<h1>Q-TUNE AUDIOPHILE</h1>"
+                      "<a class='badge' href='http://q-tunes.local' target='_blank'>http://q-tunes.local</a>"
+                      "</div>"
+                      "<div class='card now-playing'>"
+                      "<h2>Live Network Stream</h2>"
+                      "<div class='track-title' id='title'>" + htmlEscape(currentTrackTitle) + "</div>"
+                      "<div class='track-artist' id='artist'>" + htmlEscape(currentTrackArtist) + "</div>"
+                      "<span class='status-pill' id='st-pill'>" + String(streamState == STREAM_PLAYING ? "STREAMING" : (streamState == STREAM_BUFFERING ? "BUFFERING" : (streamState == STREAM_PAUSED ? "PAUSED" : "IDLE"))) + "</span>"
+                      "<div class='bar-wrap'><div class='bar-fill' id='buf-bar' style='width:" + String(getBufferFillPercentage()) + "%;'></div></div>"
+                      "<div class='bar-label'><span>Buffer Fill</span><span id='buf-pct'>" + String(getBufferFillPercentage()) + "%</span></div>"
+                      "<div class='controls'>"
+                      "<button onclick='callApi(\"/api/playback?action=toggle\")' class='primary'>Play / Pause</button>"
+                      "<button onclick='callApi(\"/toggle_output\")' id='out-btn'>Output: " + String(audioPlayer.getOutputModeShortName()) + "</button>"
+                      "</div>"
+                      "<div class='vol-box'>"
+                      "<span style='font-size:12px;color:var(--sub);'>Vol</span>"
+                      "<input type='range' min='0' max='100' id='vol-slider' value='" + String(audioPlayer.getVolume()) + "' oninput='setVol(this.value)'>"
+                      "<span id='vol-num' style='font-size:13px;width:32px;font-weight:700;'>" + String(audioPlayer.getVolume()) + "%</span>"
+                      "</div></div>"
                       "<div class='card'>"
-                      "<h2>Q-TUNE AUDIOPHILE</h2>"
-                      "<p><b>Status:</b> <span class='badge'>" + (wifiState == WIFI_STATE_CONNECTED ? "Connected: " + htmlEscape(savedSSID) : (wifiState == WIFI_STATE_CONNECTING ? "Connecting to: " + htmlEscape(savedSSID) : "SoftAP Mode")) + "</span></p>"
-                      "<p><b>IP Address:</b> " + ip.toString() + "</p>"
-                      "<p><b>Output Mode:</b> <span class='badge' style='background:#00e5ff;color:#000;'>" + String(audioPlayer.getOutputModeName()) + "</span></p>"
-                      "<p><b>Now Streaming:</b><br><i>" + htmlEscape(currentTrackTitle) + "</i><br><small>" + htmlEscape(currentTrackArtist) + "</small></p>"
-                      "<form method='POST' action='/toggle_output'><button type='submit'>Switch Output (SPKR/KA11)</button></form>"
+                      "<h2>Direct Audio Stream URL</h2>"
+                      "<div class='input-group'>"
+                      "<input type='text' id='stream-url' placeholder='http://host:port/stream.wav'>"
+                      "</div>"
+                      "<button onclick='playUrl()' class='primary' style='width:100%;'>Stream to Q-Tune</button>"
                       "</div>"
                       "<div class='card'>"
-                      "<h3>Wi-Fi Setup</h3>"
-                      "<form method='POST' action='/save'>"
-                      "<input type='text' name='ssid' placeholder='Wi-Fi SSID' value='" + htmlEscape(savedSSID) + "' required><br>"
-                      "<input type='password' name='pass' placeholder='Password'><br>"
-                      "<button type='submit'>Save & Connect</button>"
-                      "</form></div></body></html>";
+                      "<h2>Wi-Fi Setup & Network</h2>"
+                      "<div class='info-row'><span class='info-label'>Status</span><span id='net-status'>" + (wifiState == WIFI_STATE_CONNECTED ? "Connected: " + htmlEscape(savedSSID) : (wifiState == WIFI_STATE_CONNECTING ? "Connecting: " + htmlEscape(savedSSID) : "SoftAP Mode")) + "</span></div>"
+                      "<div class='info-row'><span class='info-label'>IP Address</span><span id='net-ip'>" + ip.toString() + "</span></div>"
+                      "<div class='info-row'><span class='info-label'>mDNS URL</span><span style='color:var(--accent);font-weight:bold;'>http://q-tunes.local</span></div>"
+                      "<div class='info-row'><span class='info-label'>Signal</span><span id='net-rssi'>" + (wifiState == WIFI_STATE_CONNECTED ? String(WiFi.RSSI()) + " dBm" : "N/A") + "</span></div>"
+                      "<div style='margin-top:12px;'>"
+                      "<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                      "<label style='font-size:12px;color:var(--sub);'>Nearby Networks</label>"
+                      "<button onclick='scanWifi()' style='padding:4px 10px;font-size:11px;'>Scan</button>"
+                      "</div>"
+                      "<div class='scan-list' id='scan-results'></div>"
+                      "</div>"
+                      "<form method='POST' action='/save' style='margin-top:12px;'>"
+                      "<div class='input-group'>"
+                      "<label>SSID</label>"
+                      "<input type='text' name='ssid' id='ssid-in' value='" + htmlEscape(savedSSID) + "' required>"
+                      "</div>"
+                      "<div class='input-group'>"
+                      "<label>Password</label>"
+                      "<input type='password' name='pass' id='pass-in'>"
+                      "</div>"
+                      "<button type='submit' class='primary' style='width:100%;'>Save & Connect</button>"
+                      "</form></div>"
+                      "<div class='card'>"
+                      "<h2>Streaming Quick Guide</h2>"
+                      "<div class='guide-box'>"
+                      "<p style='margin-bottom:6px;'><b>Android:</b> Open <b>BubbleUPnP</b> or <b>AirMusic</b> &rarr; select <i>Q-Tune Audiophile Player</i> as renderer.</p>"
+                      "<p style='margin-bottom:6px;'><b>Windows:</b> Right click any music file &rarr; <i>Cast to Device</i> &rarr; <i>Q-Tune Audiophile Player</i>.</p>"
+                      "<p><b>iOS / Mac:</b> Use <b>VLC</b> (Local Network &rarr; UPnP) or <b>Foobar2000 Mobile</b>.</p>"
+                      "</div></div></div>"
+                      "<script>"
+                      "function callApi(ep){fetch(ep,{method:'POST'}).then(()=>updateStatus());}"
+                      "function setVol(v){document.getElementById('vol-num').innerText=v+'%';fetch('/api/volume?val='+v,{method:'POST'});}"
+                      "function playUrl(){var u=document.getElementById('stream-url').value;if(u){fetch('/api/stream_url?url='+encodeURIComponent(u),{method:'POST'}).then(()=>updateStatus());}}"
+                      "function scanWifi(){var el=document.getElementById('scan-results');el.innerHTML='Scanning...';fetch('/scan').then(r=>r.json()).then(d=>{if(d.networks){el.innerHTML='';d.networks.forEach(n=>{var b=document.createElement('div');b.className='scan-item';b.innerText=n.ssid+' ('+n.rssi+'dBm)';b.onclick=function(){document.getElementById('ssid-in').value=n.ssid;};el.appendChild(b);});}else{setTimeout(scanWifi,1500);}}).catch(()=>{el.innerHTML='Scan failed';});}"
+                      "function updateStatus(){fetch('/api/status').then(r=>r.json()).then(d=>{"
+                      "document.getElementById('title').innerText=d.title||'Ready for Stream';"
+                      "document.getElementById('artist').innerText=d.artist||'AirMusic / Poweramp';"
+                      "var pill=document.getElementById('st-pill');pill.innerText=d.stream_state;pill.className='status-pill '+(d.stream_state=='STREAMING'?'':d.stream_state.toLowerCase());"
+                      "document.getElementById('buf-bar').style.width=d.buf_percent+'%';"
+                      "document.getElementById('buf-pct').innerText=d.buf_percent+'%';"
+                      "document.getElementById('vol-slider').value=d.volume;"
+                      "document.getElementById('vol-num').innerText=d.volume+'%';"
+                      "document.getElementById('out-btn').innerText='Output: '+(d.output_short||'SPKR');"
+                      "document.getElementById('net-status').innerText=d.state=='CONNECTED'?('Connected ('+d.ssid+')'):(d.state=='CONNECTING'?'Connecting...':'SoftAP');"
+                      "document.getElementById('net-ip').innerText=d.ip;"
+                      "document.getElementById('net-rssi').innerText=d.state=='CONNECTED'?(d.rssi+' dBm'):'N/A';"
+                      "if(!document.getElementById('ssid-in').value&&d.ssid)document.getElementById('ssid-in').value=d.ssid;"
+                      "}).catch(()=>{});}"
+                      "setInterval(updateStatus,2000);updateStatus();"
+                      "</script></body></html>";
         configServer.send(200, "text/html", html);
     });
 
@@ -439,8 +566,8 @@ void WiFiStreamer::setupConfigServer() {
             setCredentials(configServer.arg("ssid"), configServer.arg("pass"));
             String resp = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
                           "<meta http-equiv='refresh' content='4;url=/'>"
-                          "<style>body{font-family:sans-serif;background:#121212;color:#eee;text-align:center;padding:30px;}"
-                          ".card{background:#1e1e1e;border-radius:10px;padding:20px;margin:auto;max-width:360px;}"
+                          "<style>body{font-family:sans-serif;background:#121214;color:#eee;text-align:center;padding:30px;}"
+                          ".card{background:#1e1e24;border-radius:10px;padding:20px;margin:auto;max-width:360px;}"
                           "h3{color:#00e5ff;}</style></head><body>"
                           "<div class='card'><h3>Settings Saved!</h3>"
                           "<p>Connecting to <b>" + htmlEscape(savedSSID) + "</b>...</p>"
@@ -456,8 +583,95 @@ void WiFiStreamer::setupConfigServer() {
     configServer.on("/toggle_output", HTTP_POST, [this]() {
         AudioOutputMode cur = audioPlayer.getOutputMode();
         audioPlayer.setOutputMode((cur == OUTPUT_MODE_SPEAKER_I2S) ? OUTPUT_MODE_FIIO_USB_DAC : OUTPUT_MODE_SPEAKER_I2S);
-        configServer.sendHeader("Location", "/");
-        configServer.send(303);
+        if (configServer.hasArg("redirect")) {
+            configServer.sendHeader("Location", "/");
+            configServer.send(303);
+        } else {
+            configServer.send(200, "application/json", "{\"output\":\"" + String(audioPlayer.getOutputModeShortName()) + "\"}");
+        }
+    });
+
+    // REST API endpoints
+    configServer.on("/api/status", HTTP_GET, [this]() {
+        IPAddress ip = (wifiState == WIFI_STATE_CONNECTED) ? WiFi.localIP() : WiFi.softAPIP();
+        const char *stateStr = (streamState == STREAM_PLAYING) ? "STREAMING" :
+                              (streamState == STREAM_BUFFERING) ? "BUFFERING" :
+                              (streamState == STREAM_PAUSED) ? "PAUSED" : "IDLE";
+        String json = "{";
+        json += "\"state\":\"" + String(wifiState == WIFI_STATE_CONNECTED ? "CONNECTED" : (wifiState == WIFI_STATE_CONNECTING ? "CONNECTING" : "AP_MODE")) + "\",";
+        json += "\"ip\":\"" + ip.toString() + "\",";
+        json += "\"mdns\":\"q-tunes.local\",";
+        json += "\"ssid\":\"" + htmlEscape(savedSSID) + "\",";
+        json += "\"rssi\":" + String(getRSSI()) + ",";
+        json += "\"output\":\"" + String(audioPlayer.getOutputModeName()) + "\",";
+        json += "\"output_short\":\"" + String(audioPlayer.getOutputModeShortName()) + "\",";
+        json += "\"stream_state\":\"" + String(stateStr) + "\",";
+        json += "\"title\":\"" + htmlEscape(currentTrackTitle) + "\",";
+        json += "\"artist\":\"" + htmlEscape(currentTrackArtist) + "\",";
+        json += "\"volume\":" + String(audioPlayer.getVolume()) + ",";
+        json += "\"buf_percent\":" + String(getBufferFillPercentage()) + ",";
+        json += "\"buf_bytes\":" + String(ringCount);
+        json += "}";
+        configServer.send(200, "application/json", json);
+    });
+
+    configServer.on("/api/playback", HTTP_POST, [this]() {
+        String action = configServer.hasArg("action") ? configServer.arg("action") : "toggle";
+        if (action == "pause") {
+            pauseStream();
+        } else if (action == "resume") {
+            resumeStream();
+        } else if (action == "stop") {
+            stopStream();
+        } else {
+            if (streamState == STREAM_PLAYING) pauseStream();
+            else if (streamState == STREAM_PAUSED) resumeStream();
+        }
+        configServer.send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+
+    configServer.on("/api/volume", HTTP_POST, [this]() {
+        if (configServer.hasArg("val")) {
+            int vol = configServer.arg("val").toInt();
+            audioPlayer.setVolume((uint8_t)constrain(vol, 0, 100));
+        } else if (configServer.hasArg("step")) {
+            int step = configServer.arg("step").toInt();
+            if (step > 0) audioPlayer.volumeUp(step);
+            else if (step < 0) audioPlayer.volumeDown(-step);
+        }
+        configServer.send(200, "application/json", "{\"volume\":" + String(audioPlayer.getVolume()) + "}");
+    });
+
+    configServer.on("/api/stream_url", HTTP_POST, [this]() {
+        if (configServer.hasArg("url")) {
+            String url = configServer.arg("url");
+            url.trim();
+            if (url.length() > 0) {
+                playStreamUrl(url);
+                configServer.send(200, "application/json", "{\"status\":\"ok\",\"streaming\":true}");
+                return;
+            }
+        }
+        configServer.send(400, "application/json", "{\"error\":\"Missing URL\"}");
+    });
+
+    configServer.on("/scan", HTTP_GET, [this]() {
+        int n = WiFi.scanComplete();
+        if (n == -2) {
+            WiFi.scanNetworks(true);
+            configServer.send(200, "application/json", "{\"status\":\"scanning\"}");
+        } else if (n >= 0) {
+            String json = "{\"status\":\"ready\",\"networks\":[";
+            for (int i = 0; i < n; i++) {
+                if (i > 0) json += ",";
+                json += "{\"ssid\":\"" + htmlEscape(WiFi.SSID(i)) + "\",\"rssi\":" + String(WiFi.RSSI(i)) + "}";
+            }
+            json += "]}";
+            WiFi.scanDelete();
+            configServer.send(200, "application/json", json);
+        } else {
+            configServer.send(200, "application/json", "{\"status\":\"pending\"}");
+        }
     });
 
     // Captive portal assistant endpoints for mobile OS detection
@@ -697,6 +911,8 @@ void WiFiStreamer::update() {
                 wifiState = WIFI_STATE_CONNECTED;
                 // Re-announce on SSDP with station IP address
                 sendSSDPAnnounce();
+                // Re-announce mDNS responder on station interface
+                MDNS.begin("q-tunes");
             }
         } else {
             if (savedSSID.length() > 0) {
@@ -755,8 +971,8 @@ void WiFiStreamer::renderUI() {
         u8g2.setFont(u8g2_font_5x7_tr);
         u8g2.drawStr(2, 20, "AP: Q-Tune-Audio");
         u8g2.drawStr(2, 29, "Pass: 12345678");
-        u8g2.drawStr(2, 38, "Web: http://192.168.4.1");
-        u8g2.drawStr(2, 47, "SD: wifi.txt (auto)");
+        u8g2.drawStr(2, 38, "URL: q-tunes.local");
+        u8g2.drawStr(2, 47, "IP:  192.168.4.1");
 
         u8g2.setFont(u8g2_font_4x6_tr);
         u8g2.drawStr(2, 55, "SEL:Retry SD  CANCEL:Exit");
@@ -778,7 +994,7 @@ void WiFiStreamer::renderUI() {
         }
         u8g2.drawStr(2, 30, ssidBuf);
 
-        u8g2.drawStr(2, 40, "AP: 192.168.4.1 (Active)");
+        u8g2.drawStr(2, 40, "URL: q-tunes.local");
 
         u8g2.setFont(u8g2_font_4x6_tr);
         u8g2.drawStr(2, 53, "SEL:Retry SD  CANCEL:Exit");
@@ -786,9 +1002,9 @@ void WiFiStreamer::renderUI() {
         // Connected mode (Streaming HUD)
         u8g2.setFont(u8g2_font_5x7_tr);
 
-        // Network line: IP and RSSI
+        // Network line: mDNS host and signal strength
         char netBuf[32];
-        snprintf(netBuf, sizeof(netBuf), "IP: %s (%ddBm)", getIPAddress().c_str(), WiFi.RSSI());
+        snprintf(netBuf, sizeof(netBuf), "q-tunes.local (%ddBm)", WiFi.RSSI());
         u8g2.drawStr(2, 20, netBuf);
 
         // Stream status line

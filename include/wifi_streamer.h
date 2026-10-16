@@ -6,6 +6,7 @@
 #include <WiFiUdp.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <Preferences.h>
 #include "hw_config.h"
 
@@ -36,11 +37,13 @@ public:
     void pauseStream();
     void resumeStream();
     void stopStream();
+    void playStreamUrl(const String &url);
 
     // State & Status
     WiFiStreamState getWiFiState() const;
     AudioStreamState getStreamState() const;
     String getIPAddress() const;
+    String getMDNSHostname() const;
     String getSSID() const;
     int8_t getRSSI() const;
     String getTrackTitle() const;
