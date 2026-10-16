@@ -563,12 +563,21 @@ bool SDManager::buildLyricsIndex(void (*progressCallback)(int count)) {
                 if (embSync == LYRICS_SYNC_TIMED) {
                     entry.syncType = LYRICS_SYNC_TIMED;
                     entry.sourcePriority = LYRICS_SRC_EMB_SYNC;
+                } else if (embText.length() > 0) {
+                    LyricsParser tempParser;
+                    if (tempParser.parseLRCContent(embText) && tempParser.isSynchronized()) {
+                        entry.syncType = LYRICS_SYNC_TIMED;
+                        entry.sourcePriority = LYRICS_SRC_EMB_SYNC;
+                    } else if (foundExtLrc || entry.txtFileSize > 0) {
+                        entry.syncType = LYRICS_SYNC_UNTIMED;
+                        entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+                    } else {
+                        entry.syncType = LYRICS_SYNC_UNTIMED;
+                        entry.sourcePriority = LYRICS_SRC_EMB_UNSYNC;
+                    }
                 } else if (foundExtLrc || entry.txtFileSize > 0) {
                     entry.syncType = LYRICS_SYNC_UNTIMED;
                     entry.sourcePriority = LYRICS_SRC_EXT_UNSYNC;
-                } else if (embSync == LYRICS_SYNC_UNTIMED) {
-                    entry.syncType = LYRICS_SYNC_UNTIMED;
-                    entry.sourcePriority = LYRICS_SRC_EMB_UNSYNC;
                 } else {
                     entry.syncType = LYRICS_SYNC_NONE;
                     entry.sourcePriority = LYRICS_SRC_NONE;

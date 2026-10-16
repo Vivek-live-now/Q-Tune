@@ -69,6 +69,8 @@ public:
     bool parseLRCContent(const String &content);
     bool parseTXTContent(const String &content);
     static bool parseLRCLine(const String &line, uint32_t &timestampMs, String &text);
+    static bool parseTimestampMs(const String &tagInner, uint32_t &outMs);
+    static String stripAllTimestamps(const String &line);
 
 private:
     std::vector<LyricLine> lines;

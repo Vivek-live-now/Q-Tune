@@ -77,55 +77,154 @@ String LyricsParser::decodeID3String(const uint8_t *data, size_t len, uint8_t en
     return String(decoded.c_str());
 }
 
+bool LyricsParser::parseTimestampMs(const String &tagInner, uint32_t &outMs) {
+    String s = tagInner;
+    s.trim();
+    if (s.indexOf(':') < 0) return false;
+
+    // Check characters: only digits, ':', '.', ',', and spaces allowed
+    bool hasDigit = false;
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s.charAt(i);
+        if (isdigit(c)) {
+            hasDigit = true;
+        } else if (c != ':' && c != '.' && c != ',' && c != ' ') {
+            return false; // Not a timestamp (e.g. metadata [ti:title] or [ar:artist])
+        }
+    }
+    if (!hasDigit) return false;
+
+    // Normalize comma to dot
+    s.replace(',', '.');
+
+    // Split by ':'
+    std::vector<String> parts;
+    int start = 0;
+    while (start < (int)s.length()) {
+        int nextColon = s.indexOf(':', start);
+        if (nextColon < 0) nextColon = s.length();
+        String p = s.substring(start, nextColon);
+        p.trim();
+        parts.push_back(p);
+        start = nextColon + 1;
+    }
+
+    if (parts.size() == 2) {
+        // [mm:ss] or [mm:ss.xx] or [mm:ss.xxx]
+        int mm = parts[0].toInt();
+        int dot = parts[1].indexOf('.');
+        int ss = 0;
+        int ms = 0;
+        if (dot >= 0) {
+            ss = parts[1].substring(0, dot).toInt();
+            String frac = parts[1].substring(dot + 1);
+            if (frac.length() == 1) ms = frac.toInt() * 100;
+            else if (frac.length() == 2) ms = frac.toInt() * 10;
+            else ms = frac.substring(0, 3).toInt();
+        } else {
+            ss = parts[1].toInt();
+            ms = 0;
+        }
+        outMs = (uint32_t)((mm * 60 + ss) * 1000 + ms);
+        return true;
+    } else if (parts.size() == 3) {
+        // Could be hh:mm:ss.xx OR mm:ss:xx (hundredths of second separated by colon)
+        if (parts[2].indexOf('.') >= 0) {
+            // hh:mm:ss.xx
+            int hh = parts[0].toInt();
+            int mm = parts[1].toInt();
+            int dot = parts[2].indexOf('.');
+            int ss = parts[2].substring(0, dot).toInt();
+            String frac = parts[2].substring(dot + 1);
+            int ms = 0;
+            if (frac.length() == 1) ms = frac.toInt() * 100;
+            else if (frac.length() == 2) ms = frac.toInt() * 10;
+            else ms = frac.substring(0, 3).toInt();
+            outMs = (uint32_t)(((hh * 3600) + (mm * 60) + ss) * 1000 + ms);
+            return true;
+        } else if (parts[2].length() <= 2) {
+            // Asian / third-party format: [mm:ss:xx] where xx is hundredths
+            int mm = parts[0].toInt();
+            int ss = parts[1].toInt();
+            int cs = parts[2].toInt();
+            int ms = (parts[2].length() == 1) ? cs * 100 : cs * 10;
+            outMs = (uint32_t)((mm * 60 + ss) * 1000 + ms);
+            return true;
+        } else {
+            // 3-digit ms or hh:mm:ss
+            int mm = parts[0].toInt();
+            int ss = parts[1].toInt();
+            int ms = parts[2].substring(0, 3).toInt();
+            outMs = (uint32_t)((mm * 60 + ss) * 1000 + ms);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+String LyricsParser::stripAllTimestamps(const String &line) {
+    String out = "";
+    out.reserve(line.length());
+    int i = 0;
+    int len = line.length();
+
+    while (i < len) {
+        char c = line.charAt(i);
+        if (c == '[' || c == '<') {
+            char closeCh = (c == '[') ? ']' : '>';
+            int closeIdx = line.indexOf(closeCh, i + 1);
+            if (closeIdx > i + 1) {
+                String inner = line.substring(i + 1, closeIdx);
+                uint32_t dummy = 0;
+                if (parseTimestampMs(inner, dummy)) {
+                    i = closeIdx + 1;
+                    continue;
+                }
+            }
+        }
+        out += c;
+        i++;
+    }
+
+    // Collapse multiple spaces and trim
+    out.trim();
+    String cleaned = "";
+    cleaned.reserve(out.length());
+    bool lastWasSpace = false;
+    for (size_t k = 0; k < out.length(); k++) {
+        char c = out.charAt(k);
+        if (c == ' ' || c == '\t') {
+            if (!lastWasSpace) {
+                cleaned += ' ';
+                lastWasSpace = true;
+            }
+        } else {
+            cleaned += c;
+            lastWasSpace = false;
+        }
+    }
+    cleaned.trim();
+    return cleaned;
+}
+
 bool LyricsParser::parseLRCLine(const String &line, uint32_t &timestampMs, String &text) {
-    if (!line.startsWith("[")) return false;
+    String trimmed = line;
+    trimmed.trim();
+    if (!trimmed.startsWith("[") && !trimmed.startsWith("<")) return false;
 
-    int closeBracket = line.indexOf(']');
-    if (closeBracket <= 1) return false;
+    char openCh = trimmed.charAt(0);
+    char closeCh = (openCh == '[') ? ']' : '>';
+    int closeIdx = trimmed.indexOf(closeCh);
+    if (closeIdx <= 1) return false;
 
-    String tag = line.substring(1, closeBracket);
-    int colon = tag.indexOf(':');
-    if (colon <= 0) return false;
-
-    // Validate that minutes and seconds contain valid digits
-    String mmStr = tag.substring(0, colon);
-    String secPart = tag.substring(colon + 1);
-
-    for (size_t i = 0; i < mmStr.length(); i++) {
-        if (!isdigit(mmStr.charAt(i))) return false;
+    String tag = trimmed.substring(1, closeIdx);
+    if (!parseTimestampMs(tag, timestampMs)) {
+        return false;
     }
 
-    int mm = mmStr.toInt();
-    int dot = secPart.indexOf('.');
-    int ss = 0;
-    int ms = 0;
-
-    if (dot > 0) {
-        String ssStr = secPart.substring(0, dot);
-        String msStr = secPart.substring(dot + 1);
-
-        for (size_t i = 0; i < ssStr.length(); i++) {
-            if (!isdigit(ssStr.charAt(i))) return false;
-        }
-        for (size_t i = 0; i < msStr.length(); i++) {
-            if (!isdigit(msStr.charAt(i))) return false;
-        }
-
-        ss = ssStr.toInt();
-        if (msStr.length() == 1) ms = msStr.toInt() * 100;
-        else if (msStr.length() == 2) ms = msStr.toInt() * 10;
-        else ms = msStr.substring(0, 3).toInt();
-    } else {
-        for (size_t i = 0; i < secPart.length(); i++) {
-            if (!isdigit(secPart.charAt(i))) return false;
-        }
-        ss = secPart.toInt();
-        ms = 0;
-    }
-
-    timestampMs = (mm * 60 + ss) * 1000 + ms;
-    text = line.substring(closeBracket + 1);
-    text.trim();
+    text = trimmed.substring(closeIdx + 1);
+    text = stripAllTimestamps(text);
     return true;
 }
 
@@ -133,6 +232,12 @@ bool LyricsParser::parseLRCContent(const String &content) {
     lines.clear();
     int start = 0;
     int len = content.length();
+
+    // Strip UTF-8 BOM if present
+    if (content.startsWith("\xEF\xBB\xBF")) {
+        start = 3;
+    }
+
     bool foundTimedLine = false;
 
     while (start < len && lines.size() < MAX_LYRIC_LINES) {
@@ -145,35 +250,41 @@ bool LyricsParser::parseLRCContent(const String &content) {
 
         if (rawLine.length() == 0) continue;
 
-        uint32_t ts = 0;
-        String text = "";
-        if (parseLRCLine(rawLine, ts, text)) {
-            // ── Multi-timestamp support ──────────────────────────────────────
-            // Some LRC files place multiple timestamps before one lyric text:
-            // [00:12.00][02:45.00]Chorus line
-            // parseLRCLine() extracts the first timestamp; strip any
-            // remaining leading [mm:ss.xx] brackets from 'text' and collect
-            // all timestamps, creating one LyricLine entry per timestamp.
-            std::vector<uint32_t> allTs;
-            allTs.push_back(ts);
+        // Extract ALL leading timestamp tags from rawLine
+        std::vector<uint32_t> allTs;
+        int pos = 0;
+        int rawLen = rawLine.length();
 
-            // Strip additional leading timestamp brackets from text
-            while (text.length() > 0 && text[0] == '[') {
-                uint32_t extraTs = 0;
-                String remainder = "";
-                if (parseLRCLine(text, extraTs, remainder)) {
-                    allTs.push_back(extraTs);
-                    text = remainder;
-                    text.trim();
-                } else {
-                    break; // Not a timestamp bracket — stop stripping
+        while (pos < rawLen) {
+            while (pos < rawLen && (rawLine.charAt(pos) == ' ' || rawLine.charAt(pos) == '\t')) pos++;
+            if (pos >= rawLen) break;
+
+            char ch = rawLine.charAt(pos);
+            if (ch == '[' || ch == '<') {
+                char closeCh = (ch == '[') ? ']' : '>';
+                int closeIdx = rawLine.indexOf(closeCh, pos + 1);
+                if (closeIdx > pos + 1) {
+                    String tagInner = rawLine.substring(pos + 1, closeIdx);
+                    uint32_t ts = 0;
+                    if (parseTimestampMs(tagInner, ts)) {
+                        allTs.push_back(ts);
+                        pos = closeIdx + 1;
+                        continue;
+                    }
                 }
             }
+            break;
+        }
 
-            // Skip lines where lyrics text is empty (section markers etc.)
-            if (text.isEmpty()) { start = nextNewline + 1; continue; }
+        if (!allTs.empty()) {
+            // Remainder of line is the lyric text; strip any remaining inline timestamps
+            String lyricText = rawLine.substring(pos);
+            lyricText = stripAllTimestamps(lyricText);
 
-            String truncated = truncateUtf8CodePoints(text, MAX_LINE_CODE_POINTS);
+            // Skip empty lyric lines
+            if (lyricText.length() == 0) continue;
+
+            String truncated = truncateUtf8CodePoints(lyricText, MAX_LINE_CODE_POINTS);
             for (uint32_t t : allTs) {
                 if (lines.size() >= MAX_LYRIC_LINES) break;
                 LyricLine item;
@@ -182,17 +293,27 @@ bool LyricsParser::parseLRCContent(const String &content) {
                 lines.push_back(item);
             }
             foundTimedLine = true;
+        } else {
+            // Check if this is a metadata tag like [ti:Title], [ar:Artist], [al:Album], [offset:0]
+            if (rawLine.startsWith("[")) {
+                int cl = rawLine.indexOf(']');
+                if (cl > 1) {
+                    String tag = rawLine.substring(1, cl);
+                    if (tag.indexOf(':') > 0) {
+                        continue; // Metadata tag — skip it
+                    }
+                }
+            }
 
-        } else if (!rawLine.startsWith("[")) { // Plain line without timestamp bracket
-            if (!rawLine.isEmpty()) {
+            // Plain line without timestamps (e.g. section titles or untimed lyrics)
+            String cleaned = stripAllTimestamps(rawLine);
+            if (cleaned.length() > 0) {
                 LyricLine item;
                 item.timestampMs = 0;
-                item.text = truncateUtf8CodePoints(rawLine, MAX_LINE_CODE_POINTS);
+                item.text = truncateUtf8CodePoints(cleaned, MAX_LINE_CODE_POINTS);
                 lines.push_back(item);
             }
         }
-        // Lines starting with '[' but not a valid timestamp (metadata like [ti:Title])
-        // are silently skipped — no change needed here.
     }
 
     if (lines.empty()) {
@@ -213,11 +334,20 @@ bool LyricsParser::parseLRCContent(const String &content) {
     return true;
 }
 
-
 bool LyricsParser::parseTXTContent(const String &content) {
+    // If the content actually has timed LRC timestamps, parse it with full timed support!
+    if (content.indexOf(':') >= 0 && (content.indexOf('[') >= 0 || content.indexOf('<') >= 0)) {
+        if (parseLRCContent(content) && isSynchronized()) {
+            return true;
+        }
+    }
+
     lines.clear();
     int start = 0;
     int len = content.length();
+    if (content.startsWith("\xEF\xBB\xBF")) {
+        start = 3;
+    }
 
     while (start < len && lines.size() < MAX_LYRIC_LINES) {
         int nextNewline = content.indexOf('\n', start);
@@ -229,9 +359,22 @@ bool LyricsParser::parseTXTContent(const String &content) {
 
         if (rawLine.length() == 0) continue;
 
+        // Filter out metadata tags like [ti:Title]
+        if (rawLine.startsWith("[")) {
+            int cl = rawLine.indexOf(']');
+            if (cl > 1) {
+                String tag = rawLine.substring(1, cl);
+                if (tag.indexOf(':') > 0) continue;
+            }
+        }
+
+        // Clean any timestamps from the text so no timestamps are ever shown
+        String cleaned = stripAllTimestamps(rawLine);
+        if (cleaned.length() == 0) continue;
+
         LyricLine item;
         item.timestampMs = 0;
-        item.text = truncateUtf8CodePoints(rawLine, MAX_LINE_CODE_POINTS);
+        item.text = truncateUtf8CodePoints(cleaned, MAX_LINE_CODE_POINTS);
         lines.push_back(item);
     }
 
@@ -337,10 +480,18 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
     }
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
+    // 2a. Embedded binary SYLT frame
     if (embSync == LYRICS_SYNC_TIMED && !syltLines.empty()) {
         lines = syltLines;
         syncType = LYRICS_SYNC_TIMED;
         sourcePriority = LYRICS_SRC_EMB_SYNC;
+        return true;
+    }
+
+    // 2b. Embedded text with timed LRC tags (USLT, Vorbis LYRICS, M4A ©lyr)
+    if (embText.length() > 0 && parseLRCContent(embText) && isSynchronized()) {
+        sourcePriority = LYRICS_SRC_EMB_SYNC;
+        syncType = LYRICS_SYNC_TIMED;
         return true;
     }
 
@@ -369,14 +520,20 @@ bool LyricsParser::loadForTrack(const String &audioPath) {
         }
         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
 
-        if (content.length() > 0 && parseTXTContent(content)) {
-            sourcePriority = LYRICS_SRC_EXT_UNSYNC;
-            return true;
+        if (content.length() > 0) {
+            if (parseLRCContent(content) && isSynchronized()) {
+                sourcePriority = LYRICS_SRC_EXT_SYNC;
+                syncType = LYRICS_SYNC_TIMED;
+                return true;
+            } else if (parseTXTContent(content)) {
+                sourcePriority = LYRICS_SRC_EXT_UNSYNC;
+                return true;
+            }
         }
     }
 
     // 4. Priority 4: Embedded Untimed Lyrics (USLT, Vorbis LYRICS, M4A ©lyr)
-    if (embSync == LYRICS_SYNC_UNTIMED && embText.length() > 0) {
+    if (embText.length() > 0) {
         if (parseTXTContent(embText)) {
             syncType = LYRICS_SYNC_UNTIMED;
             sourcePriority = LYRICS_SRC_EMB_UNSYNC;

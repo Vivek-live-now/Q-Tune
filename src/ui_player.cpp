@@ -1246,18 +1246,24 @@ void UIPlayer::renderPlayerPage3() {
             curIdx = manualLyricIndex;
         }
 
+        if (curIdx < 0) curIdx = 0;
+        if (curIdx >= (int)lyricsParser.getLineCount()) {
+            curIdx = (int)lyricsParser.getLineCount() - 1;
+        }
+
         // ── Font pair selection driven by playerConfig ──────────────────────
         // Each entry: { smallFont (prev/next lines), largeFont (current line) }
         struct LyricsFontPair { const uint8_t *small; const uint8_t *large; };
-        static const LyricsFontPair FONT_PAIRS[5] = {
+        static const LyricsFontPair FONT_PAIRS[6] = {
             { u8g2_font_5x7_tr,         u8g2_font_6x10_tr        }, // 0 CLASSIC
             { u8g2_font_04b_03_tr,       u8g2_font_baby_tr         }, // 1 CUTE
             { u8g2_font_blipfest_07_tr,  u8g2_font_nokiafc22_tr    }, // 2 CHIPTUNE
             { u8g2_font_4x6_tr,          u8g2_font_courB08_tr      }, // 3 TYPEWRITER
             { u8g2_font_5x7_tr,          u8g2_font_pressstart2p_8u }, // 4 ARCADE
+            { u8g2_font_4x6_tr,          u8g2_font_5x7_tr          }, // 5 PIXIE
         };
         uint8_t fontIdx = (uint8_t)playerConfig.getLyricsFont();
-        if (fontIdx >= 5) fontIdx = 0;
+        if (fontIdx >= 6) fontIdx = 0;
         const LyricsFontPair &fp = FONT_PAIRS[fontIdx];
 
         // ── Previous line (y=12–19) ─────────────────────────────────────────
