@@ -226,7 +226,7 @@ void showBandChoosingInterface() {
             y_pos += 11;
         }
 
-        Display::drawScrollBar(scrollOffset, BAND_COUNT);
+        display.drawScrollBar(scrollOffset, BAND_COUNT);
 
         u8g2.setFont(u8g2_font_4x6_tr);
         u8g2.drawStr(2, 63, "UP/DN:Select  OK:Save  CANCEL");
