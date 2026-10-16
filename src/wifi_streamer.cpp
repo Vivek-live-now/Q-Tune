@@ -6,6 +6,7 @@
 #include "button_manager.h"
 #include "battery.h"
 #include "power_manager.h"
+#include "sd_manager.h"
 #include <esp_heap_caps.h>
 
 WiFiStreamer wifiStreamer;
@@ -75,10 +76,76 @@ WiFiStreamer::WiFiStreamer()
       hasActiveStream(false) {
 }
 
+bool WiFiStreamer::loadSDConfig() {
+    if (!sdManager.isMounted()) return false;
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+
+    bool fileFound = false;
+    File f;
+    if (SD.exists("/wifi.txt")) {
+        f = SD.open("/wifi.txt", FILE_READ);
+        fileFound = true;
+    } else if (SD.exists("/wificonfig.txt")) {
+        f = SD.open("/wificonfig.txt", FILE_READ);
+        fileFound = true;
+    } else if (SD.exists("/WIFI.TXT")) {
+        f = SD.open("/WIFI.TXT", FILE_READ);
+        fileFound = true;
+    }
+
+    if (!fileFound || !f) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    String foundSSID = "";
+    String foundPass = "";
+
+    while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if (line.startsWith("#") || line.startsWith("//") || line.length() == 0) continue;
+
+        int eqIdx = line.indexOf('=');
+        if (eqIdx == -1) eqIdx = line.indexOf(':');
+        if (eqIdx != -1) {
+            String key = line.substring(0, eqIdx);
+            key.trim();
+            key.toLowerCase();
+            String val = line.substring(eqIdx + 1);
+            val.trim();
+            if ((val.startsWith("\"") && val.endsWith("\"")) ||
+                (val.startsWith("'") && val.endsWith("'"))) {
+                if (val.length() >= 2) {
+                    val = val.substring(1, val.length() - 1);
+                }
+            }
+            if (key == "ssid" || key == "wifi_ssid" || key == "wifi_name") {
+                foundSSID = val;
+            } else if (key == "pass" || key == "password" || key == "pwd" || key == "wifi_pass" || key == "wifi_password") {
+                foundPass = val;
+            }
+        }
+    }
+    f.close();
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+    if (foundSSID.length() > 0) {
+        if (foundSSID != savedSSID || foundPass != savedPass) {
+            setCredentials(foundSSID, foundPass);
+        }
+        return true;
+    }
+    return false;
+}
+
 bool WiFiStreamer::begin() {
     prefs.begin("qtune_wifi", false);
     savedSSID = prefs.getString("ssid", "");
     savedPass = prefs.getString("pass", "");
+
+    // Load credentials from microSD card if wifi.txt exists
+    loadSDConfig();
 
     if (ringMutex == NULL) {
         ringMutex = xSemaphoreCreateMutex();
@@ -101,30 +168,47 @@ bool WiFiStreamer::begin() {
 
 bool WiFiStreamer::start() {
     begin();
+    loadSDConfig();
 
     // Ensure SD player is paused or stopped
     audioPlayer.prepareForStream(44100);
 
+    // Wi-Fi RF & power stabilization
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
+    WiFi.setSleep(false);                 // Disable modem sleep to prevent latency jitter and dropped frames
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Maximize TX power for reliable 2.4GHz signal
+
+    // Always host SoftAP for seamless captive portal setup
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP("Q-Tune-Audio", "12345678");
+
     // Attempt to connect to saved Wi-Fi credentials
     if (savedSSID.length() > 0) {
         wifiState = WIFI_STATE_CONNECTING;
-        WiFi.mode(WIFI_STA);
         WiFi.begin(savedSSID.c_str(), savedPass.c_str());
 
+        // Responsive non-blocking check: wait up to 3s for fast router association
         uint32_t startMs = millis();
-        while (WiFi.status() != WL_CONNECTED && (millis() - startMs < 8000)) {
+        while (WiFi.status() != WL_CONNECTED && (millis() - startMs < 3000)) {
             delay(100);
         }
-    }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiState = WIFI_STATE_CONNECTED;
+        if (WiFi.status() == WL_CONNECTED) {
+            wifiState = WIFI_STATE_CONNECTED;
+        } else {
+            // Background connection continues in update() without blocking the UI
+            wifiState = WIFI_STATE_CONNECTING;
+        }
     } else {
         startAPMode();
     }
 
     setupConfigServer();
     setupUpnpServer();
+
+    // Start Captive Portal DNS server (port 53)
+    dnsServer.start(53, "*", WiFi.softAPIP());
 
     // SSDP multicast listener on UDP port 1900
     ssdpUdp.beginMulticast(IPAddress(239, 255, 255, 250), 1900);
@@ -155,6 +239,7 @@ void WiFiStreamer::stop() {
         streamTaskHandle = NULL;
     }
 
+    dnsServer.stop();
     configServer.stop();
     upnpServer.stop();
     ssdpUdp.stop();
@@ -170,8 +255,15 @@ void WiFiStreamer::startAPMode() {
 }
 
 void WiFiStreamer::reconnect() {
-    stop();
-    start();
+    if (savedSSID.length() > 0) {
+        wifiState = WIFI_STATE_CONNECTING;
+        WiFi.disconnect(false);
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.softAP("Q-Tune-Audio", "12345678");
+        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+    } else {
+        startAPMode();
+    }
 }
 
 void WiFiStreamer::setCredentials(const String &ssid, const String &password) {
@@ -315,7 +407,7 @@ static String htmlEscape(const String &input) {
 
 void WiFiStreamer::setupConfigServer() {
     configServer.on("/", HTTP_GET, [this]() {
-        IPAddress ip = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
+        IPAddress ip = (wifiState == WIFI_STATE_CONNECTED) ? WiFi.localIP() : WiFi.softAPIP();
         String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
                       "<title>Q-Tune Audiophile Portal</title>"
                       "<style>body{font-family:sans-serif;background:#121212;color:#eee;padding:20px;text-align:center;}"
@@ -326,7 +418,7 @@ void WiFiStreamer::setupConfigServer() {
                       "</style></head><body>"
                       "<div class='card'>"
                       "<h2>Q-TUNE AUDIOPHILE</h2>"
-                      "<p><b>Status:</b> <span class='badge'>" + (wifiState == WIFI_STATE_CONNECTED ? "Connected: " + htmlEscape(savedSSID) : "SoftAP Mode") + "</span></p>"
+                      "<p><b>Status:</b> <span class='badge'>" + (wifiState == WIFI_STATE_CONNECTED ? "Connected: " + htmlEscape(savedSSID) : (wifiState == WIFI_STATE_CONNECTING ? "Connecting to: " + htmlEscape(savedSSID) : "SoftAP Mode")) + "</span></p>"
                       "<p><b>IP Address:</b> " + ip.toString() + "</p>"
                       "<p><b>Output Mode:</b> <span class='badge' style='background:#00e5ff;color:#000;'>" + String(audioPlayer.getOutputModeName()) + "</span></p>"
                       "<p><b>Now Streaming:</b><br><i>" + htmlEscape(currentTrackTitle) + "</i><br><small>" + htmlEscape(currentTrackArtist) + "</small></p>"
@@ -345,8 +437,16 @@ void WiFiStreamer::setupConfigServer() {
     configServer.on("/save", HTTP_POST, [this]() {
         if (configServer.hasArg("ssid")) {
             setCredentials(configServer.arg("ssid"), configServer.arg("pass"));
-            configServer.send(200, "text/html", "<h3>Settings Saved! Connecting...</h3><script>setTimeout(function(){location.href='/';},4000);</script>");
-            delay(500);
+            String resp = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                          "<meta http-equiv='refresh' content='4;url=/'>"
+                          "<style>body{font-family:sans-serif;background:#121212;color:#eee;text-align:center;padding:30px;}"
+                          ".card{background:#1e1e1e;border-radius:10px;padding:20px;margin:auto;max-width:360px;}"
+                          "h3{color:#00e5ff;}</style></head><body>"
+                          "<div class='card'><h3>Settings Saved!</h3>"
+                          "<p>Connecting to <b>" + htmlEscape(savedSSID) + "</b>...</p>"
+                          "<p>Redirecting in 4s...</p></div></body></html>";
+            configServer.send(200, "text/html", resp);
+            delay(100);
             reconnect();
         } else {
             configServer.send(400, "text/plain", "Missing SSID");
@@ -358,6 +458,32 @@ void WiFiStreamer::setupConfigServer() {
         audioPlayer.setOutputMode((cur == OUTPUT_MODE_SPEAKER_I2S) ? OUTPUT_MODE_FIIO_USB_DAC : OUTPUT_MODE_SPEAKER_I2S);
         configServer.sendHeader("Location", "/");
         configServer.send(303);
+    });
+
+    // Captive portal assistant endpoints for mobile OS detection
+    auto sendCaptiveRedirect = [this]() {
+        configServer.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+        configServer.send(302, "text/plain", "");
+    };
+
+    configServer.on("/generate_204", sendCaptiveRedirect);
+    configServer.on("/hotspot-detect.html", sendCaptiveRedirect);
+    configServer.on("/canonical.html", sendCaptiveRedirect);
+    configServer.on("/connecttest.txt", sendCaptiveRedirect);
+    configServer.on("/redirect", sendCaptiveRedirect);
+    configServer.on("/success.txt", [this]() {
+        configServer.send(200, "text/plain", "success\n");
+    });
+    configServer.on("/ncsi.txt", [this]() {
+        configServer.send(200, "text/plain", "Microsoft NCSI");
+    });
+
+    configServer.onNotFound([this, sendCaptiveRedirect]() {
+        if (wifiState == WIFI_STATE_AP_MODE || (WiFi.getMode() & WIFI_AP)) {
+            sendCaptiveRedirect();
+        } else {
+            configServer.send(404, "text/plain", "Not Found");
+        }
     });
 
     configServer.begin();
@@ -555,6 +681,39 @@ void WiFiStreamer::update() {
     configServer.handleClient();
     upnpServer.handleClient();
     handleSSDP();
+
+    if (wifiState == WIFI_STATE_AP_MODE || (WiFi.getMode() & WIFI_AP)) {
+        dnsServer.processNextRequest();
+    }
+
+    // Dynamic Wi-Fi connection monitoring & auto-reconnect
+    static uint32_t lastCheck = 0;
+    uint32_t now = millis();
+    if (now - lastCheck >= 500) {
+        lastCheck = now;
+        wl_status_t status = WiFi.status();
+        if (status == WL_CONNECTED) {
+            if (wifiState != WIFI_STATE_CONNECTED) {
+                wifiState = WIFI_STATE_CONNECTED;
+                // Re-announce on SSDP with station IP address
+                sendSSDPAnnounce();
+            }
+        } else {
+            if (savedSSID.length() > 0) {
+                if (wifiState == WIFI_STATE_CONNECTED) {
+                    wifiState = WIFI_STATE_CONNECTING;
+                }
+                // Periodic reconnect attempt every 10 seconds if still disconnected
+                static uint32_t lastReconnectAttempt = 0;
+                if (wifiState == WIFI_STATE_CONNECTING && (now - lastReconnectAttempt > 10000)) {
+                    lastReconnectAttempt = now;
+                    WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+                }
+            } else {
+                wifiState = WIFI_STATE_AP_MODE;
+            }
+        }
+    }
 }
 
 WiFiStreamState WiFiStreamer::getWiFiState() const { return wifiState; }
@@ -575,7 +734,7 @@ uint8_t WiFiStreamer::getBufferFillPercentage() const {
 String WiFiStreamer::getIPAddress() const {
     if (wifiState == WIFI_STATE_CONNECTED) {
         return WiFi.localIP().toString();
-    } else if (wifiState == WIFI_STATE_AP_MODE) {
+    } else if (wifiState == WIFI_STATE_AP_MODE || wifiState == WIFI_STATE_CONNECTING) {
         return WiFi.softAPIP().toString();
     }
     return "0.0.0.0";
@@ -583,8 +742,6 @@ String WiFiStreamer::getIPAddress() const {
 
 void WiFiStreamer::renderUI() {
     display.clear();
-    char batBuf[16];
-    snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
 
     // Top status bar with output badge
     char titleBuf[32];
@@ -592,35 +749,66 @@ void WiFiStreamer::renderUI() {
     display.drawTopStatusBar(titleBuf, battery.getPercentage());
 
     U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_6x10_tr);
 
-    // Network line
-    char netBuf[32];
-    if (wifiState == WIFI_STATE_CONNECTED) {
-        snprintf(netBuf, sizeof(netBuf), "IP: %s", getIPAddress().c_str());
-    } else if (wifiState == WIFI_STATE_AP_MODE) {
-        snprintf(netBuf, sizeof(netBuf), "AP: Q-Tune (%s)", getIPAddress().c_str());
+    if (wifiState == WIFI_STATE_AP_MODE) {
+        // SoftAP configuration portal screen (crisp 5x7 font, perfectly fitting 128x64)
+        u8g2.setFont(u8g2_font_5x7_tr);
+        u8g2.drawStr(2, 20, "AP: Q-Tune-Audio");
+        u8g2.drawStr(2, 29, "Pass: 12345678");
+        u8g2.drawStr(2, 38, "Web: http://192.168.4.1");
+        u8g2.drawStr(2, 47, "SD: wifi.txt (auto)");
+
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(2, 55, "SEL:Retry SD  CANCEL:Exit");
+    } else if (wifiState == WIFI_STATE_CONNECTING) {
+        // Connecting in progress screen
+        u8g2.setFont(u8g2_font_5x7_tr);
+        static uint8_t animTick = 0;
+        animTick = (animTick + 1) % 4;
+        char conStr[32] = "Connecting";
+        for (uint8_t d = 0; d < animTick; d++) strcat(conStr, ".");
+        u8g2.drawStr(2, 20, conStr);
+
+        char ssidBuf[32];
+        snprintf(ssidBuf, sizeof(ssidBuf), "SSID: %s", savedSSID.c_str());
+        if (strlen(ssidBuf) > 23) {
+            ssidBuf[20] = '.';
+            ssidBuf[21] = '.';
+            ssidBuf[22] = '\0';
+        }
+        u8g2.drawStr(2, 30, ssidBuf);
+
+        u8g2.drawStr(2, 40, "AP: 192.168.4.1 (Active)");
+
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(2, 53, "SEL:Retry SD  CANCEL:Exit");
     } else {
-        snprintf(netBuf, sizeof(netBuf), "Wi-Fi: Connecting...");
+        // Connected mode (Streaming HUD)
+        u8g2.setFont(u8g2_font_5x7_tr);
+
+        // Network line: IP and RSSI
+        char netBuf[32];
+        snprintf(netBuf, sizeof(netBuf), "IP: %s (%ddBm)", getIPAddress().c_str(), WiFi.RSSI());
+        u8g2.drawStr(2, 20, netBuf);
+
+        // Stream status line
+        char statusBuf[32];
+        const char *stateStr = (streamState == STREAM_PLAYING) ? "STREAM" :
+                              (streamState == STREAM_BUFFERING) ? "BUFFER" :
+                              (streamState == STREAM_PAUSED) ? "PAUSED" : "READY";
+        snprintf(statusBuf, sizeof(statusBuf), "[%s] Buf:%d%% V:%d%%", stateStr, getBufferFillPercentage(), audioPlayer.getVolume());
+        u8g2.drawStr(2, 31, statusBuf);
+
+        // Now Playing Track / Artist line
+        u8g2.setFont(u8g2_font_6x10_tr);
+        String dispTitle = currentTrackTitle;
+        if (dispTitle.length() > 20) dispTitle = dispTitle.substring(0, 19) + ".";
+        u8g2.drawStr(2, 43, dispTitle.c_str());
+
+        String dispArtist = currentTrackArtist;
+        if (dispArtist.length() > 20) dispArtist = dispArtist.substring(0, 19) + ".";
+        u8g2.drawStr(2, 54, dispArtist.c_str());
     }
-    u8g2.drawStr(2, 23, netBuf);
-
-    // Stream status line
-    char statusBuf[32];
-    const char *stateStr = (streamState == STREAM_PLAYING) ? "STREAMING" :
-                          (streamState == STREAM_BUFFERING) ? "BUFFERING" :
-                          (streamState == STREAM_PAUSED) ? "PAUSED" : "IDLE";
-    snprintf(statusBuf, sizeof(statusBuf), "[%s] Buf:%d%% V:%d%%", stateStr, getBufferFillPercentage(), audioPlayer.getVolume());
-    u8g2.drawStr(2, 34, statusBuf);
-
-    // Now Playing Track / Artist line
-    String dispTitle = currentTrackTitle;
-    if (dispTitle.length() > 20) dispTitle = dispTitle.substring(0, 19) + ".";
-    u8g2.drawStr(2, 45, dispTitle.c_str());
-
-    String dispArtist = currentTrackArtist;
-    if (dispArtist.length() > 20) dispArtist = dispArtist.substring(0, 19) + ".";
-    u8g2.drawStr(2, 54, dispArtist.c_str());
 
     // Mini spectrum visualizer bar at the bottom
     spectrumAnalyzer.renderMiniBars(u8g2, 2, 57, 124, 7);
@@ -643,7 +831,12 @@ bool WiFiStreamer::updateUI() {
         audioPlayer.volumeDown(5);
         ledManager.triggerButtonPulse(CRGB::Red, 1, 40);
     } else if (evt == BTN_EVENT_SEL_PRESS) {
-        if (streamState == STREAM_PLAYING) {
+        if (wifiState == WIFI_STATE_AP_MODE || wifiState == WIFI_STATE_CONNECTING) {
+            // Attempt to reload SD card wifi.txt and reconnect
+            loadSDConfig();
+            reconnect();
+            ledManager.triggerButtonPulse(CRGB::Cyan, 1, 60);
+        } else if (streamState == STREAM_PLAYING) {
             pauseStream();
             ledManager.onPlaybackPause();
         } else if (streamState == STREAM_PAUSED) {

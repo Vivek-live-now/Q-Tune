@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <WebServer.h>
+#include <DNSServer.h>
 #include <Preferences.h>
 #include "hw_config.h"
 
@@ -53,6 +54,7 @@ public:
     void setCredentials(const String &ssid, const String &password);
     void startAPMode();
     void reconnect();
+    bool loadSDConfig();
 
 private:
     WiFiStreamState wifiState;
@@ -70,6 +72,7 @@ private:
     WebServer configServer;   // Port 80: Web Configuration & Status Portal
     WebServer upnpServer;     // Port 8080: UPnP / DLNA SOAP & XML Server
     WiFiUDP ssdpUdp;          // Port 1900: SSDP Multicast Receiver
+    DNSServer dnsServer;      // Port 53: Captive Portal DNS Server
 
     // PSRAM Ring Buffer
     uint8_t *streamRingBuffer;
