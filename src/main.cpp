@@ -31,12 +31,12 @@ int menuSelection = 0;
 int menuScrollOffset = 0;
 const int MAIN_MENU_COUNT = 6;
 const char* menuLabels[] = {
-    "1. Music Player",
-    "2. Spectrum Visualizer",
-    "3. Wi-Fi Audio Stream",
-    "4. RGB Light Effects",
-    "5. Diagnostics",
-    "6. System Info"
+    "Music Player",
+    "Spectrum Visualizer",
+    "Wi-Fi Audio Stream",
+    "RGB Light Effects",
+    "Diagnostics",
+    "System Info"
 };
 
 void renderMainMenu() {
