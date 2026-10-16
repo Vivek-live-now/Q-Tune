@@ -52,6 +52,11 @@ public:
     void cyclePage();
     void openNowPlaying();
 
+    // Top status bar auto-hide management (5-second timeout for full-screen view)
+    void wakeTopBar(unsigned long durationMs = 5000);
+    bool isTopBarVisible() const;
+    void resetTopBar();
+
 private:
     std::vector<String> trackList;
     int currentTrackIndex;
@@ -59,6 +64,7 @@ private:
     bool inListMode;
     PlaybackMode playbackMode;
     unsigned long volumeOverlayExpiry;
+    unsigned long topBarExpiryMs;
 
     // View & Page State
     UIPlayerView currentView;

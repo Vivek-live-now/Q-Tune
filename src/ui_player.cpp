@@ -22,11 +22,13 @@ UIPlayer::UIPlayer() :
     settingsSelection(0),
     settingsScrollOffset(0),
     eqBandSelection(0),
-    artSettingsRow(0) {}
+    artSettingsRow(0),
+    topBarExpiryMs(0) {}
 
 void UIPlayer::begin() {
     if (!sdManager.isMounted() && !sdManager.isExFAT() && !sdManager.isGPT()) sdManager.begin();
     playerConfig.begin();
+    wakeTopBar(5000);
 
     // If already playing or paused, jump straight to Now Playing view without restarting!
     if (audioPlayer.isPlaying() || audioPlayer.isPaused()) {
@@ -49,6 +51,7 @@ void UIPlayer::openNowPlaying() {
     manualLyricIndex = 0;
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    wakeTopBar(5000);
 }
 
 PlayerPage UIPlayer::getCurrentPage() const {
@@ -57,10 +60,12 @@ PlayerPage UIPlayer::getCurrentPage() const {
 
 void UIPlayer::setPage(PlayerPage page) {
     currentPage = page;
+    wakeTopBar(5000);
 }
 
 void UIPlayer::cyclePage() {
     currentPage = (PlayerPage)((currentPage + 1) % 3);
+    wakeTopBar(5000);
     if (currentPage == PAGE_LYRICS) {
         manualLyricIndex = 0;
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
@@ -148,6 +153,19 @@ const char* UIPlayer::getPlaybackModeString() const {
 
 void UIPlayer::showVolumeOverlay() {
     volumeOverlayExpiry = millis() + 1500;
+    wakeTopBar(5000);
+}
+
+void UIPlayer::wakeTopBar(unsigned long durationMs) {
+    topBarExpiryMs = millis() + durationMs;
+}
+
+bool UIPlayer::isTopBarVisible() const {
+    return millis() < topBarExpiryMs;
+}
+
+void UIPlayer::resetTopBar() {
+    topBarExpiryMs = 0;
 }
 
 bool UIPlayer::update() {
@@ -534,6 +552,9 @@ bool UIPlayer::update() {
 
     } else {
         // --- Now Playing Multi-Page View (VIEW_PLAYER) ---
+        if (evt != BTN_EVENT_NONE) {
+            wakeTopBar(5000);
+        }
         if (evt == BTN_EVENT_SEL_PRESS) {
             if (currentPage == PAGE_TRACK_INFO) {
                 cyclePlaybackMode();
@@ -966,7 +987,103 @@ void UIPlayer::renderPlayerPage1() {
             display.clear();
             U8G2 &u8g2 = display.getU8g2();
             u8g2.setFont(u8g2_font_6x10_tr);
+            bool showBar = isTopBarVisible();
 
+            if (showBar) {
+                char headerBuf[32];
+                snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+                         battery.getPercentage(), audioPlayer.getOutputModeShortName());
+                u8g2.drawStr(0, 10, headerBuf);
+                u8g2.drawHLine(0, 12, 128);
+
+                String displayName = audioPlayer.getCurrentTrackName();
+                if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+                    displayName = trackList[currentTrackIndex];
+                    int slash = displayName.lastIndexOf('/');
+                    if (slash >= 0) displayName = displayName.substring(slash + 1);
+                }
+                if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
+                u8g2.drawStr(0, 23, displayName.c_str());
+
+                String stateStr = "■ STOPPED";
+                if (audioPlayer.isPlaying()) {
+                    stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
+                } else if (audioPlayer.isPaused()) {
+                    stateStr = "❚❚ PAUSED";
+                }
+                u8g2.drawStr(0, 35, stateStr.c_str());
+
+                uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+                uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+                char timeBuf[32];
+                snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+                u8g2.drawStr(0, 47, timeBuf);
+
+                spectrumAnalyzer.sampleAudioStream();
+                spectrumAnalyzer.renderMiniBars(u8g2, 92, 28, 34, 18);
+
+                u8g2.drawFrame(0, 53, 128, 7);
+                if (durSec > 0) {
+                    int progressWidth = (posSec * 126) / durSec;
+                    if (progressWidth > 126) progressWidth = 126;
+                    u8g2.drawBox(1, 54, progressWidth, 5);
+                }
+            } else {
+                // Full-screen Spectrum HUD: header auto-hidden after 5s
+                String displayName = audioPlayer.getCurrentTrackName();
+                if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+                    displayName = trackList[currentTrackIndex];
+                    int slash = displayName.lastIndexOf('/');
+                    if (slash >= 0) displayName = displayName.substring(slash + 1);
+                }
+                if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
+                u8g2.drawStr(0, 11, displayName.c_str());
+
+                uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+                uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+                char timeBuf[32];
+                snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+                u8g2.setFont(u8g2_font_5x7_tr);
+                u8g2.drawStr(0, 22, timeBuf);
+                u8g2.setFont(u8g2_font_6x10_tr);
+
+                spectrumAnalyzer.sampleAudioStream();
+                spectrumAnalyzer.renderMiniBars(u8g2, 88, 14, 38, 38);
+
+                u8g2.drawFrame(0, 55, 128, 7);
+                if (durSec > 0) {
+                    int progressWidth = (posSec * 126) / durSec;
+                    if (progressWidth > 126) progressWidth = 126;
+                    u8g2.drawBox(1, 56, progressWidth, 5);
+                }
+            }
+
+            if (millis() < volumeOverlayExpiry) {
+                u8g2.setDrawColor(0);
+                u8g2.drawBox(18, 16, 92, 34);
+                u8g2.setDrawColor(1);
+                u8g2.drawFrame(18, 16, 92, 34);
+                char volStr[20];
+                snprintf(volStr, sizeof(volStr), "VOLUME: %d%%", audioPlayer.getVolume());
+                u8g2.drawStr(24, 28, volStr);
+                u8g2.drawFrame(24, 34, 80, 8);
+                int volBar = (audioPlayer.getVolume() * 76) / 100;
+                if (volBar > 76) volBar = 76;
+                u8g2.drawBox(26, 36, volBar, 4);
+            }
+            display.sendBuffer();
+        }
+    } else if (layout == LAYOUT_SPLIT_ART) {
+        renderPlayerSplitArt();
+    } else if (layout == LAYOUT_COVER_HERO) {
+        renderPlayerCoverHero();
+    } else { // LAYOUT_SPECTRUM_HUD
+        display.clear();
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        bool showBar = isTopBarVisible();
+
+        if (showBar) {
             char headerBuf[32];
             snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
                      battery.getPercentage(), audioPlayer.getOutputModeShortName());
@@ -1005,68 +1122,34 @@ void UIPlayer::renderPlayerPage1() {
                 if (progressWidth > 126) progressWidth = 126;
                 u8g2.drawBox(1, 54, progressWidth, 5);
             }
-
-            if (millis() < volumeOverlayExpiry) {
-                u8g2.setDrawColor(0);
-                u8g2.drawBox(18, 16, 92, 34);
-                u8g2.setDrawColor(1);
-                u8g2.drawFrame(18, 16, 92, 34);
-                char volStr[20];
-                snprintf(volStr, sizeof(volStr), "VOLUME: %d%%", audioPlayer.getVolume());
-                u8g2.drawStr(24, 28, volStr);
-                u8g2.drawFrame(24, 34, 80, 8);
-                int volBar = (audioPlayer.getVolume() * 76) / 100;
-                if (volBar > 76) volBar = 76;
-                u8g2.drawBox(26, 36, volBar, 4);
+        } else {
+            // Full-screen Spectrum HUD: header auto-hidden after 5s
+            String displayName = audioPlayer.getCurrentTrackName();
+            if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+                displayName = trackList[currentTrackIndex];
+                int slash = displayName.lastIndexOf('/');
+                if (slash >= 0) displayName = displayName.substring(slash + 1);
             }
-            display.sendBuffer();
-        }
-    } else if (layout == LAYOUT_SPLIT_ART) {
-        renderPlayerSplitArt();
-    } else if (layout == LAYOUT_COVER_HERO) {
-        renderPlayerCoverHero();
-    } else { // LAYOUT_SPECTRUM_HUD
-        display.clear();
-        U8G2 &u8g2 = display.getU8g2();
-        u8g2.setFont(u8g2_font_6x10_tr);
+            if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
+            u8g2.drawStr(0, 11, displayName.c_str());
 
-        char headerBuf[32];
-        snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
-                 battery.getPercentage(), audioPlayer.getOutputModeShortName());
-        u8g2.drawStr(0, 10, headerBuf);
-        u8g2.drawHLine(0, 12, 128);
+            uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+            uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+            char timeBuf[32];
+            snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+            u8g2.setFont(u8g2_font_5x7_tr);
+            u8g2.drawStr(0, 22, timeBuf);
+            u8g2.setFont(u8g2_font_6x10_tr);
 
-        String displayName = audioPlayer.getCurrentTrackName();
-        if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
-            displayName = trackList[currentTrackIndex];
-            int slash = displayName.lastIndexOf('/');
-            if (slash >= 0) displayName = displayName.substring(slash + 1);
-        }
-        if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-        u8g2.drawStr(0, 23, displayName.c_str());
+            spectrumAnalyzer.sampleAudioStream();
+            spectrumAnalyzer.renderMiniBars(u8g2, 88, 14, 38, 38);
 
-        String stateStr = "■ STOPPED";
-        if (audioPlayer.isPlaying()) {
-            stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
-        } else if (audioPlayer.isPaused()) {
-            stateStr = "❚❚ PAUSED";
-        }
-        u8g2.drawStr(0, 35, stateStr.c_str());
-
-        uint32_t posSec = audioPlayer.getPositionMs() / 1000;
-        uint32_t durSec = audioPlayer.getDurationMs() / 1000;
-        char timeBuf[32];
-        snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
-        u8g2.drawStr(0, 47, timeBuf);
-
-        spectrumAnalyzer.sampleAudioStream();
-        spectrumAnalyzer.renderMiniBars(u8g2, 92, 28, 34, 18);
-
-        u8g2.drawFrame(0, 53, 128, 7);
-        if (durSec > 0) {
-            int progressWidth = (posSec * 126) / durSec;
-            if (progressWidth > 126) progressWidth = 126;
-            u8g2.drawBox(1, 54, progressWidth, 5);
+            u8g2.drawFrame(0, 55, 128, 7);
+            if (durSec > 0) {
+                int progressWidth = (posSec * 126) / durSec;
+                if (progressWidth > 126) progressWidth = 126;
+                u8g2.drawBox(1, 56, progressWidth, 5);
+            }
         }
 
         if (millis() < volumeOverlayExpiry) {
@@ -1092,51 +1175,88 @@ void UIPlayer::renderPlayerPage1() {
 void UIPlayer::renderPlayerSplitArt() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
+    bool showBar = isTopBarVisible();
 
-    // Top status header
-    u8g2.setFont(u8g2_font_5x7_tr);
-    char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
-             battery.getPercentage(), audioPlayer.getOutputModeShortName());
-    u8g2.drawStr(0, 8, headerBuf);
-    u8g2.drawHLine(0, 9, 128);
+    if (showBar) {
+        // Top status header
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char headerBuf[32];
+        snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+                 battery.getPercentage(), audioPlayer.getOutputModeShortName());
+        u8g2.drawStr(0, 8, headerBuf);
+        u8g2.drawHLine(0, 9, 128);
 
-    // Left: Draw 56x56 Album Art (or Default Icon)
-    albumArtManager.draw(u8g2, 1, 10);
+        // Left: Draw 56x56 Album Art (or Default Icon)
+        albumArtManager.draw(u8g2, 1, 10);
 
-    // Right: Song Info
-    u8g2.setFont(u8g2_font_5x7_tr);
-    String displayName = audioPlayer.getCurrentTrackName();
-    if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
-        displayName = trackList[currentTrackIndex];
-        int slash = displayName.lastIndexOf('/');
-        if (slash >= 0) displayName = displayName.substring(slash + 1);
-    }
-    if (displayName.length() > 11) displayName = displayName.substring(0, 10) + ".";
-    u8g2.drawStr(60, 18, displayName.c_str());
+        // Right: Song Info
+        u8g2.setFont(u8g2_font_5x7_tr);
+        String displayName = audioPlayer.getCurrentTrackName();
+        if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+            displayName = trackList[currentTrackIndex];
+            int slash = displayName.lastIndexOf('/');
+            if (slash >= 0) displayName = displayName.substring(slash + 1);
+        }
+        if (displayName.length() > 11) displayName = displayName.substring(0, 10) + ".";
+        u8g2.drawStr(60, 18, displayName.c_str());
 
-    // Playback state
-    String stateStr = audioPlayer.isPlaying() ? ("▶ " + String(audioPlayer.getFormatName())) : "❚❚ PAUS";
-    u8g2.drawStr(60, 28, stateStr.c_str());
+        // Playback state
+        String stateStr = audioPlayer.isPlaying() ? ("▶ " + String(audioPlayer.getFormatName())) : "❚❚ PAUS";
+        u8g2.drawStr(60, 28, stateStr.c_str());
 
-    // Time elapsed / total
-    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
-    uint32_t durSec = audioPlayer.getDurationMs() / 1000;
-    char timeBuf[20];
-    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
-    u8g2.drawStr(60, 39, timeBuf);
+        // Time elapsed / total
+        uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+        uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+        char timeBuf[20];
+        snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+        u8g2.drawStr(60, 39, timeBuf);
 
-    // Output Mode / Vol
-    char outBuf[16];
-    snprintf(outBuf, sizeof(outBuf), "VOL:%d%%", audioPlayer.getVolume());
-    u8g2.drawStr(60, 50, outBuf);
+        // Output Mode / Vol
+        char outBuf[16];
+        snprintf(outBuf, sizeof(outBuf), "VOL:%d%%", audioPlayer.getVolume());
+        u8g2.drawStr(60, 50, outBuf);
 
-    // Mini progress bar
-    u8g2.drawFrame(60, 56, 66, 6);
-    if (durSec > 0) {
-        int progressWidth = (posSec * 64) / durSec;
-        if (progressWidth > 64) progressWidth = 64;
-        u8g2.drawBox(61, 57, progressWidth, 4);
+        // Mini progress bar
+        u8g2.drawFrame(60, 56, 66, 6);
+        if (durSec > 0) {
+            int progressWidth = (posSec * 64) / durSec;
+            if (progressWidth > 64) progressWidth = 64;
+            u8g2.drawBox(61, 57, progressWidth, 4);
+        }
+    } else {
+        // Full-screen Split Art (top header auto-hidden)
+        // 56x56 Album Art centered vertically on 64px display at Y=4
+        albumArtManager.draw(u8g2, 1, 4);
+
+        u8g2.setFont(u8g2_font_5x7_tr);
+        String displayName = audioPlayer.getCurrentTrackName();
+        if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+            displayName = trackList[currentTrackIndex];
+            int slash = displayName.lastIndexOf('/');
+            if (slash >= 0) displayName = displayName.substring(slash + 1);
+        }
+        if (displayName.length() > 11) displayName = displayName.substring(0, 10) + ".";
+        u8g2.drawStr(60, 12, displayName.c_str());
+
+        String stateStr = audioPlayer.isPlaying() ? ("▶ " + String(audioPlayer.getFormatName())) : "❚❚ PAUS";
+        u8g2.drawStr(60, 23, stateStr.c_str());
+
+        uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+        uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+        char timeBuf[20];
+        snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+        u8g2.drawStr(60, 35, timeBuf);
+
+        char outBuf[16];
+        snprintf(outBuf, sizeof(outBuf), "VOL:%d%%", audioPlayer.getVolume());
+        u8g2.drawStr(60, 47, outBuf);
+
+        u8g2.drawFrame(60, 54, 66, 6);
+        if (durSec > 0) {
+            int progressWidth = (posSec * 64) / durSec;
+            if (progressWidth > 64) progressWidth = 64;
+            u8g2.drawBox(61, 55, progressWidth, 4);
+        }
     }
 
     display.sendBuffer();
@@ -1148,27 +1268,30 @@ void UIPlayer::renderPlayerSplitArt() {
 void UIPlayer::renderPlayerCoverHero() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
+    bool showBar = isTopBarVisible();
 
     // Centered 64x64 Album Art at X=32, Y=0
     albumArtManager.draw(u8g2, 32, 0);
 
-    // Floating bottom HUD
-    u8g2.setFont(u8g2_font_5x7_tr);
-    String displayName = audioPlayer.getCurrentTrackName();
-    if (displayName.length() > 14) displayName = displayName.substring(0, 12) + "..";
-    u8g2.drawStr(0, 56, displayName.c_str());
+    // Floating bottom HUD (visible for 5s after any button press, auto-hides for pure full screen)
+    if (showBar) {
+        u8g2.setFont(u8g2_font_5x7_tr);
+        String displayName = audioPlayer.getCurrentTrackName();
+        if (displayName.length() > 14) displayName = displayName.substring(0, 12) + "..";
+        u8g2.drawStr(0, 56, displayName.c_str());
 
-    uint32_t posSec = audioPlayer.getPositionMs() / 1000;
-    char timeBuf[12];
-    snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u", posSec / 60, posSec % 60);
-    u8g2.drawStr(100, 56, timeBuf);
+        uint32_t posSec = audioPlayer.getPositionMs() / 1000;
+        char timeBuf[12];
+        snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u", posSec / 60, posSec % 60);
+        u8g2.drawStr(100, 56, timeBuf);
 
-    uint32_t durSec = audioPlayer.getDurationMs() / 1000;
-    u8g2.drawFrame(0, 59, 128, 4);
-    if (durSec > 0) {
-        int pw = (posSec * 126) / durSec;
-        if (pw > 126) pw = 126;
-        u8g2.drawBox(1, 60, pw, 2);
+        uint32_t durSec = audioPlayer.getDurationMs() / 1000;
+        u8g2.drawFrame(0, 59, 128, 4);
+        if (durSec > 0) {
+            int pw = (posSec * 126) / durSec;
+            if (pw > 126) pw = 126;
+            u8g2.drawBox(1, 60, pw, 2);
+        }
     }
 
     display.sendBuffer();
@@ -1180,35 +1303,72 @@ void UIPlayer::renderPlayerCoverHero() {
 void UIPlayer::renderPlayerPage2() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
-    u8g2.setFont(u8g2_font_5x7_tr);
+    bool showBar = isTopBarVisible();
 
-    char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "TRACK INFO  [2/3]  B:%d%%", battery.getPercentage());
-    u8g2.drawStr(0, 8, headerBuf);
-    u8g2.drawHLine(0, 10, 128);
+    if (showBar) {
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char headerBuf[32];
+        snprintf(headerBuf, sizeof(headerBuf), "TRACK INFO  [2/3]  B:%d%%", battery.getPercentage());
+        u8g2.drawStr(0, 8, headerBuf);
+        u8g2.drawHLine(0, 10, 128);
 
-    char buf[40];
-    snprintf(buf, sizeof(buf), "Codec: %s (%d-bit)", audioPlayer.getFormatName(), audioPlayer.getBitsPerSample());
-    u8g2.drawStr(2, 19, buf);
+        char buf[40];
+        snprintf(buf, sizeof(buf), "Codec: %s (%d-bit)", audioPlayer.getFormatName(), audioPlayer.getBitsPerSample());
+        u8g2.drawStr(2, 19, buf);
 
-    uint32_t sr = audioPlayer.getSampleRate();
-    const char* chStr = (audioPlayer.getChannels() == 1) ? "Mono" : "Stereo";
-    snprintf(buf, sizeof(buf), "Rate: %u.%ukHz %s", sr / 1000, (sr % 1000) / 100, chStr);
-    u8g2.drawStr(2, 28, buf);
+        uint32_t sr = audioPlayer.getSampleRate();
+        const char* chStr = (audioPlayer.getChannels() == 1) ? "Mono" : "Stereo";
+        snprintf(buf, sizeof(buf), "Rate: %u.%ukHz %s", sr / 1000, (sr % 1000) / 100, chStr);
+        u8g2.drawStr(2, 28, buf);
 
-    uint32_t kbps = audioPlayer.getBitrateKbps();
-    snprintf(buf, sizeof(buf), "Bitrate: %u kbps", kbps);
-    u8g2.drawStr(2, 37, buf);
+        uint32_t kbps = audioPlayer.getBitrateKbps();
+        snprintf(buf, sizeof(buf), "Bitrate: %u kbps", kbps);
+        u8g2.drawStr(2, 37, buf);
 
-    uint32_t sz = audioPlayer.getTotalBytes();
-    snprintf(buf, sizeof(buf), "Size: %u.%01u MB", sz / 1048576, (sz % 1048576) / 104857);
-    u8g2.drawStr(2, 46, buf);
+        uint32_t sz = audioPlayer.getTotalBytes();
+        snprintf(buf, sizeof(buf), "Size: %u.%01u MB", sz / 1048576, (sz % 1048576) / 104857);
+        u8g2.drawStr(2, 46, buf);
 
-    snprintf(buf, sizeof(buf), "Out: %s", audioPlayer.getOutputModeName());
-    u8g2.drawStr(2, 55, buf);
+        snprintf(buf, sizeof(buf), "Out: %s", audioPlayer.getOutputModeName());
+        u8g2.drawStr(2, 55, buf);
 
-    snprintf(buf, sizeof(buf), "Mode: %s (OK: Cycle)", getPlaybackModeString());
-    u8g2.drawStr(2, 63, buf);
+        snprintf(buf, sizeof(buf), "Mode: %s (OK: Cycle)", getPlaybackModeString());
+        u8g2.drawStr(2, 63, buf);
+    } else {
+        // Full-screen Track Info card (header auto-hidden after 5s)
+        String displayName = audioPlayer.getCurrentTrackName();
+        if (displayName.length() == 0 && !trackList.empty() && currentTrackIndex < (int)trackList.size()) {
+            displayName = trackList[currentTrackIndex];
+            int slash = displayName.lastIndexOf('/');
+            if (slash >= 0) displayName = displayName.substring(slash + 1);
+        }
+        if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
+
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(2, 10, displayName.c_str());
+        u8g2.drawHLine(0, 13, 128);
+
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char buf[40];
+        snprintf(buf, sizeof(buf), "Codec: %s (%d-bit)", audioPlayer.getFormatName(), audioPlayer.getBitsPerSample());
+        u8g2.drawStr(2, 23, buf);
+
+        uint32_t sr = audioPlayer.getSampleRate();
+        const char* chStr = (audioPlayer.getChannels() == 1) ? "Mono" : "Stereo";
+        snprintf(buf, sizeof(buf), "Rate:  %u.%ukHz %s", sr / 1000, (sr % 1000) / 100, chStr);
+        u8g2.drawStr(2, 33, buf);
+
+        uint32_t kbps = audioPlayer.getBitrateKbps();
+        uint32_t sz = audioPlayer.getTotalBytes();
+        snprintf(buf, sizeof(buf), "Audio: %u kbps (%u.%01uMB)", kbps, sz / 1048576, (sz % 1048576) / 104857);
+        u8g2.drawStr(2, 43, buf);
+
+        snprintf(buf, sizeof(buf), "Out:   %s", audioPlayer.getOutputModeName());
+        u8g2.drawStr(2, 53, buf);
+
+        snprintf(buf, sizeof(buf), "Mode:  %s", getPlaybackModeString());
+        u8g2.drawStr(2, 63, buf);
+    }
 
     display.sendBuffer();
 }
@@ -1361,14 +1521,18 @@ void UIPlayer::renderPlayerPage3() {
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 
-    // ── Header ───────────────────────────────────────────────────────────────
-    u8g2.setFont(u8g2_font_5x7_tr);
-    char headerBuf[32];
-    const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]"
-                        : (lyricsParser.hasLyrics()     ? "[MANUAL]" : "[NONE]");
-    snprintf(headerBuf, sizeof(headerBuf), "LYRICS %s B:%d%%", modeTag, battery.getPercentage());
-    u8g2.drawStr(0, 8, headerBuf);
-    u8g2.drawHLine(0, 10, 128);
+    bool showBar = isTopBarVisible();
+
+    // ── Header (visible for 5s after button press, auto-hides for full screen) ─
+    if (showBar) {
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char headerBuf[32];
+        const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]"
+                            : (lyricsParser.hasLyrics()     ? "[MANUAL]" : "[NONE]");
+        snprintf(headerBuf, sizeof(headerBuf), "LYRICS %s B:%d%%", modeTag, battery.getPercentage());
+        u8g2.drawStr(0, 8, headerBuf);
+        u8g2.drawHLine(0, 10, 128);
+    }
 
     if (lyricsParser.hasLyrics()) {
         int curIdx = 0;
@@ -1446,97 +1610,180 @@ void UIPlayer::renderPlayerPage3() {
         if (curIsDev) {
             // ── Devanagari 16px rendering ───────────────────────────────────
             if (!wrapL2.isEmpty()) {
-                // Two wrapped lines of 16px font: box y=12..50 (height 38)
-                u8g2.drawBox(0, 12, 128, 38);
-                u8g2.setDrawColor(0);
-                drawLyricText(u8g2, 2, 27, wrapL1, true);
-                drawLyricText(u8g2, 2, 45, wrapL2, true);
-                u8g2.setDrawColor(1);
+                // Two wrapped lines of 16px font
+                if (showBar) {
+                    u8g2.drawBox(0, 12, 128, 38);
+                    u8g2.setDrawColor(0);
+                    drawLyricText(u8g2, 2, 27, wrapL1, true);
+                    drawLyricText(u8g2, 2, 45, wrapL2, true);
+                    u8g2.setDrawColor(1);
+                } else {
+                    // Full screen 2-line wrapped Hindi (height 48px, y=8..56)
+                    u8g2.drawBox(0, 8, 128, 48);
+                    u8g2.setDrawColor(0);
+                    drawLyricText(u8g2, 2, 26, wrapL1, true);
+                    drawLyricText(u8g2, 2, 46, wrapL2, true);
+                    u8g2.setDrawColor(1);
+                }
             } else {
-                // Single line of 16px font: box y=19..43 (height 24)
-                u8g2.drawBox(0, 19, 128, 24);
-                u8g2.setDrawColor(0);
-                drawLyricText(u8g2, 2, 36, wrapL1, true);
-                u8g2.setDrawColor(1);
+                // Single line of 16px font
+                if (showBar) {
+                    u8g2.drawBox(0, 19, 128, 24);
+                    u8g2.setDrawColor(0);
+                    drawLyricText(u8g2, 2, 36, wrapL1, true);
+                    u8g2.setDrawColor(1);
 
-                // If previous line is ASCII, show it in remaining space (y=11..18)
-                if (curIdx > 0) {
-                    String prevText = lyricsParser.getLineText(curIdx - 1);
-                    if (!isDevanagariText(prevText) && fontIdx != LYRICS_FONT_HINDI) {
-                        u8g2.setFont(fp.small);
-                        while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
+                    // If previous line is ASCII, show it in remaining space (y=11..18)
+                    if (curIdx > 0) {
+                        String prevText = lyricsParser.getLineText(curIdx - 1);
+                        if (!isDevanagariText(prevText) && fontIdx != LYRICS_FONT_HINDI) {
+                            u8g2.setFont(fp.small);
+                            while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
+                                size_t cp = LyricsParser::countUtf8CodePoints(prevText);
+                                if (cp == 0) break;
+                                prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+                            }
+                            u8g2.drawUTF8(2, 17, prevText.c_str());
+                        }
+                    }
+
+                    // If next line is ASCII, show it in remaining space (y=44..55)
+                    if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
+                        String nextText = lyricsParser.getLineText(curIdx + 1);
+                        if (!isDevanagariText(nextText) && fontIdx != LYRICS_FONT_HINDI) {
+                            u8g2.setFont(fp.small);
+                            while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
+                                size_t cp = LyricsParser::countUtf8CodePoints(nextText);
+                                if (cp == 0) break;
+                                nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                            }
+                            u8g2.drawUTF8(2, 53, nextText.c_str());
+                        }
+                    }
+                } else {
+                    // Full screen single-line: box y=18..46 (height 28)
+                    // Full 64px display allows previous and next lines to be shown cleanly!
+                    if (curIdx > 0) {
+                        String prevText = lyricsParser.getLineText(curIdx - 1);
+                        bool prevIsDev = (fontIdx == LYRICS_FONT_HINDI) || isDevanagariText(prevText);
+                        u8g2.setFont(prevIsDev ? u8g2_font_unifont_t_devanagari : fp.small);
+                        while (prevText.length() > 0 && getLyricTextWidth(u8g2, prevText, prevIsDev) > 124) {
                             size_t cp = LyricsParser::countUtf8CodePoints(prevText);
                             if (cp == 0) break;
                             prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
                         }
-                        u8g2.drawUTF8(2, 17, prevText.c_str());
+                        drawLyricText(u8g2, 2, 14, prevText, prevIsDev);
                     }
-                }
 
-                // If next line is ASCII, show it in remaining space (y=44..55)
-                if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
-                    String nextText = lyricsParser.getLineText(curIdx + 1);
-                    if (!isDevanagariText(nextText) && fontIdx != LYRICS_FONT_HINDI) {
-                        u8g2.setFont(fp.small);
-                        while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
+                    u8g2.drawBox(0, 18, 128, 28);
+                    u8g2.setDrawColor(0);
+                    drawLyricText(u8g2, 2, 36, wrapL1, true);
+                    u8g2.setDrawColor(1);
+
+                    if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
+                        String nextText = lyricsParser.getLineText(curIdx + 1);
+                        bool nextIsDev = (fontIdx == LYRICS_FONT_HINDI) || isDevanagariText(nextText);
+                        u8g2.setFont(nextIsDev ? u8g2_font_unifont_t_devanagari : fp.small);
+                        while (nextText.length() > 0 && getLyricTextWidth(u8g2, nextText, nextIsDev) > 124) {
                             size_t cp = LyricsParser::countUtf8CodePoints(nextText);
                             if (cp == 0) break;
                             nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
                         }
-                        u8g2.drawUTF8(2, 53, nextText.c_str());
+                        drawLyricText(u8g2, 2, nextIsDev ? 59 : 58, nextText, nextIsDev);
                     }
                 }
             }
         } else {
             // ── Standard Latin/ASCII 3-line rendering ───────────────────────
-            // Previous line (y=12–19)
-            u8g2.setFont(fp.small);
-            if (curIdx > 0) {
-                String prevText = lyricsParser.getLineText(curIdx - 1);
-                while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
-                    size_t cp = LyricsParser::countUtf8CodePoints(prevText);
-                    if (cp == 0) break;
-                    prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+            if (showBar) {
+                // Previous line (y=12–19)
+                u8g2.setFont(fp.small);
+                if (curIdx > 0) {
+                    String prevText = lyricsParser.getLineText(curIdx - 1);
+                    while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
+                        size_t cp = LyricsParser::countUtf8CodePoints(prevText);
+                        if (cp == 0) break;
+                        prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+                    }
+                    u8g2.drawUTF8(2, 19, prevText.c_str());
                 }
-                u8g2.drawUTF8(2, 19, prevText.c_str());
-            }
 
-            // Current line in 22px highlight box (y=21..43)
-            u8g2.setFont(curFont);
-            u8g2.drawBox(0, 21, 128, 22);
-            u8g2.setDrawColor(0);
-            if (wrapL2.isEmpty()) {
-                u8g2.drawUTF8(2, 34, wrapL1.c_str());
+                // Current line in 22px highlight box (y=21..43)
+                u8g2.setFont(curFont);
+                u8g2.drawBox(0, 21, 128, 22);
+                u8g2.setDrawColor(0);
+                if (wrapL2.isEmpty()) {
+                    u8g2.drawUTF8(2, 34, wrapL1.c_str());
+                } else {
+                    u8g2.drawUTF8(2, 31, wrapL1.c_str());
+                    u8g2.drawUTF8(2, 42, wrapL2.c_str());
+                }
+                u8g2.setDrawColor(1);
+
+                // Next line (y=46–53)
+                u8g2.setFont(fp.small);
+                if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
+                    String nextText = lyricsParser.getLineText(curIdx + 1);
+                    while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
+                        size_t cp = LyricsParser::countUtf8CodePoints(nextText);
+                        if (cp == 0) break;
+                        nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                    }
+                    u8g2.drawUTF8(2, 53, nextText.c_str());
+                }
             } else {
-                u8g2.drawUTF8(2, 31, wrapL1.c_str());
-                u8g2.drawUTF8(2, 42, wrapL2.c_str());
-            }
-            u8g2.setDrawColor(1);
-
-            // Next line (y=46–53)
-            u8g2.setFont(fp.small);
-            if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
-                String nextText = lyricsParser.getLineText(curIdx + 1);
-                while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
-                    size_t cp = LyricsParser::countUtf8CodePoints(nextText);
-                    if (cp == 0) break;
-                    nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                // Full screen ASCII 3-line mode:
+                // Previous line (y=4..13)
+                u8g2.setFont(fp.small);
+                if (curIdx > 0) {
+                    String prevText = lyricsParser.getLineText(curIdx - 1);
+                    while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
+                        size_t cp = LyricsParser::countUtf8CodePoints(prevText);
+                        if (cp == 0) break;
+                        prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+                    }
+                    u8g2.drawUTF8(2, 13, prevText.c_str());
                 }
-                u8g2.drawUTF8(2, 53, nextText.c_str());
+
+                // Current line in 28px highlight box (y=18..46)
+                u8g2.setFont(curFont);
+                u8g2.drawBox(0, 18, 128, 28);
+                u8g2.setDrawColor(0);
+                if (wrapL2.isEmpty()) {
+                    u8g2.drawUTF8(2, 35, wrapL1.c_str());
+                } else {
+                    u8g2.drawUTF8(2, 30, wrapL1.c_str());
+                    u8g2.drawUTF8(2, 42, wrapL2.c_str());
+                }
+                u8g2.setDrawColor(1);
+
+                // Next line (y=50..60)
+                u8g2.setFont(fp.small);
+                if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
+                    String nextText = lyricsParser.getLineText(curIdx + 1);
+                    while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
+                        size_t cp = LyricsParser::countUtf8CodePoints(nextText);
+                        if (cp == 0) break;
+                        nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                    }
+                    u8g2.drawUTF8(2, 58, nextText.c_str());
+                }
             }
         }
 
-        // ── Footer row (y=56–63) ────────────────────────────────────────────
-        char footBuf[28];
-        if (lyricsParser.isSynchronized()) {
-            snprintf(footBuf, sizeof(footBuf), "> Synced [%s]",
-                     (curIsDev && fontIdx != LYRICS_FONT_HINDI) ? "HINDI" : playerConfig.getLyricsFontName());
-        } else {
-            snprintf(footBuf, sizeof(footBuf), "Line %d/%d (UP/DN)",
-                     curIdx + 1, (int)lyricsParser.getLineCount());
+        // ── Footer row (y=56–63) (Only shown when showBar is true) ──────────
+        if (showBar) {
+            char footBuf[28];
+            if (lyricsParser.isSynchronized()) {
+                snprintf(footBuf, sizeof(footBuf), "> Synced [%s]",
+                         (curIsDev && fontIdx != LYRICS_FONT_HINDI) ? "HINDI" : playerConfig.getLyricsFontName());
+            } else {
+                snprintf(footBuf, sizeof(footBuf), "Line %d/%d (UP/DN)",
+                         curIdx + 1, (int)lyricsParser.getLineCount());
+            }
+            u8g2.setFont(u8g2_font_5x7_tr);
+            u8g2.drawStr(2, 63, footBuf);
         }
-        u8g2.setFont(u8g2_font_5x7_tr);
-        u8g2.drawStr(2, 63, footBuf);
 
     } else {
         // No lyrics fallback
