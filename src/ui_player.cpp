@@ -21,7 +21,8 @@ UIPlayer::UIPlayer() :
     folderScrollOffset(0),
     settingsSelection(0),
     settingsScrollOffset(0),
-    eqBandSelection(0) {}
+    eqBandSelection(0),
+    artSettingsRow(0) {}
 
 void UIPlayer::begin() {
     if (!sdManager.isMounted() && !sdManager.isExFAT() && !sdManager.isGPT()) sdManager.begin();
@@ -291,7 +292,11 @@ bool UIPlayer::update() {
             switch (settingsSelection) {
                 case 0: playerConfig.cycleLayout(); break;
                 case 1: playerConfig.cycleArtSource(); break;
-                case 2: playerConfig.cycleDitherMode(); break;
+                case 2: {
+                    currentView = VIEW_ART_SETTINGS;
+                    artSettingsRow = 0;
+                    break;
+                }
                 case 3: playerConfig.toggleLyricsAutoScroll(); break;
                 case 4: playerConfig.cycleLyricsFont(); break;
                 case 5: playerConfig.cycleLyricsSize(); break;
@@ -348,6 +353,50 @@ bool UIPlayer::update() {
         if (evt != BTN_EVENT_NONE || (nowEq - lastEqRender >= 50)) {
             lastEqRender = nowEq;
             renderEqSettings();
+        }
+
+    } else if (currentView == VIEW_ART_SETTINGS) {
+        // --- Album Art Settings: Dithering + Brightness/Contrast/Threshold ---
+        // Row 0: dither algorithm (SEL cycles), Row 1: brightness, Row 2: contrast, Row 3: threshold
+        const int ART_ROW_COUNT = 4;
+        if (evt == BTN_EVENT_SEL_PRESS) {
+            if (artSettingsRow == 0) {
+                playerConfig.cycleDitherMode();
+            } else {
+                artSettingsRow = (artSettingsRow + 1) % ART_ROW_COUNT;
+            }
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+        } else if (evt == BTN_EVENT_UP_PRESS || evt == BTN_EVENT_UP_HOLD) {
+            switch (artSettingsRow) {
+                case 0: playerConfig.cycleDitherMode(); break;
+                case 1: { int8_t v = playerConfig.getArtBrightness(); if (v < 100) playerConfig.setArtBrightness(v + 1); break; }
+                case 2: { int8_t v = playerConfig.getArtContrast();   if (v < 100) playerConfig.setArtContrast(v + 1);   break; }
+                case 3: { uint8_t v = playerConfig.getArtThreshold(); if (v < 255) playerConfig.setArtThreshold(v + 1); break; }
+            }
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+        } else if (evt == BTN_EVENT_DN_PRESS || evt == BTN_EVENT_DN_HOLD) {
+            switch (artSettingsRow) {
+                case 0: playerConfig.cycleDitherMode(); break;
+                case 1: { int8_t v = playerConfig.getArtBrightness(); if (v > -100) playerConfig.setArtBrightness(v - 1); break; }
+                case 2: { int8_t v = playerConfig.getArtContrast();   if (v > -100) playerConfig.setArtContrast(v - 1);   break; }
+                case 3: { uint8_t v = playerConfig.getArtThreshold(); if (v > 0)   playerConfig.setArtThreshold(v - 1);   break; }
+            }
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+        } else if (evt == BTN_EVENT_OK_HOLD) {
+            // Cycle to next row on long OK press
+            artSettingsRow = (artSettingsRow + 1) % ART_ROW_COUNT;
+            ledManager.triggerButtonPulse(CRGB::Magenta, 1, 100);
+        } else if (evt == BTN_EVENT_CANCEL_PRESS) {
+            // Reload album art with new settings and return to Settings
+            albumArtManager.clear();
+            albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+            currentView = VIEW_PLAYER_SETTINGS;
+        }
+        static unsigned long lastArtRender = 0;
+        unsigned long nowArt = millis();
+        if (evt != BTN_EVENT_NONE || (nowArt - lastArtRender >= 100)) {
+            lastArtRender = nowArt;
+            renderArtSettings();
         }
 
     } else if (currentView == VIEW_TRACK_LIST) {
@@ -585,7 +634,7 @@ void UIPlayer::renderPlayerSettings() {
     const char* labels[SETTINGS_COUNT] = {
         "Now Playing",
         "Art Source",
-        "Dithering",
+        "Art Settings",
         "Lyrics Sync",
         "Lyrics Font",
         "Lyrics Size",
@@ -596,7 +645,7 @@ void UIPlayer::renderPlayerSettings() {
     String vals[SETTINGS_COUNT];
     vals[0] = String("[") + playerConfig.getLayoutName() + "]";
     vals[1] = String("[") + playerConfig.getArtSourceName() + "]";
-    vals[2] = String("[") + playerConfig.getDitherName() + "]";
+    vals[2] = String("[") + playerConfig.getDitherName() + "] >";
     vals[3] = String("[") + playerConfig.getLyricsAutoScrollName() + "]";
     vals[4] = String("[") + playerConfig.getLyricsFontName() + "]";
     vals[5] = String("[") + playerConfig.getLyricsSizeName() + "]";
@@ -677,6 +726,99 @@ void UIPlayer::renderEqSettings() {
     // Footer hint line
     u8g2.setFont(u8g2_font_4x6_tr);
     u8g2.drawStr(2, 63, "OK:Band  HOLD:Pre  CANCEL:Back");
+
+    display.sendBuffer();
+}
+
+void UIPlayer::renderArtSettings() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+
+    // Header
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(0, 8, "ART SETTINGS");
+    char batBuf[16];
+    snprintf(batBuf, sizeof(batBuf), "B:%d%%", battery.getPercentage());
+    u8g2.drawStr(98, 8, batBuf);
+    u8g2.drawHLine(0, 10, 128);
+
+    // Row 0: Dithering algorithm (text row with selection highlight)
+    {
+        const char *dname = playerConfig.getDitherName();
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Dither: %s", dname);
+        if (artSettingsRow == 0) {
+            u8g2.drawBox(0, 12, 128, 9);
+            u8g2.setDrawColor(0);
+            u8g2.drawStr(2, 19, buf);
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawStr(2, 19, buf);
+        }
+    }
+
+    // Helper: draw a horizontal bar for a value in range [minV..maxV]
+    // Bar occupies full row width, value mapped to bar fill
+    // y is baseline (text at y, bar just below)
+    auto drawBar = [&](int row, const char *label, int value, int minV, int maxV, int yTop) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%s:%+d", label, value);
+        bool selected = (artSettingsRow == row);
+
+        // label + value text
+        u8g2.setFont(u8g2_font_5x7_tr);
+        if (selected) {
+            u8g2.drawBox(0, yTop, 128, 7);
+            u8g2.setDrawColor(0);
+            u8g2.drawStr(2, yTop + 6, buf);
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawStr(2, yTop + 6, buf);
+        }
+
+        // Bar below text
+        int barY = yTop + 8;
+        int barW = 120;
+        int barX = 4;
+        u8g2.drawFrame(barX, barY, barW, 3);
+        int range = maxV - minV;
+        int filled = (range > 0) ? ((value - minV) * (barW - 2) / range) : 0;
+        if (filled > 0) u8g2.drawBox(barX + 1, barY + 1, filled, 1);
+    };
+
+    // Row 1: Brightness (-100..+100)
+    drawBar(1, "Bri", (int)playerConfig.getArtBrightness(), -100, 100, 22);
+
+    // Row 2: Contrast (-100..+100)
+    drawBar(2, "Con", (int)playerConfig.getArtContrast(), -100, 100, 35);
+
+    // Row 3: Threshold (0..255) — shown as 0..255
+    {
+        int thr = (int)playerConfig.getArtThreshold();
+        bool selected = (artSettingsRow == 3);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Thr:%d", thr);
+        u8g2.setFont(u8g2_font_5x7_tr);
+        if (selected) {
+            u8g2.drawBox(0, 48, 128, 7);
+            u8g2.setDrawColor(0);
+            u8g2.drawStr(2, 54, buf);
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawStr(2, 54, buf);
+        }
+        // bar
+        int barY = 56;
+        int barX = 4;
+        int barW = 120;
+        u8g2.drawFrame(barX, barY, barW, 3);
+        int filled = thr * (barW - 2) / 255;
+        if (filled > 0) u8g2.drawBox(barX + 1, barY + 1, filled, 1);
+    }
+
+    // Footer hint
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(0, 63, "SEL/UP/DN:Adj  HOLD:Row  CANCEL:Back");
 
     display.sendBuffer();
 }

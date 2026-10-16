@@ -24,7 +24,8 @@ enum UIPlayerView {
     VIEW_FOLDER_BROWSER,   // Hierarchical directory browser
     VIEW_PLAYER,           // Player screens (Pages 1, 2, 3)
     VIEW_PLAYER_SETTINGS,  // Customization settings menu
-    VIEW_EQ_SETTINGS       // Audiophile 5-Band Equalizer & Crossfeed
+    VIEW_EQ_SETTINGS,      // Audiophile 5-Band Equalizer & Crossfeed
+    VIEW_ART_SETTINGS      // Album Art dithering + image adjustments
 };
 
 enum PlayerPage {
@@ -85,6 +86,7 @@ private:
 
     // Equalizer navigation
     int eqBandSelection;
+    int artSettingsRow; // 0=dither, 1=brightness, 2=contrast, 3=threshold
 
     void refreshTrackList();
     void renderCategories();
@@ -98,6 +100,7 @@ private:
     void renderPlayerCoverHero();
     void renderPlayerSettings();
     void renderEqSettings();
+    void renderArtSettings();
     void showVolumeOverlay();
     void enterFolder(const String &folderPath);
     void refreshCurrentFolder();

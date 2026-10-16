@@ -26,7 +26,13 @@ public:
     // Dithering algorithms
     static void atkinsonDither(uint8_t *gray, int w, int h, uint8_t *out1Bit);
     static void floydSteinbergDither(uint8_t *gray, int w, int h, uint8_t *out1Bit);
-    static void thresholdDither(const uint8_t *gray, int w, int h, uint8_t *out1Bit);
+    static void thresholdDither(const uint8_t *gray, int w, int h, uint8_t *out1Bit, uint8_t threshold = 128);
+    static void bayer4Dither(const uint8_t *gray, int w, int h, uint8_t *out1Bit, uint8_t threshold = 128);
+    static void sierraLiteDither(uint8_t *gray, int w, int h, uint8_t *out1Bit);
+    static void stuckiDither(uint8_t *gray, int w, int h, uint8_t *out1Bit);
+
+    // Image preprocessing
+    static void applyBrightnessContrast(uint8_t *gray, int count, int8_t brightness, int8_t contrast);
 
     // Embedded art locators
     static bool findMP3Art(File &file, uint32_t &offset, uint32_t &size);

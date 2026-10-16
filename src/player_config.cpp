@@ -4,6 +4,9 @@
 PlayerConfig::PlayerConfig() :
     layout(LAYOUT_AUTO),
     dither(DITHER_ATKINSON),
+    artBrightness(0),
+    artContrast(0),
+    artThreshold(128),
     artSource(ART_SRC_EMBEDDED_FIRST),
     lyricsAutoScroll(true),
     lyricsFont(LYRICS_FONT_CLASSIC),
@@ -17,6 +20,9 @@ void PlayerConfig::begin() {
     prefs.begin("qtune_cfg", false);
     layout = (PlayerLayout)prefs.getUChar("layout", (uint8_t)LAYOUT_AUTO);
     dither = (DitherMode)prefs.getUChar("dither", (uint8_t)DITHER_ATKINSON);
+    artBrightness = (int8_t)prefs.getChar("art_bri", 0);
+    artContrast   = (int8_t)prefs.getChar("art_con", 0);
+    artThreshold  = prefs.getUChar("art_thr", 128);
     artSource = (ArtSource)prefs.getUChar("art_src", (uint8_t)ART_SRC_EMBEDDED_FIRST);
     lyricsAutoScroll = prefs.getBool("lrc_scroll", true);
     lyricsFont = (LyricsFont)prefs.getUChar("lrc_font", (uint8_t)LYRICS_FONT_CLASSIC);
@@ -46,6 +52,9 @@ void PlayerConfig::save() {
     prefs.begin("qtune_cfg", false);
     prefs.putUChar("layout", (uint8_t)layout);
     prefs.putUChar("dither", (uint8_t)dither);
+    prefs.putChar("art_bri", artBrightness);
+    prefs.putChar("art_con", artContrast);
+    prefs.putUChar("art_thr", artThreshold);
     prefs.putUChar("art_src", (uint8_t)artSource);
     prefs.putBool("lrc_scroll", lyricsAutoScroll);
     prefs.putUChar("lrc_font", (uint8_t)lyricsFont);
@@ -91,7 +100,7 @@ void PlayerConfig::setDitherMode(DitherMode m) {
 }
 
 void PlayerConfig::cycleDitherMode() {
-    dither = (DitherMode)((dither + 1) % 3);
+    dither = (DitherMode)((dither + 1) % DITHER_COUNT);
     save();
 }
 
@@ -100,6 +109,9 @@ const char* PlayerConfig::getDitherName() const {
         case DITHER_ATKINSON:       return "ATKINSON";
         case DITHER_FLOYD_STEINBERG:return "FLOYD-ST";
         case DITHER_THRESHOLD:      return "THRESHOLD";
+        case DITHER_BAYER4:         return "BAYER 4X4";
+        case DITHER_SIERRA_LITE:    return "SIERRA";
+        case DITHER_STUCKI:         return "STUCKI";
         default:                    return "ATKINSON";
     }
 }
@@ -213,6 +225,7 @@ const char* PlayerConfig::getLyricsFontName() const {
         case LYRICS_FONT_CHIPTUNE:   return "CHIPTUNE";
         case LYRICS_FONT_TYPEWRITER: return "TYPEWRITER";
         case LYRICS_FONT_ARCADE:     return "ARCADE";
+        case LYRICS_FONT_PIXIE:      return "PIXIE";
         default:                     return "CLASSIC";
     }
 }
@@ -237,6 +250,24 @@ const char* PlayerConfig::getLyricsSizeName() const {
         case LYRICS_SIZE_LARGE:  return "LARGE";
         default:                 return "MEDIUM";
     }
+}
+
+int8_t PlayerConfig::getArtBrightness() const { return artBrightness; }
+void PlayerConfig::setArtBrightness(int8_t val) {
+    artBrightness = (val < -100) ? -100 : (val > 100) ? 100 : val;
+    save();
+}
+
+int8_t PlayerConfig::getArtContrast() const { return artContrast; }
+void PlayerConfig::setArtContrast(int8_t val) {
+    artContrast = (val < -100) ? -100 : (val > 100) ? 100 : val;
+    save();
+}
+
+uint8_t PlayerConfig::getArtThreshold() const { return artThreshold; }
+void PlayerConfig::setArtThreshold(uint8_t val) {
+    artThreshold = val;
+    save();
 }
 
 PlayerConfig playerConfig;

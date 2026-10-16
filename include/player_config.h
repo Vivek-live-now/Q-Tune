@@ -14,7 +14,10 @@ enum PlayerLayout {
 enum DitherMode {
     DITHER_ATKINSON = 0,       // Atkinson error diffusion (high contrast, sharp details)
     DITHER_FLOYD_STEINBERG = 1,// Floyd-Steinberg error diffusion (smooth gradient)
-    DITHER_THRESHOLD = 2       // High-contrast 2-tone thresholding
+    DITHER_THRESHOLD = 2,      // High-contrast 2-tone thresholding
+    DITHER_BAYER4 = 3,         // Bayer 4x4 matrix dithering
+    DITHER_SIERRA_LITE = 4,    // Sierra Lite error diffusion
+    DITHER_STUCKI = 5          // Stucki error diffusion
 };
 
 enum ArtSource {
@@ -54,6 +57,15 @@ public:
     void cycleDitherMode();
     const char* getDitherName() const;
 
+    // Art image adjustments
+    int8_t getArtBrightness() const;
+    void setArtBrightness(int8_t val);
+    int8_t getArtContrast() const;
+    void setArtContrast(int8_t val);
+    uint8_t getArtThreshold() const;
+    void setArtThreshold(uint8_t val);
+    static constexpr uint8_t DITHER_COUNT = 6;
+
     ArtSource getArtSource() const;
     void setArtSource(ArtSource src);
     void cycleArtSource();
@@ -68,7 +80,7 @@ public:
     void setLyricsFont(LyricsFont font);
     void cycleLyricsFont();
     const char* getLyricsFontName() const;
-    static constexpr uint8_t LYRICS_FONT_COUNT = 5;
+    static constexpr uint8_t LYRICS_FONT_COUNT = 6;
 
     LyricsSize getLyricsSize() const;
     void setLyricsSize(LyricsSize size);
@@ -97,6 +109,9 @@ public:
 private:
     PlayerLayout layout;
     DitherMode dither;
+    int8_t artBrightness; // -128..+127, default 0
+    int8_t artContrast;   // -128..+127, default 0
+    uint8_t artThreshold; // 0..255, default 128
     ArtSource artSource;
     bool lyricsAutoScroll;
     LyricsFont lyricsFont;

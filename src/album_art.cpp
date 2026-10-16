@@ -165,15 +165,143 @@ void AlbumArtManager::floydSteinbergDither(uint8_t *gray, int w, int h, uint8_t 
     free(err);
 }
 
-void AlbumArtManager::thresholdDither(const uint8_t *gray, int w, int h, uint8_t *out1Bit) {
+void AlbumArtManager::thresholdDither(const uint8_t *gray, int w, int h, uint8_t *out1Bit, uint8_t threshold) {
     int totalPixels = w * h;
     memset(out1Bit, 0, (totalPixels + 7) / 8);
     for (int i = 0; i < totalPixels; i++) {
-        if (gray[i] >= 128) {
+        if (gray[i] >= threshold) {
             out1Bit[i / 8] |= (1 << (7 - (i % 8)));
         }
     }
 }
+
+void AlbumArtManager::bayer4Dither(const uint8_t *gray, int w, int h, uint8_t *out1Bit, uint8_t threshold) {
+    // Bayer 4x4 ordered dithering matrix (values 0-15, normalized to 0-255 range)
+    static const uint8_t bayer4[4][4] = {
+        {  0, 136,  34, 170 },
+        { 204,  68, 238, 102 },
+        {  51, 187,  17, 153 },
+        { 255, 119, 221,  85 }
+    };
+    int totalPixels = w * h;
+    memset(out1Bit, 0, (totalPixels + 7) / 8);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int i = y * w + x;
+            // Add Bayer matrix offset scaled around the threshold
+            int16_t adjusted = (int16_t)gray[i] + ((int16_t)bayer4[y & 3][x & 3] - 128) / 2;
+            if (adjusted < 0) adjusted = 0;
+            if (adjusted > 255) adjusted = 255;
+            if ((uint8_t)adjusted >= threshold) {
+                out1Bit[i / 8] |= (1 << (7 - (i % 8)));
+            }
+        }
+    }
+}
+
+void AlbumArtManager::sierraLiteDither(uint8_t *gray, int w, int h, uint8_t *out1Bit) {
+    // Sierra Lite: fast 2-row error diffusion
+    // Pattern:     X  2
+    //           1  1       (out of 4)
+    int totalPixels = w * h;
+    int16_t *err = (int16_t*)malloc(totalPixels * sizeof(int16_t));
+    if (!err) return;
+
+    for (int i = 0; i < totalPixels; i++) err[i] = gray[i];
+    memset(out1Bit, 0, (totalPixels + 7) / 8);
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int idx = y * w + x;
+            int16_t oldVal = err[idx];
+            if (oldVal < 0) oldVal = 0;
+            if (oldVal > 255) oldVal = 255;
+
+            uint8_t bit = (oldVal >= 128) ? 1 : 0;
+            if (bit) out1Bit[idx / 8] |= (1 << (7 - (idx % 8)));
+
+            int16_t error = oldVal - (bit ? 255 : 0);
+            if (x + 1 < w)              err[idx + 1]             += (error * 2) / 4;
+            if (y + 1 < h) {
+                if (x - 1 >= 0)         err[(y+1)*w + (x-1)]    += (error * 1) / 4;
+                                        err[(y+1)*w + x]         += (error * 1) / 4;
+            }
+        }
+    }
+    free(err);
+}
+
+void AlbumArtManager::stuckiDither(uint8_t *gray, int w, int h, uint8_t *out1Bit) {
+    // Stucki error diffusion — very smooth gradients
+    // Distribution (/ 42):
+    //               X  8  4
+    //     2  4  8  4  2
+    //     1  2  4  2  1
+    int totalPixels = w * h;
+    int16_t *err = (int16_t*)malloc(totalPixels * sizeof(int16_t));
+    if (!err) return;
+
+    for (int i = 0; i < totalPixels; i++) err[i] = gray[i];
+    memset(out1Bit, 0, (totalPixels + 7) / 8);
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int idx = y * w + x;
+            int16_t oldVal = err[idx];
+            if (oldVal < 0) oldVal = 0;
+            if (oldVal > 255) oldVal = 255;
+
+            uint8_t bit = (oldVal >= 128) ? 1 : 0;
+            if (bit) out1Bit[idx / 8] |= (1 << (7 - (idx % 8)));
+
+            int16_t e = oldVal - (bit ? 255 : 0);
+
+#define STUCKI_ADD(dx, dy, num) \
+            if ((x+(dx)) >= 0 && (x+(dx)) < w && (y+(dy)) >= 0 && (y+(dy)) < h) \
+                err[(y+(dy))*w + (x+(dx))] += (e * (num)) / 42;
+
+            STUCKI_ADD(+1, 0, 8)
+            STUCKI_ADD(+2, 0, 4)
+            STUCKI_ADD(-2, 1, 2)
+            STUCKI_ADD(-1, 1, 4)
+            STUCKI_ADD( 0, 1, 8)
+            STUCKI_ADD(+1, 1, 4)
+            STUCKI_ADD(+2, 1, 2)
+            STUCKI_ADD(-2, 2, 1)
+            STUCKI_ADD(-1, 2, 2)
+            STUCKI_ADD( 0, 2, 4)
+            STUCKI_ADD(+1, 2, 2)
+            STUCKI_ADD(+2, 2, 1)
+#undef STUCKI_ADD
+        }
+    }
+    free(err);
+}
+
+void AlbumArtManager::applyBrightnessContrast(uint8_t *gray, int count, int8_t brightness, int8_t contrast) {
+    if (brightness == 0 && contrast == 0) return;
+
+    // Contrast: scale around midpoint 128.
+    // contrast in -100..+100; map to factor 0.0..2.0 (0 = 1.0 = no change)
+    // factor = 1.0 + contrast/100.0
+    // Brightness: simple additive offset, scaled: brightness * 127 / 100
+    int bOffset = (int)brightness * 127 / 100;
+    // contrast factor as fixed-point *128: 128 + contrast * 128/100
+    int cFactor128 = 128 + (int)contrast * 128 / 100;
+    if (cFactor128 < 0) cFactor128 = 0;
+
+    for (int i = 0; i < count; i++) {
+        int32_t v = gray[i];
+        // Apply contrast around midpoint
+        v = 128 + ((v - 128) * cFactor128) / 128;
+        // Apply brightness
+        v += bOffset;
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;
+        gray[i] = (uint8_t)v;
+    }
+}
+
 
 // Helper to scan for JPEG Start-Of-Image marker (0xFF, 0xD8) in a stream window
 static bool scanForJPEGHeader(File &file, uint32_t frameStart, uint32_t frameSize, uint32_t &jpegOffset, uint32_t &jpegSize) {
@@ -462,12 +590,32 @@ bool AlbumArtManager::decodeJPEGFromStream(File &file, uint32_t offset, uint32_t
         artWidth = targetW;
         artHeight = targetH;
 
-        if (dither == DITHER_ATKINSON) {
-            atkinsonDither(grayBuf, targetW, targetH, bitmap);
-        } else if (dither == DITHER_FLOYD_STEINBERG) {
-            floydSteinbergDither(grayBuf, targetW, targetH, bitmap);
-        } else {
-            thresholdDither(grayBuf, targetW, targetH, bitmap);
+        // Apply brightness/contrast preprocessing before dithering
+        int8_t  bri = playerConfig.getArtBrightness();
+        int8_t  con = playerConfig.getArtContrast();
+        uint8_t thr = playerConfig.getArtThreshold();
+        applyBrightnessContrast(grayBuf, targetW * targetH, bri, con);
+
+        switch (dither) {
+            case DITHER_ATKINSON:
+                atkinsonDither(grayBuf, targetW, targetH, bitmap);
+                break;
+            case DITHER_FLOYD_STEINBERG:
+                floydSteinbergDither(grayBuf, targetW, targetH, bitmap);
+                break;
+            case DITHER_BAYER4:
+                bayer4Dither(grayBuf, targetW, targetH, bitmap, thr);
+                break;
+            case DITHER_SIERRA_LITE:
+                sierraLiteDither(grayBuf, targetW, targetH, bitmap);
+                break;
+            case DITHER_STUCKI:
+                stuckiDither(grayBuf, targetW, targetH, bitmap);
+                break;
+            case DITHER_THRESHOLD:
+            default:
+                thresholdDither(grayBuf, targetW, targetH, bitmap, thr);
+                break;
         }
         artLoaded = true;
     }
