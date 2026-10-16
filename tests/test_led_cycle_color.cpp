@@ -190,8 +190,19 @@ enum class LedMode {
     REACT_SPECTRUM_HUE,
     REACT_RAINBOW_FLOW,
     REACT_FIRE,
-    REACT_DISCO_FLASH
+    REACT_DISCO_FLASH,
+    REACT_BAND_TARGET
 };
+
+enum class LedTargetBand : uint8_t {
+    SUB_BASS = 0,
+    BASS     = 1,
+    LOW_MID  = 2,
+    MIDRANGE = 3,
+    HIGH_MID = 4,
+    TREBLE   = 5
+};
+static constexpr uint8_t TARGET_BAND_COUNT = 6;
 
 enum class LedSensitivity {
     SENS_LOW = 1,
@@ -236,6 +247,13 @@ public:
     LedSensitivity getSensitivity() const { return current_sensitivity; }
     void cycleSensitivity();
     const char* getSensitivityName() const;
+
+    void setTargetBand(LedTargetBand band);
+    LedTargetBand getTargetBand() const { return target_band; }
+    void cycleTargetBand();
+    const char* getTargetBandName() const;
+    const char* getTargetBandShortName() const;
+    float getTargetBandEnergy() const;
 
     bool isButtonFeedbackEnabled() const { return button_feedback_enabled; }
     void setButtonFeedbackEnabled(bool enabled);
@@ -294,6 +312,9 @@ private:
     float lightning_intensity;
     uint32_t last_lightning_time;
     uint8_t lightning_burst_count;
+
+    LedTargetBand target_band;
+    float target_band_max;
 
     void updateReactiveModes(float dt);
 };

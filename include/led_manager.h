@@ -22,8 +22,19 @@ enum class LedMode {
     REACT_SPECTRUM_HUE,
     REACT_RAINBOW_FLOW,
     REACT_FIRE,
-    REACT_DISCO_FLASH
+    REACT_DISCO_FLASH,
+    REACT_BAND_TARGET
 };
+
+enum class LedTargetBand : uint8_t {
+    SUB_BASS = 0, // 30 - 80 Hz   (Band 0)
+    BASS     = 1, // 80 - 250 Hz  (Bands 1-2)
+    LOW_MID  = 2, // 250 - 600 Hz (Bands 3-4)
+    MIDRANGE = 3, // 600 - 2 kHz  (Bands 5-7)
+    HIGH_MID = 4, // 2 - 6 kHz    (Bands 8-10)
+    TREBLE   = 5  // 6 - 16+ kHz  (Bands 11-15)
+};
+static constexpr uint8_t TARGET_BAND_COUNT = 6;
 
 enum class LedSensitivity {
     SENS_LOW = 1,
@@ -70,6 +81,14 @@ public:
     LedSensitivity getSensitivity() const { return current_sensitivity; }
     void cycleSensitivity();
     const char* getSensitivityName() const;
+
+    // Target frequency band selection for REACT_BAND_TARGET mode
+    void setTargetBand(LedTargetBand band);
+    LedTargetBand getTargetBand() const { return target_band; }
+    void cycleTargetBand();
+    const char* getTargetBandName() const;
+    const char* getTargetBandShortName() const;
+    float getTargetBandEnergy() const;
 
     // Button reactive lights control
     bool isButtonFeedbackEnabled() const { return button_feedback_enabled; }
@@ -133,6 +152,10 @@ private:
     float lightning_intensity;
     uint32_t last_lightning_time;
     uint8_t lightning_burst_count;
+
+    // Target band reactive trackers
+    LedTargetBand target_band;
+    float target_band_max;
 
     void updateReactiveModes(float dt);
 };

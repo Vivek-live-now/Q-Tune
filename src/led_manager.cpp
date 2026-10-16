@@ -29,6 +29,7 @@ static const LedMode SELECTABLE_MODES[] = {
     LedMode::REACT_RAINBOW_FLOW,
     LedMode::REACT_FIRE,
     LedMode::REACT_DISCO_FLASH,
+    LedMode::REACT_BAND_TARGET,
     LedMode::BREATHING,
     LedMode::RAINBOW,
     LedMode::SOLID
@@ -68,7 +69,9 @@ LEDManager::LEDManager() :
     vocal_max(25.0f),
     lightning_intensity(0.0f),
     last_lightning_time(0),
-    lightning_burst_count(0)
+    lightning_burst_count(0),
+    target_band(LedTargetBand::BASS),
+    target_band_max(15.0f)
 {}
 
 void LEDManager::loadSettings() {
@@ -85,6 +88,9 @@ void LEDManager::loadSettings() {
         master_enabled = prefs.getBool("enabled", true);
         button_feedback_enabled = prefs.getBool("btn_fb", true);
         off_on_complete = prefs.getBool("off_done", true);
+        uint8_t tb = prefs.getUChar("tgt_band", (uint8_t)LedTargetBand::BASS);
+        if (tb >= TARGET_BAND_COUNT) tb = (uint8_t)LedTargetBand::BASS;
+        target_band = (LedTargetBand)tb;
         prefs.end();
     }
 }
@@ -99,6 +105,7 @@ void LEDManager::saveSettings() {
         prefs.putBool("enabled", master_enabled);
         prefs.putBool("btn_fb", button_feedback_enabled);
         prefs.putBool("off_done", off_on_complete);
+        prefs.putUChar("tgt_band", (uint8_t)target_band);
         prefs.end();
     }
 }
@@ -117,7 +124,8 @@ bool LEDManager::isReactiveMode(LedMode mode) {
             mode == LedMode::REACT_SPECTRUM_HUE ||
             mode == LedMode::REACT_RAINBOW_FLOW ||
             mode == LedMode::REACT_FIRE ||
-            mode == LedMode::REACT_DISCO_FLASH);
+            mode == LedMode::REACT_DISCO_FLASH ||
+            mode == LedMode::REACT_BAND_TARGET);
 }
 
 void LEDManager::setMode(LedMode mode) {
@@ -171,6 +179,7 @@ case LedMode::REACT_ENERGY_VU:        return "ENERGY VU";
         case LedMode::REACT_RAINBOW_FLOW:     return "RAINBOW FLOW";
         case LedMode::REACT_FIRE:             return "FIRE FLAME";
         case LedMode::REACT_DISCO_FLASH:      return "DISCO STROBE";
+        case LedMode::REACT_BAND_TARGET:      return "BAND TARGET";
         case LedMode::BREATHING:              return "BREATHING";
         case LedMode::RAINBOW:                return "RAINBOW WHEEL";
         case LedMode::SOLID:                  return "SOLID COLOR";
@@ -193,6 +202,7 @@ const char* LEDManager::getShortModeName() const {
         case LedMode::REACT_RAINBOW_FLOW:     return "FLOW";
         case LedMode::REACT_FIRE:             return "FIRE";
         case LedMode::REACT_DISCO_FLASH:      return "DSCO";
+        case LedMode::REACT_BAND_TARGET:      return "BAND";
         case LedMode::BREATHING:              return "BRTH";
         case LedMode::RAINBOW:                return "RAIN";
         case LedMode::SOLID:                  return "SLID";
@@ -264,6 +274,53 @@ const char* LEDManager::getSensitivityName() const {
         case LedSensitivity::SENS_NORMAL: return "NORM";
         case LedSensitivity::SENS_HIGH:   return "HIGH";
         default:                          return "NORM";
+    }
+}
+
+void LEDManager::setTargetBand(LedTargetBand band) {
+    target_band = band;
+    saveSettings();
+}
+
+void LEDManager::cycleTargetBand() {
+    target_band = (LedTargetBand)(((uint8_t)target_band + 1) % TARGET_BAND_COUNT);
+    saveSettings();
+}
+
+const char* LEDManager::getTargetBandName() const {
+    switch (target_band) {
+        case LedTargetBand::SUB_BASS: return "Sub-Bass (30-80Hz)";
+        case LedTargetBand::BASS:     return "Bass (80-250Hz)";
+        case LedTargetBand::LOW_MID:  return "Low-Mid (250-600Hz)";
+        case LedTargetBand::MIDRANGE: return "Midrange (600-2kHz)";
+        case LedTargetBand::HIGH_MID: return "High-Mid (2-6kHz)";
+        case LedTargetBand::TREBLE:   return "Treble (6-16kHz)";
+        default:                      return "Bass (80-250Hz)";
+    }
+}
+
+const char* LEDManager::getTargetBandShortName() const {
+    switch (target_band) {
+        case LedTargetBand::SUB_BASS: return "SUB";
+        case LedTargetBand::BASS:     return "BASS";
+        case LedTargetBand::LOW_MID:  return "LMID";
+        case LedTargetBand::MIDRANGE: return "MID";
+        case LedTargetBand::HIGH_MID: return "HMID";
+        case LedTargetBand::TREBLE:   return "TREB";
+        default:                      return "BASS";
+    }
+}
+
+float LEDManager::getTargetBandEnergy() const {
+    const uint8_t* b = spectrumAnalyzer.getBands();
+    switch (target_band) {
+        case LedTargetBand::SUB_BASS: return (float)b[0];
+        case LedTargetBand::BASS:     return (b[1] * 1.2f + b[2] * 1.0f) * 0.5f;
+        case LedTargetBand::LOW_MID:  return (b[3] * 1.1f + b[4] * 1.0f) * 0.5f;
+        case LedTargetBand::MIDRANGE: return (b[5] * 1.0f + b[6] * 1.1f + b[7] * 1.0f) / 3.0f;
+        case LedTargetBand::HIGH_MID: return (b[8] * 1.0f + b[9] * 1.1f + b[10] * 1.0f) / 3.0f;
+        case LedTargetBand::TREBLE:   return (b[11] * 1.0f + b[12] * 1.1f + b[13] * 1.2f + b[14] * 1.2f + b[15] * 1.3f) / 5.0f;
+        default:                      return (float)b[1];
     }
 }
 
@@ -438,6 +495,23 @@ void LEDManager::updateReactiveModes(float dt) {
                 leds[0] = CHSV((uint8_t)reactive_hue, 255, val);
                 break;
             }
+            case LedMode::REACT_BAND_TARGET: {
+                // Rhythmic band-targeted pulse demo
+                float pulse = 0.5f + 0.5f * sinf(anim_phase * 2.8f);
+                pulse = pulse * pulse * pulse;
+                uint8_t val = (uint8_t)(20 + pulse * 235);
+                bool isPitchMode = (color_index == 8);
+                if (isPitchMode) {
+                    static const uint8_t BAND_HUES[6] = { 0, 24, 48, 96, 140, 210 };
+                    uint8_t h = BAND_HUES[(uint8_t)target_band];
+                    leds[0] = CHSV(h, 255, val);
+                } else {
+                    CRGB c = current_color;
+                    c.nscale8(val);
+                    leds[0] = c;
+                }
+                break;
+            }
             default:
                 break;
         }
@@ -593,12 +667,23 @@ void LEDManager::updateReactiveModes(float dt) {
             if (anim_phase > 2.0f * (float)M_PI) anim_phase -= 2.0f * (float)M_PI;
             float vibratoShimmer = 1.0f + 0.06f * sinf(anim_phase) * constrain(voiceConfidence, 0.3f, 1.0f);
 
+            // Voice confidence linear scaling: 0 when conf <= 50%, 100% when conf == 100%
+            float confScale = (voiceConfidence <= 0.50f) ? 0.0f : constrain((voiceConfidence - 0.50f) / 0.50f, 0.0f, 1.0f);
+            if (confScale <= 0.0f) {
+                leds[0] = CRGB::Black;
+                break;
+            }
+
             // CRITICAL Hardware Safety (Level 50/255 Lowest Brightness):
             // Use soft-knee/linear scaling and active illumination floor (>= 28 PWM counts)
             // so FastLED at 50/255 setting preserves at least 3-6 PWM counts without blackout!
             uint8_t minPWMFloor = (voicePitchGate > 0.05f && lightning_intensity > 0.02f) ? 28 : 0;
             float vocalCurve = lightning_intensity * vibratoShimmer;
-            uint8_t vocalBright = (uint8_t)constrain((int)(vocalCurve * 227.0f) + minPWMFloor, 0, 255);
+            uint8_t vocalBright = (uint8_t)constrain((int)((vocalCurve * 227.0f + minPWMFloor) * confScale), 0, 255);
+            if (vocalBright == 0) {
+                leds[0] = CRGB::Black;
+                break;
+            }
 
             // Determine Vocal Melody Hue & Saturation based on pitch spectrum or user palette
             bool isPitchMode = (color_index == 8); // "PTCH" dynamic pitch spectrum
@@ -730,6 +815,46 @@ void LEDManager::updateReactiveModes(float dt) {
 
             uint8_t val = (uint8_t)(10 + reactive_flash * 245.0f);
             leds[0] = CHSV((uint8_t)reactive_hue, 255, val);
+            break;
+        }
+
+        case LedMode::REACT_BAND_TARGET: {
+            // Real-time audio reactivity tuned specifically to user's chosen frequency band
+            float bandEnergy = getTargetBandEnergy();
+            if (bandEnergy > target_band_max) {
+                target_band_max = bandEnergy;
+            } else {
+                target_band_max -= dt * (target_band_max * 0.20f);
+            }
+            if (target_band_max < 6.0f) target_band_max = 6.0f;
+
+            float normEnergy = constrain((bandEnergy / target_band_max) * sens, 0.0f, 1.0f);
+            if (normEnergy >= reactive_energy) {
+                reactive_energy = normEnergy;
+            } else {
+                reactive_energy -= dt * 4.5f;
+                if (reactive_energy < 0.0f) reactive_energy = 0.0f;
+            }
+
+            float curved = reactive_energy * reactive_energy;
+            uint8_t val = (uint8_t)(curved * 255.0f);
+            if (val < 4) {
+                leds[0] = CRGB::Black;
+                break;
+            }
+
+            bool isPitchMode = (color_index == 8);
+            if (isPitchMode) {
+                // Distinct acoustic spectrum colors for each frequency band:
+                // Sub-Bass: Deep Red, Bass: Amber/Orange, Low-Mid: Warm Yellow, Mid: Emerald, High-Mid: Cyan, Treble: Magenta
+                static const uint8_t BAND_HUES[6] = { 0, 24, 48, 96, 140, 210 };
+                uint8_t h = BAND_HUES[(uint8_t)target_band];
+                leds[0] = CHSV(h, 255, val);
+            } else {
+                CRGB c = current_color;
+                c.nscale8(val);
+                leds[0] = c;
+            }
             break;
         }
 

@@ -197,7 +197,7 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
 
     const char* curSelItem = (items && selection >= 0 && selection < item_count && items[selection]) ? items[selection] : "";
     String curTitle = title ? title : "";
-    if (curTitle != s_lastMenuTitle || selection != s_lastMenuSelection || curSelItem != s_lastSelectedItemText) {
+    if (curTitle != s_lastMenuTitle || selection != s_lastMenuSelection || s_lastSelectedItemText != curSelItem) {
         s_lastMenuTitle = curTitle;
         s_lastMenuSelection = selection;
         s_lastSelectedItemText = curSelItem;
@@ -272,7 +272,7 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
 
     const char* curSelItem = (items && selection >= 0 && selection < item_count && items[selection]) ? items[selection] : "";
     String curTitle = title ? title : "";
-    if (curTitle != s_lastMenuTitle || selection != s_lastMenuSelection || curSelItem != s_lastSelectedItemText) {
+    if (curTitle != s_lastMenuTitle || selection != s_lastMenuSelection || s_lastSelectedItemText != curSelItem) {
         s_lastMenuTitle = curTitle;
         s_lastMenuSelection = selection;
         s_lastSelectedItemText = curSelItem;

@@ -483,10 +483,10 @@ void SpectrumAnalyzer::sampleMicrophone() {
         // Uninstall existing I2S driver on I2S_NUM to reconfigure for microphone RX
         i2s_driver_uninstall(I2S_NUM);
 
-        // INMP441 standard Philips I2S configuration (32-bit slot width, master RX)
+        // INMP441 standard Philips I2S configuration (32-bit slot width, master RX, 44.1kHz)
         i2s_config_t i2s_config = {
             .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-            .sample_rate = 16000,
+            .sample_rate = 44100,
             .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
             .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
             .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -518,12 +518,13 @@ void SpectrumAnalyzer::sampleMicrophone() {
 
     int32_t rawSamples[SAMPLE_SIZE * 2];
     size_t bytesRead = 0;
-    esp_err_t err = i2s_read(I2S_NUM, rawSamples, sizeof(rawSamples), &bytesRead, pdMS_TO_TICKS(50));
+    esp_err_t err = i2s_read(I2S_NUM, rawSamples, sizeof(rawSamples), &bytesRead, pdMS_TO_TICKS(15));
     if (err != ESP_OK || bytesRead == 0) return;
 
     size_t pairCount = bytesRead / (sizeof(int32_t) * 2);
     if (pairCount == 0) return;
 
+    int16_t pcmSamples[SAMPLE_SIZE];
     int64_t sum = 0;
     for (size_t i = 0; i < pairCount && i < SAMPLE_SIZE; i++) {
         int32_t left = rawSamples[i * 2];
@@ -531,10 +532,16 @@ void SpectrumAnalyzer::sampleMicrophone() {
 
         // INMP441 outputs 24-bit audio in upper bits of 32-bit slot
         int32_t chosen = (labs(left) >= labs(right)) ? left : right;
-        int16_t sample = (int16_t)(chosen >> 14);
+        int32_t pcm = chosen >> 10;
+        if (pcm > 32767) pcm = 32767;
+        if (pcm < -32768) pcm = -32768;
+        pcmSamples[i] = (int16_t)pcm;
+        int16_t sample = (int16_t)(pcm >> 6);
         micBuffer[i] = sample;
         sum += sample;
     }
+
+    feedSamples(pcmSamples, (pairCount < SAMPLE_SIZE) ? pairCount : SAMPLE_SIZE, 1);
 
     for (size_t i = pairCount; i < SAMPLE_SIZE; i++) {
         micBuffer[i] = 0;

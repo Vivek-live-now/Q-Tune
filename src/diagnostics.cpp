@@ -383,7 +383,9 @@ void Diagnostics::testVocalReactiveCheck() {
     ledManager.setEnabled(true);
     ledManager.setMode(LedMode::REACT_VOCAL_LIGHTNING);
 
-    bool useMicrophone = !audioPlayer.isPlaying();
+    bool wasPlaying = audioPlayer.isPlaying();
+    String savedTrack = audioPlayer.getCurrentTrackPath();
+    bool useMicrophone = !wasPlaying;
     if (useMicrophone) {
         audioPlayer.stopAudioTask();
         audioPlayer.stop();
@@ -415,6 +417,9 @@ void Diagnostics::testVocalReactiveCheck() {
         display.clear();
         u8g2.setFont(u8g2_font_6x10_tr);
         u8g2.drawStr(0, 10, "VOCAL REACTIVE CHECK");
+        const char* srcBadge = useMicrophone ? "[MIC]" : "[FILE]";
+        int bw = u8g2.getStrWidth(srcBadge);
+        u8g2.drawStr(128 - bw, 10, srcBadge);
         u8g2.drawHLine(0, 12, 128);
 
         char buf[32];
@@ -441,32 +446,54 @@ void Diagnostics::testVocalReactiveCheck() {
         snprintf(buf, sizeof(buf), "Gate: %s | %s", gateOpen ? "OPEN " : "CLOSED", ledManager.getSensitivityName());
         u8g2.drawStr(0, 53, buf);
 
-        u8g2.drawStr(0, 63, "UP/DN:Sens OK:Mic CANCEL");
+        snprintf(buf, sizeof(buf), "UP/DN:Sens OK:%s CANCEL", useMicrophone ? "FILE" : "MIC");
+        u8g2.drawStr(0, 63, buf);
         display.sendBuffer();
 
         ButtonEvent evt = buttonManager.update();
         if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) break;
-        if (evt == BTN_EVENT_UP_PRESS || evt == BTN_EVENT_DN_PRESS) {
+        if (evt == BTN_EVENT_UP_PRESS) {
             ledManager.cycleSensitivity();
-        } else if (evt == BTN_EVENT_SEL_PRESS) {
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+        } else if (evt == BTN_EVENT_DN_PRESS) {
+            ledManager.cycleSensitivity();
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+        } else if (evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_OK_PRESS) {
             if (useMicrophone) {
                 spectrumAnalyzer.stop();
                 audioPlayer.begin();
                 useMicrophone = false;
+                if (savedTrack.length() > 0) {
+                    audioPlayer.playFile(savedTrack);
+                } else {
+                    std::vector<String> files = sdManager.listMusicFiles();
+                    if (!files.empty()) {
+                        savedTrack = files[0];
+                        audioPlayer.playFile(savedTrack);
+                    }
+                }
+                ledManager.triggerButtonPulse(CRGB::Green, 1, 50);
             } else {
+                if (audioPlayer.isPlaying()) {
+                    savedTrack = audioPlayer.getCurrentTrackPath();
+                }
                 audioPlayer.stopAudioTask();
                 audioPlayer.stop();
                 spectrumAnalyzer.start();
                 useMicrophone = true;
+                ledManager.triggerButtonPulse(CRGB::Cyan, 1, 50);
             }
         }
         unsigned long tVocPoll = millis();
-        while (millis() - tVocPoll < 25) { yield(); }
+        while (millis() - tVocPoll < 20) { yield(); }
     }
 
     if (useMicrophone) {
         spectrumAnalyzer.stop();
         audioPlayer.begin();
+    }
+    if (wasPlaying && savedTrack.length() > 0 && !audioPlayer.isPlaying()) {
+        audioPlayer.playFile(savedTrack);
     }
     ledManager.setUserMode(prevMode);
     ledManager.setEnabled(prevEnabled);
