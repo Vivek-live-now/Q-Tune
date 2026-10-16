@@ -120,8 +120,10 @@ typedef void (*usb_host_client_event_cb_t)(const usb_host_client_event_msg_t *ev
 typedef struct {
     bool is_synchronous;
     int max_num_event_msg;
-    usb_host_client_event_cb_t client_event_cb;
-    void *callback_arg;
+    struct {
+        usb_host_client_event_cb_t client_event_callback;
+        void *callback_arg;
+    } async;
 } usb_host_client_config_t;
 
 typedef struct {
@@ -256,10 +258,12 @@ static esp_err_t usb_host_transfer_submit(usb_transfer_t *transfer) {
     return ESP_OK;
 }
 
-static esp_err_t usb_host_transfer_submit_control(usb_host_client_handle_t client_hdl, usb_device_handle_t dev_hdl,
-                                                  const usb_setup_packet_t *setup, uint8_t *data, size_t data_len, uint32_t timeout) {
-    if (!setup) return ESP_ERR_INVALID_ARG;
-    // Process control request on physical DAC Feature Unit
+static esp_err_t usb_host_transfer_submit_control(usb_host_client_handle_t client_hdl, usb_transfer_t *transfer) {
+    if (!transfer || !transfer->data_buffer) return ESP_ERR_INVALID_ARG;
+    const usb_setup_packet_t *setup = (const usb_setup_packet_t *)transfer->data_buffer;
+    uint8_t *data = transfer->data_buffer + sizeof(usb_setup_packet_t);
+    size_t data_len = setup->wLength;
+
     if (setup->bRequest == UAC_SET_CUR) {
         uint8_t cs = (setup->wValue >> 8) & 0xFF;
         if (cs == UAC_VOLUME_CONTROL && data && data_len >= 2) {
@@ -271,6 +275,11 @@ static esp_err_t usb_host_transfer_submit_control(usb_host_client_handle_t clien
         } else if (cs == UAC_MUTE_CONTROL && data && data_len >= 1) {
             s_mock_dac_mute = (data[0] != 0);
         }
+    }
+    transfer->actual_num_bytes = transfer->num_bytes;
+    transfer->status = USB_TRANSFER_STATUS_COMPLETED;
+    if (transfer->callback) {
+        transfer->callback(transfer);
     }
     return ESP_OK;
 }
@@ -319,7 +328,8 @@ struct uac_interface {
     size_t ring_tail;
     size_t ring_count;
 
-    // Hardware Audio Controls
+    // Hardware Audio Controls & Control Transfer
+    usb_transfer_t *ctrl_xfer;
     uint8_t volume;
     int16_t volume_db;
     bool mute;
@@ -401,12 +411,12 @@ esp_err_t uac_host_install(const uac_host_driver_config_t *config) {
     }
 
     // 2. Register USB Host Client with host library
-    usb_host_client_config_t client_config = {
-        .is_synchronous = false,
-        .max_num_event_msg = 16,
-        .client_event_cb = uac_client_event_cb,
-        .callback_arg = (void*)config
-    };
+    usb_host_client_config_t client_config;
+    memset(&client_config, 0, sizeof(client_config));
+    client_config.is_synchronous = false;
+    client_config.max_num_event_msg = 16;
+    client_config.async.client_event_callback = uac_client_event_cb;
+    client_config.async.callback_arg = (void*)config;
     esp_err_t err = usb_host_client_register(&client_config, &s_client_handle);
     if (err != ESP_OK) {
         return err;
@@ -510,6 +520,10 @@ esp_err_t uac_host_device_open(const uac_host_device_config_t *config, uac_host_
         dev->active_xfer_list[i] = NULL;
     }
 
+    // Allocate control transfer buffer
+    dev->ctrl_xfer = NULL;
+    usb_host_transfer_alloc(64, 0, &dev->ctrl_xfer);
+
     s_opened_devices.push_back(dev);
     *uac_dev_handle = (uac_host_device_handle_t)dev;
     return ESP_OK;
@@ -533,6 +547,11 @@ esp_err_t uac_host_device_close(uac_host_device_handle_t uac_dev_handle) {
 
     // Release USB interface and free transfer URBs
     usb_host_interface_release(s_client_handle, dev->dev_hdl, dev->iface_num);
+
+    if (dev->ctrl_xfer) {
+        usb_host_transfer_free(dev->ctrl_xfer);
+        dev->ctrl_xfer = NULL;
+    }
 
     if (dev->free_xfer_list) {
         for (int i = 0; i < dev->xfer_num; i++) {
@@ -708,22 +727,27 @@ esp_err_t uac_host_device_set_volume(uac_host_device_handle_t uac_dev_handle, ui
     int16_t volume_db = (int16_t)(volume_db_f * 256.0f);
     dev->volume_db = volume_db;
 
-    // Dispatches real USB Class-Specific SET_CUR control transfer:
-    // bmRequestType: 0x21 (Host to Device, Class-Specific, Interface Recipient)
-    // bRequest: UAC_SET_CUR (0x01)
-    // wValue: (UAC_VOLUME_CONTROL << 8) | Master Channel (0x0200)
-    // wIndex: (Feature Unit ID << 8) | Audio Control Interface
-    // wLength: 2 bytes
-    uint8_t vol_data[2] = { (uint8_t)(volume_db & 0xFF), (uint8_t)((volume_db >> 8) & 0xFF) };
-    usb_setup_packet_t setup = {
-        .bmRequestType = 0x21,
-        .bRequest = UAC_SET_CUR,
-        .wValue = (uint16_t)((UAC_VOLUME_CONTROL << 8) | 0),
-        .wIndex = (uint16_t)((dev->feature_unit_id << 8) | dev->ctrl_iface_num),
-        .wLength = 2
-    };
+    if (!dev->ctrl_xfer) return ESP_ERR_INVALID_STATE;
+    usb_transfer_t *xfer = dev->ctrl_xfer;
+    xfer->device_handle = dev->dev_hdl;
+    xfer->bEndpointAddress = 0;
+    xfer->callback = NULL;
+    xfer->context = dev;
+    xfer->timeout_ms = 1000;
+    xfer->num_bytes = sizeof(usb_setup_packet_t) + 2;
 
-    return usb_host_transfer_submit_control(s_client_handle, dev->dev_hdl, &setup, vol_data, 2, 1000);
+    usb_setup_packet_t *setup = (usb_setup_packet_t*)xfer->data_buffer;
+    setup->bmRequestType = 0x21;
+    setup->bRequest = UAC_SET_CUR;
+    setup->wValue = (uint16_t)((UAC_VOLUME_CONTROL << 8) | 0);
+    setup->wIndex = (uint16_t)((dev->feature_unit_id << 8) | dev->ctrl_iface_num);
+    setup->wLength = 2;
+
+    uint8_t *payload = xfer->data_buffer + sizeof(usb_setup_packet_t);
+    payload[0] = (uint8_t)(volume_db & 0xFF);
+    payload[1] = (uint8_t)((volume_db >> 8) & 0xFF);
+
+    return usb_host_transfer_submit_control(s_client_handle, xfer);
 }
 
 esp_err_t uac_host_device_get_volume(uac_host_device_handle_t uac_dev_handle, uint8_t *volume) {
@@ -756,22 +780,26 @@ esp_err_t uac_host_device_set_mute(uac_host_device_handle_t uac_dev_handle, bool
     uac_interface *dev = (uac_interface*)uac_dev_handle;
     dev->mute = mute;
 
-    // Dispatches real USB Class-Specific SET_CUR control transfer:
-    // bmRequestType: 0x21 (Host to Device, Class-Specific, Interface Recipient)
-    // bRequest: UAC_SET_CUR (0x01)
-    // wValue: (UAC_MUTE_CONTROL << 8) | Master Channel (0x0100)
-    // wIndex: (Feature Unit ID << 8) | Audio Control Interface
-    // wLength: 1 byte
-    uint8_t mute_data[1] = { (uint8_t)(mute ? 1 : 0) };
-    usb_setup_packet_t setup = {
-        .bmRequestType = 0x21,
-        .bRequest = UAC_SET_CUR,
-        .wValue = (uint16_t)((UAC_MUTE_CONTROL << 8) | 0),
-        .wIndex = (uint16_t)((dev->feature_unit_id << 8) | dev->ctrl_iface_num),
-        .wLength = 1
-    };
+    if (!dev->ctrl_xfer) return ESP_ERR_INVALID_STATE;
+    usb_transfer_t *xfer = dev->ctrl_xfer;
+    xfer->device_handle = dev->dev_hdl;
+    xfer->bEndpointAddress = 0;
+    xfer->callback = NULL;
+    xfer->context = dev;
+    xfer->timeout_ms = 1000;
+    xfer->num_bytes = sizeof(usb_setup_packet_t) + 1;
 
-    return usb_host_transfer_submit_control(s_client_handle, dev->dev_hdl, &setup, mute_data, 1, 1000);
+    usb_setup_packet_t *setup = (usb_setup_packet_t*)xfer->data_buffer;
+    setup->bmRequestType = 0x21;
+    setup->bRequest = UAC_SET_CUR;
+    setup->wValue = (uint16_t)((UAC_MUTE_CONTROL << 8) | 0);
+    setup->wIndex = (uint16_t)((dev->feature_unit_id << 8) | dev->ctrl_iface_num);
+    setup->wLength = 1;
+
+    uint8_t *payload = xfer->data_buffer + sizeof(usb_setup_packet_t);
+    payload[0] = (uint8_t)(mute ? 1 : 0);
+
+    return usb_host_transfer_submit_control(s_client_handle, xfer);
 }
 
 esp_err_t uac_host_device_get_mute(uac_host_device_handle_t uac_dev_handle, bool *mute) {

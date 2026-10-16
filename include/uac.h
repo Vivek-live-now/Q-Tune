@@ -10,6 +10,9 @@
 #if !defined(HOST_TEST)
 #include "sdkconfig.h"
 #include "usb/usb_types_ch9.h"
+#else
+struct usb_config_desc_t;
+typedef struct usb_config_desc_t usb_config_desc_t;
 #endif
 
 #ifdef __cplusplus
@@ -512,8 +515,7 @@ typedef struct {
     uint8_t bLockDelayUnits;    /*!< Units for wLockDelay. */
     uint16_t wLockDelay;        /*!< Lock delay for the endpoint. */
 } __attribute__((packed)) uac_as_cs_ep_desc_t;
-
-typedef struct usb_config_desc_t usb_config_desc_t;
+ 
 /**
  * @brief Print the full UAC configuration descriptor.
  *
