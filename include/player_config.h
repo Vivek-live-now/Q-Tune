@@ -32,7 +32,8 @@ enum LyricsFont {
     LYRICS_FONT_CHIPTUNE    = 2,  // 8-bit demoparty & chiptune
     LYRICS_FONT_TYPEWRITER  = 3,  // Retro typewriter monospace
     LYRICS_FONT_ARCADE      = 4,  // 80s arcade gaming
-    LYRICS_FONT_PIXIE       = 5   // Fairytale tiny pixie
+    LYRICS_FONT_PIXIE       = 5,  // Fairytale tiny pixie
+    LYRICS_FONT_HINDI       = 6   // Devanagari Hindi Unifont
 };
 
 enum LyricsSize {
@@ -80,7 +81,7 @@ public:
     void setLyricsFont(LyricsFont font);
     void cycleLyricsFont();
     const char* getLyricsFontName() const;
-    static constexpr uint8_t LYRICS_FONT_COUNT = 6;
+    static constexpr uint8_t LYRICS_FONT_COUNT = 7;
 
     LyricsSize getLyricsSize() const;
     void setLyricsSize(LyricsSize size);

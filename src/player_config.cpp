@@ -226,6 +226,7 @@ const char* PlayerConfig::getLyricsFontName() const {
         case LYRICS_FONT_TYPEWRITER: return "TYPEWRITER";
         case LYRICS_FONT_ARCADE:     return "ARCADE";
         case LYRICS_FONT_PIXIE:      return "PIXIE";
+        case LYRICS_FONT_HINDI:      return "HINDI";
         default:                     return "CLASSIC";
     }
 }

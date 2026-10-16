@@ -1213,6 +1213,143 @@ void UIPlayer::renderPlayerPage2() {
     display.sendBuffer();
 }
 
+// ── Devanagari (Hindi) UTF-8 Detection & Rendering ───────────────────────────
+#ifdef U8G2_FONT_SECTION
+extern const uint8_t u8g2_font_unifont_t_devanagari[] U8G2_FONT_SECTION("u8g2_font_unifont_t_devanagari");
+#else
+extern const uint8_t u8g2_font_unifont_t_devanagari[];
+#endif
+
+static inline bool isDevanagariText(const String &str) {
+    const uint8_t *p = (const uint8_t*)str.c_str();
+    while (*p) {
+        if (*p == 0xE0 && *(p + 1) != 0 && *(p + 2) != 0) {
+            uint8_t b2 = *(p + 1);
+            if (b2 == 0xA4 || b2 == 0xA5) return true;
+            p += 3;
+        } else {
+            p++;
+        }
+    }
+    return false;
+}
+
+static u8g2_uint_t drawDevanagari(U8G2 &u8g2, int16_t x, int16_t y, const char *str) {
+    uint16_t e;
+    u8g2_uint_t delta;
+    int16_t startX = x;
+    u8g2.getU8g2()->u8x8.next_cb = u8x8_utf8_next;
+    u8x8_utf8_init(u8g2.getU8x8());
+    u8g2.setFontMode(1);
+
+    for (;;) {
+        e = u8g2.getU8g2()->u8x8.next_cb(u8g2.getU8x8(), (uint8_t)*str);
+        if (e == 0x0ffff)
+            break;
+        str++;
+        if (e != 0x0fffe) {
+            switch (e) {
+                case 0x0901: x -= 14; y -= 2; break; // ँ
+                case 0x0902: x -= 14; y -= 2; break; // ं
+                case 0x0903: x -= 14; break;         // ः
+                case 0x093e: x -= 12; break;         // ा
+                case 0x093f: x -= 16; break;         // ि
+                case 0x0940: x -= 12; break;         // ी
+                case 0x0941: x -= 15; y += 2; break; // ु
+                case 0x0942: x -= 12; y += 2; break; // ू
+                case 0x0943: x -= 16; y += 2; break; // ृ
+                case 0x0944: x -= 16; y += 2; break; // ॄ
+                case 0x0945: x -= 14; y -= 2; break; // ॅ
+                case 0x0946: x -= 14; break;         // ॆ
+                case 0x0947: x -= 14; break;         // े
+                case 0x0948: x -= 14; break;         // ै
+                case 0x0949: x -= 14; break;         // ॉ
+                case 0x094b: x -= 14; break;         // ो
+                case 0x094c: x -= 14; break;         // ौ
+                case 0x094d: x -= 10; break;         // ्
+            }
+            delta = u8g2.drawGlyph(x, y, e);
+            switch (e) {
+                case 0x0901: x -= 6; y += 2; break;
+                case 0x0902: x -= 6; y += 2; break;
+                case 0x0941: x -= 3; y -= 2; break;
+                case 0x0942: x -= 6; y -= 2; break;
+                case 0x0943: x -= 4; y -= 2; break;
+                case 0x0944: x -= 4; y -= 2; break;
+                case 0x0945: x -= 6; y += 2; break;
+                case 0x0946: x -= 2; break;
+                case 0x0947: x -= 2; break;
+                case 0x0948: x -= 2; break;
+                case 0x0949: x -= 2; break;
+                case 0x094d: x -= 8; break;
+            }
+            x += delta;
+        }
+    }
+    return (x > startX) ? (u8g2_uint_t)(x - startX) : 0;
+}
+
+static u8g2_uint_t getDevanagariWidth(U8G2 &u8g2, const char *str) {
+    uint16_t e;
+    int16_t x = 0;
+    u8g2.getU8g2()->u8x8.next_cb = u8x8_utf8_next;
+    u8x8_utf8_init(u8g2.getU8x8());
+
+    for (;;) {
+        e = u8g2.getU8g2()->u8x8.next_cb(u8g2.getU8x8(), (uint8_t)*str);
+        if (e == 0x0ffff)
+            break;
+        str++;
+        if (e != 0x0fffe) {
+            int16_t pre = 0, post = 0;
+            switch (e) {
+                case 0x0901: pre = -14; post = -6; break;
+                case 0x0902: pre = -14; post = -6; break;
+                case 0x0903: pre = -14; break;
+                case 0x093e: pre = -12; break;
+                case 0x093f: pre = -16; break;
+                case 0x0940: pre = -12; break;
+                case 0x0941: pre = -15; post = -3; break;
+                case 0x0942: pre = -12; post = -6; break;
+                case 0x0943: pre = -16; post = -4; break;
+                case 0x0944: pre = -16; post = -4; break;
+                case 0x0945: pre = -14; post = -6; break;
+                case 0x0946: pre = -14; post = -2; break;
+                case 0x0947: pre = -14; post = -2; break;
+                case 0x0948: pre = -14; post = -2; break;
+                case 0x0949: pre = -14; post = -2; break;
+                case 0x094b: pre = -14; break;
+                case 0x094c: pre = -14; break;
+                case 0x094d: pre = -10; post = -8; break;
+            }
+            int8_t delta = u8g2_GetGlyphWidth(u8g2.getU8g2(), e);
+            x += pre + post + delta;
+        }
+    }
+    return (x > 0) ? (u8g2_uint_t)x : 0;
+}
+
+static u8g2_uint_t getLyricTextWidth(U8G2 &u8g2, const String &str, bool isDevanagari) {
+    if (str.isEmpty()) return 0;
+    if (isDevanagari) {
+        u8g2.setFont(u8g2_font_unifont_t_devanagari);
+        return getDevanagariWidth(u8g2, str.c_str());
+    } else {
+        return u8g2.getUTF8Width(str.c_str());
+    }
+}
+
+static u8g2_uint_t drawLyricText(U8G2 &u8g2, int16_t x, int16_t y, const String &str, bool isDevanagari) {
+    if (str.isEmpty()) return 0;
+    if (isDevanagari) {
+        u8g2.setFont(u8g2_font_unifont_t_devanagari);
+        u8g2.setFontMode(1);
+        return drawDevanagari(u8g2, x, y, str.c_str());
+    } else {
+        return u8g2.drawUTF8(x, y, str.c_str());
+    }
+}
+
 // ============================================================================
 // Page 3: Synchronized LRC Lyrics Viewer
 // ============================================================================
@@ -1254,49 +1391,39 @@ void UIPlayer::renderPlayerPage3() {
         // ── Font pair selection driven by playerConfig ──────────────────────
         // Each entry: { smallFont (prev/next lines), largeFont (current line) }
         struct LyricsFontPair { const uint8_t *small; const uint8_t *large; };
-        static const LyricsFontPair FONT_PAIRS[6] = {
-            { u8g2_font_5x7_tr,         u8g2_font_6x10_tr        }, // 0 CLASSIC
-            { u8g2_font_04b_03_tr,       u8g2_font_baby_tr         }, // 1 CUTE
-            { u8g2_font_blipfest_07_tr,  u8g2_font_nokiafc22_tr    }, // 2 CHIPTUNE
-            { u8g2_font_4x6_tr,          u8g2_font_courB08_tr      }, // 3 TYPEWRITER
-            { u8g2_font_5x7_tr,          u8g2_font_pressstart2p_8u }, // 4 ARCADE
-            { u8g2_font_4x6_tr,          u8g2_font_5x7_tr          }, // 5 PIXIE
+        static const LyricsFontPair FONT_PAIRS[7] = {
+            { u8g2_font_5x7_tr,             u8g2_font_6x10_tr            }, // 0 CLASSIC
+            { u8g2_font_04b_03_tr,           u8g2_font_baby_tr             }, // 1 CUTE
+            { u8g2_font_blipfest_07_tr,      u8g2_font_nokiafc22_tr        }, // 2 CHIPTUNE
+            { u8g2_font_4x6_tr,              u8g2_font_courB08_tr          }, // 3 TYPEWRITER
+            { u8g2_font_5x7_tr,              u8g2_font_pressstart2p_8u     }, // 4 ARCADE
+            { u8g2_font_4x6_tr,              u8g2_font_5x7_tr              }, // 5 PIXIE
+            { u8g2_font_unifont_t_devanagari, u8g2_font_unifont_t_devanagari }, // 6 HINDI
         };
         uint8_t fontIdx = (uint8_t)playerConfig.getLyricsFont();
-        if (fontIdx >= 6) fontIdx = 0;
+        if (fontIdx >= 7) fontIdx = 0;
         const LyricsFontPair &fp = FONT_PAIRS[fontIdx];
 
-        // ── Previous line (y=12–19) ─────────────────────────────────────────
-        u8g2.setFont(fp.small);
-        if (curIdx > 0) {
-            String prevText = lyricsParser.getLineText(curIdx - 1);
-            // Pixel-based truncation: shrink until fits within 124px
-            while (prevText.length() > 0 && u8g2.getStrWidth(prevText.c_str()) > 124) {
-                size_t cp = LyricsParser::countUtf8CodePoints(prevText);
-                if (cp == 0) break;
-                prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
-            }
-            u8g2.drawStr(2, 19, prevText.c_str());
-        }
-
-        // ── Current line — pixel word-wrap in 22px highlight box (y=21–43) ──
+        // ── Current line — pixel word-wrap in highlight box ──
         String curText = lyricsParser.getLineText(curIdx);
-        // Choose font for current line based on size setting
-LyricsSize sz = playerConfig.getLyricsSize();
-const uint8_t *curFont = (sz == LYRICS_SIZE_SMALL) ? fp.small : fp.large;
-u8g2.setFont(curFont);
+        bool curIsDev = (fontIdx == LYRICS_FONT_HINDI) || isDevanagariText(curText);
+
+        LyricsSize sz = playerConfig.getLyricsSize();
+        const uint8_t *curFont = curIsDev ? u8g2_font_unifont_t_devanagari
+                               : ((sz == LYRICS_SIZE_SMALL) ? fp.small : fp.large);
+        u8g2.setFont(curFont);
 
         // Pixel-based word-wrap: split at last space before 124px width boundary
         String wrapL1 = curText;
         String wrapL2 = "";
-        if (u8g2.getStrWidth(curText.c_str()) > 124) {
+        if (getLyricTextWidth(u8g2, curText, curIsDev) > 124) {
             String candidate = "";
             int lastSpaceByteIdx = -1;
             for (int bi = 0; bi < (int)curText.length(); ) {
                 uint8_t c = (uint8_t)curText[bi];
                 int cpLen = (c < 0x80) ? 1 : (c < 0xE0) ? 2 : (c < 0xF0) ? 3 : 4;
                 String next = curText.substring(0, bi + cpLen);
-                if (u8g2.getStrWidth(next.c_str()) > 124) break;
+                if (getLyricTextWidth(u8g2, next, curIsDev) > 124) break;
                 candidate = next;
                 if (curText[bi] == ' ') lastSpaceByteIdx = bi;
                 bi += cpLen;
@@ -1305,7 +1432,7 @@ u8g2.setFont(curFont);
                 wrapL1 = curText.substring(0, lastSpaceByteIdx);
                 wrapL2 = curText.substring(lastSpaceByteIdx + 1);
                 // Truncate second line to fit
-                while (wrapL2.length() > 0 && u8g2.getStrWidth(wrapL2.c_str()) > 124) {
+                while (wrapL2.length() > 0 && getLyricTextWidth(u8g2, wrapL2, curIsDev) > 124) {
                     size_t cp = LyricsParser::countUtf8CodePoints(wrapL2);
                     if (cp == 0) break;
                     wrapL2 = LyricsParser::truncateUtf8CodePoints(wrapL2, cp - 1);
@@ -1316,37 +1443,94 @@ u8g2.setFont(curFont);
             }
         }
 
-        u8g2.drawBox(0, 21, 128, 22);  // 22px highlight box (y=21 to y=43)
-        u8g2.setDrawColor(0);          // white-on-black (inverted)
-        if (wrapL2.isEmpty()) {
-            // Single line: vertically centred in box (baseline ~y=34)
-            u8g2.drawStr(2, 34, wrapL1.c_str());
-        } else {
-            // Two wrapped lines within box
-            u8g2.drawStr(2, 31, wrapL1.c_str());
-            u8g2.drawStr(2, 42, wrapL2.c_str());
-        }
-        u8g2.setDrawColor(1);
+        if (curIsDev) {
+            // ── Devanagari 16px rendering ───────────────────────────────────
+            if (!wrapL2.isEmpty()) {
+                // Two wrapped lines of 16px font: box y=12..50 (height 38)
+                u8g2.drawBox(0, 12, 128, 38);
+                u8g2.setDrawColor(0);
+                drawLyricText(u8g2, 2, 27, wrapL1, true);
+                drawLyricText(u8g2, 2, 45, wrapL2, true);
+                u8g2.setDrawColor(1);
+            } else {
+                // Single line of 16px font: box y=19..43 (height 24)
+                u8g2.drawBox(0, 19, 128, 24);
+                u8g2.setDrawColor(0);
+                drawLyricText(u8g2, 2, 36, wrapL1, true);
+                u8g2.setDrawColor(1);
 
-        // ── Next line (y=46–53) ─────────────────────────────────────────────
-        u8g2.setFont(fp.small);
-        if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
-            String nextText = lyricsParser.getLineText(curIdx + 1);
-            while (nextText.length() > 0 && u8g2.getStrWidth(nextText.c_str()) > 124) {
-                size_t cp = LyricsParser::countUtf8CodePoints(nextText);
-                if (cp == 0) break;
-                nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                // If previous line is ASCII, show it in remaining space (y=11..18)
+                if (curIdx > 0) {
+                    String prevText = lyricsParser.getLineText(curIdx - 1);
+                    if (!isDevanagariText(prevText) && fontIdx != LYRICS_FONT_HINDI) {
+                        u8g2.setFont(fp.small);
+                        while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
+                            size_t cp = LyricsParser::countUtf8CodePoints(prevText);
+                            if (cp == 0) break;
+                            prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+                        }
+                        u8g2.drawUTF8(2, 17, prevText.c_str());
+                    }
+                }
+
+                // If next line is ASCII, show it in remaining space (y=44..55)
+                if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
+                    String nextText = lyricsParser.getLineText(curIdx + 1);
+                    if (!isDevanagariText(nextText) && fontIdx != LYRICS_FONT_HINDI) {
+                        u8g2.setFont(fp.small);
+                        while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
+                            size_t cp = LyricsParser::countUtf8CodePoints(nextText);
+                            if (cp == 0) break;
+                            nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                        }
+                        u8g2.drawUTF8(2, 53, nextText.c_str());
+                    }
+                }
             }
-            u8g2.drawStr(2, 53, nextText.c_str());
+        } else {
+            // ── Standard Latin/ASCII 3-line rendering ───────────────────────
+            // Previous line (y=12–19)
+            u8g2.setFont(fp.small);
+            if (curIdx > 0) {
+                String prevText = lyricsParser.getLineText(curIdx - 1);
+                while (prevText.length() > 0 && u8g2.getUTF8Width(prevText.c_str()) > 124) {
+                    size_t cp = LyricsParser::countUtf8CodePoints(prevText);
+                    if (cp == 0) break;
+                    prevText = LyricsParser::truncateUtf8CodePoints(prevText, cp - 1);
+                }
+                u8g2.drawUTF8(2, 19, prevText.c_str());
+            }
+
+            // Current line in 22px highlight box (y=21..43)
+            u8g2.setFont(curFont);
+            u8g2.drawBox(0, 21, 128, 22);
+            u8g2.setDrawColor(0);
+            if (wrapL2.isEmpty()) {
+                u8g2.drawUTF8(2, 34, wrapL1.c_str());
+            } else {
+                u8g2.drawUTF8(2, 31, wrapL1.c_str());
+                u8g2.drawUTF8(2, 42, wrapL2.c_str());
+            }
+            u8g2.setDrawColor(1);
+
+            // Next line (y=46–53)
+            u8g2.setFont(fp.small);
+            if (curIdx + 1 < (int)lyricsParser.getLineCount()) {
+                String nextText = lyricsParser.getLineText(curIdx + 1);
+                while (nextText.length() > 0 && u8g2.getUTF8Width(nextText.c_str()) > 124) {
+                    size_t cp = LyricsParser::countUtf8CodePoints(nextText);
+                    if (cp == 0) break;
+                    nextText = LyricsParser::truncateUtf8CodePoints(nextText, cp - 1);
+                }
+                u8g2.drawUTF8(2, 53, nextText.c_str());
+            }
         }
 
         // ── Footer row (y=56–63) ────────────────────────────────────────────
-        // Sync mode: show active font name — NO live clock (removed per UX)
-        // Manual mode: show line counter + navigation hint
         char footBuf[28];
         if (lyricsParser.isSynchronized()) {
             snprintf(footBuf, sizeof(footBuf), "> Synced [%s]",
-                     playerConfig.getLyricsFontName());
+                     (curIsDev && fontIdx != LYRICS_FONT_HINDI) ? "HINDI" : playerConfig.getLyricsFontName());
         } else {
             snprintf(footBuf, sizeof(footBuf), "Line %d/%d (UP/DN)",
                      curIdx + 1, (int)lyricsParser.getLineCount());
