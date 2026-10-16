@@ -138,6 +138,51 @@ typedef struct {
     int intr_flags;
 } usb_host_config_t;
 
+// Simulated FreeRTOS Synchronization for Host Test
+typedef void* SemaphoreHandle_t;
+#ifndef pdTRUE
+#define pdTRUE 1
+#endif
+#ifndef pdFALSE
+#define pdFALSE 0
+#endif
+#ifndef pdPASS
+#define pdPASS 1
+#endif
+#ifndef pdMS_TO_TICKS
+#define pdMS_TO_TICKS(ms) (ms)
+#endif
+#ifndef portMAX_DELAY
+#define portMAX_DELAY 0xFFFFFFFF
+#endif
+
+static inline SemaphoreHandle_t xSemaphoreCreateBinary(void) {
+    bool *p = new bool(false);
+    return (SemaphoreHandle_t)p;
+}
+
+static inline void vSemaphoreDelete(SemaphoreHandle_t sem) {
+    if (sem) delete (bool*)sem;
+}
+
+static inline int xSemaphoreGive(SemaphoreHandle_t sem) {
+    if (sem) {
+        *(bool*)sem = true;
+        return pdTRUE;
+    }
+    return pdFALSE;
+}
+
+static inline int xSemaphoreTake(SemaphoreHandle_t sem, uint32_t timeout) {
+    if (sem) {
+        if (*(bool*)sem) {
+            *(bool*)sem = false;
+            return pdTRUE;
+        }
+    }
+    return pdFALSE;
+}
+
 // Simulated hardware state
 static bool s_mock_usb_host_installed = false;
 static usb_host_client_config_t s_mock_client_config = {};
@@ -146,6 +191,8 @@ static uint16_t s_mock_vid = FIIO_KA11_VID;
 static uint16_t s_mock_pid = FIIO_KA11_PID;
 static uint8_t s_mock_dac_volume = 10;
 static bool s_mock_dac_mute = false;
+static uint32_t s_mock_dac_freq = 44100;
+static uint8_t s_mock_uac_version = 1;
 
 static esp_err_t usb_host_install(const usb_host_config_t *config) {
     if (!config) return ESP_ERR_INVALID_ARG;
@@ -221,9 +268,10 @@ static esp_err_t usb_host_device_free_all(void) {
 
 // Complete mock configuration descriptor containing Interface 0 (AC + Feature Unit 2)
 // and Interface 1 (AS with Alt 1 16-bit and Alt 2 24-bit 6 discrete frequencies).
+// Total length: exactly 161 bytes (0xA1, 0x00).
 static const uint8_t s_mock_full_cfg_desc[] = {
     // 1. Configuration descriptor (9 bytes)
-    0x09, 0x02, 152, 0x00, 0x02, 0x01, 0x00, 0x80, 0xFA,
+    0x09, 0x02, 161, 0x00, 0x02, 0x01, 0x00, 0x80, 0xFA,
     // 2. Interface 0, Alt 0: Audio Control (9 bytes)
     0x09, 0x04, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
     // 3. CS_INTERFACE: AC Header (9 bytes)
@@ -252,8 +300,8 @@ static const uint8_t s_mock_full_cfg_desc[] = {
     0x1A, 0x24, 0x02, 0x01, 0x02, 0x04, 0x18, 0x06,
     0x44, 0xAC, 0x00, 0x80, 0xBB, 0x00, 0x88, 0x58, 0x01,
     0x00, 0x77, 0x01, 0x10, 0xB1, 0x02, 0x00, 0xEE, 0x02,
-    // 14. Endpoint: EP 0x01 OUT, MPS 384 (9 bytes)
-    0x09, 0x05, 0x01, 0x05, 0x80, 0x01, 0x01, 0x00, 0x00,
+    // 14. Endpoint: EP 0x01 OUT, MPS 768 (9 bytes) -> supports 96kHz 24-bit (768 bytes/ms)
+    0x09, 0x05, 0x01, 0x05, 0x00, 0x03, 0x01, 0x00, 0x00,
     // 15. CS_ENDPOINT: Sampling Frequency Control (7 bytes)
     0x07, 0x25, 0x01, 0x01, 0x00, 0x00, 0x00
 };
@@ -273,9 +321,14 @@ static esp_err_t usb_host_interface_release(usb_host_client_handle_t client_hdl,
 
 static esp_err_t usb_host_transfer_alloc(size_t data_buffer_size, int isoc_packets, usb_transfer_t **transfer) {
     if (!transfer) return ESP_ERR_INVALID_ARG;
-    usb_transfer_t *x = new usb_transfer_t();
+    usb_transfer_t *x = new (std::nothrow) usb_transfer_t();
+    if (!x) return ESP_ERR_NO_MEM;
     x->data_buffer_size = data_buffer_size;
     x->data_buffer = (uint8_t*)calloc(1, data_buffer_size);
+    if (!x->data_buffer) {
+        delete x;
+        return ESP_ERR_NO_MEM;
+    }
     x->num_bytes = 0;
     x->actual_num_bytes = 0;
     x->num_isoc_packets = isoc_packets;
@@ -311,7 +364,7 @@ static esp_err_t usb_host_transfer_submit_control(usb_host_client_handle_t clien
     if (setup->bRequest == UAC_SET_CUR) {
         uint8_t cs = (setup->wValue >> 8) & 0xFF;
         if (setup->bmRequestType == 0x21) {
-            // Audio Control Feature Unit
+            // Audio Control Feature Unit or Clock Source
             if (cs == UAC_VOLUME_CONTROL && data && data_len >= 2) {
                 int16_t vol_db = (int16_t)(data[0] | (data[1] << 8));
                 float pct = (vol_db + 32640.0f) * 100.0f / 32640.0f;
@@ -320,6 +373,14 @@ static esp_err_t usb_host_transfer_submit_control(usb_host_client_handle_t clien
                 s_mock_dac_volume = (uint8_t)std::round(pct);
             } else if (cs == UAC_MUTE_CONTROL && data && data_len >= 1) {
                 s_mock_dac_mute = (data[0] != 0);
+            } else if (cs == 0x01 && data && data_len == 4) {
+                // UAC 2.0 Clock Source frequency control
+                s_mock_dac_freq = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+            }
+        } else if (setup->bmRequestType == 0x22) {
+            // UAC 1.0 Endpoint frequency control
+            if (cs == UAC_SAMPLING_FREQ_CONTROL && data && data_len >= 3) {
+                s_mock_dac_freq = data[0] | (data[1] << 8) | (data[2] << 16);
             }
         }
     }
@@ -344,9 +405,10 @@ struct uac_interface {
     uac_host_device_event_cb_t callback;
     void *callback_arg;
 
-    // Real Hardware Identification
+    // Real Hardware Identification & Protocol
     uint16_t vid;
     uint16_t pid;
+    uint8_t uac_version;       // 1 = UAC 1.0, 2 = UAC 2.0
     wchar_t manufacturer[UAC_STR_DESC_MAX_LENGTH];
     wchar_t product[UAC_STR_DESC_MAX_LENGTH];
     wchar_t serial[UAC_STR_DESC_MAX_LENGTH];
@@ -354,6 +416,7 @@ struct uac_interface {
     // Class-Specific Topology
     uint8_t ctrl_iface_num;
     uint8_t feature_unit_id;
+    uint8_t clock_source_id;   // UAC2 Clock Source entity ID
     int16_t vol_min_db;
     int16_t vol_max_db;
     int16_t vol_res_db;
@@ -366,6 +429,8 @@ struct uac_interface {
     uint8_t ep_addr;
     uint16_t ep_mps;
     int packet_num;
+    uint32_t frame_size;       // channels * subframe_size
+    uint32_t sample_accum;     // Fractional accumulator for non-integer sample rates
 
     // Supported formats parsed from descriptors
     struct AltSettingInfo {
@@ -393,6 +458,7 @@ struct uac_interface {
 
     // Hardware Audio Controls & Control Transfer
     usb_transfer_t *ctrl_xfer;
+    SemaphoreHandle_t ctrl_sem; // Dedicated completion semaphore
     uint8_t volume;
     int16_t volume_db;
     bool mute;
@@ -437,29 +503,143 @@ static void uac_host_event_task(void *arg) {
 #endif
 
 // ----------------------------------------------------------------------------
-// Isochronous Transfer Callback
+// Device Resource Cleanup & Control Transfer Synchronization
 // ----------------------------------------------------------------------------
+static void uac_device_cleanup(uac_interface *dev) {
+    if (!dev) return;
+
+    if (dev->ctrl_xfer) {
+        usb_host_transfer_free(dev->ctrl_xfer);
+        dev->ctrl_xfer = NULL;
+    }
+
+    if (dev->ctrl_sem) {
+        vSemaphoreDelete(dev->ctrl_sem);
+        dev->ctrl_sem = NULL;
+    }
+
+    if (dev->free_xfer_list) {
+        for (int i = 0; i < dev->xfer_num; i++) {
+            if (dev->free_xfer_list[i]) {
+                usb_host_transfer_free(dev->free_xfer_list[i]);
+            }
+        }
+        delete[] dev->free_xfer_list;
+        dev->free_xfer_list = NULL;
+    }
+
+    if (dev->active_xfer_list) {
+        delete[] dev->active_xfer_list;
+        dev->active_xfer_list = NULL;
+    }
+
+    if (dev->ring_buffer) {
+        free(dev->ring_buffer);
+        dev->ring_buffer = NULL;
+    }
+
+    delete dev;
+}
+
+static void uac_ctrl_transfer_cb(usb_transfer_t *transfer) {
+    if (!transfer) return;
+    SemaphoreHandle_t sem = (SemaphoreHandle_t)transfer->context;
+    if (sem) {
+        xSemaphoreGive(sem);
+    }
+}
+
+static esp_err_t uac_submit_control_transfer_sync(uac_interface *dev, uint32_t timeout_ms) {
+    if (!dev || !dev->ctrl_xfer || !s_client_handle) return ESP_ERR_INVALID_STATE;
+    dev->ctrl_xfer->device_handle = dev->dev_hdl;
+    dev->ctrl_xfer->bEndpointAddress = 0;
+    dev->ctrl_xfer->callback = uac_ctrl_transfer_cb;
+    dev->ctrl_xfer->context = (void*)dev->ctrl_sem;
+    dev->ctrl_xfer->timeout_ms = timeout_ms;
+
+    if (dev->ctrl_sem) {
+        xSemaphoreTake(dev->ctrl_sem, 0); // Drain any stale completion token
+    }
+
+    esp_err_t err = usb_host_transfer_submit_control(s_client_handle, dev->ctrl_xfer);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (dev->ctrl_sem) {
+        if (xSemaphoreTake(dev->ctrl_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (dev->ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
+}
+
+// ----------------------------------------------------------------------------
+// Real-Time Audio Isochronous Packet Scheduler & Transfer Callback
+// ----------------------------------------------------------------------------
+static uint32_t uac_get_next_packet_bytes(uac_interface *dev) {
+    if (!dev) return 192;
+    uint32_t freq = dev->stream_config.sample_freq ? dev->stream_config.sample_freq : 44100;
+    uint32_t frame_size = dev->frame_size ? dev->frame_size : 4;
+
+    // Full-Speed frame rate is 1ms (1000 frames/sec)
+    uint32_t base_samples = freq / 1000;
+    uint32_t rem = freq % 1000;
+    uint32_t samples = base_samples;
+    if (rem > 0) {
+        dev->sample_accum += rem;
+        if (dev->sample_accum >= 1000) {
+            samples += 1;
+            dev->sample_accum -= 1000;
+        }
+    }
+    uint32_t bytes = samples * frame_size;
+    if (dev->ep_mps > 0 && bytes > dev->ep_mps) {
+        bytes = dev->ep_mps;
+    }
+    return bytes;
+}
+
+static size_t uac_fill_isoc_transfer(uac_interface *dev, usb_transfer_t *xfer) {
+    size_t total_bytes = 0;
+    for (int p = 0; p < dev->packet_num; p++) {
+        uint32_t pkt_target_bytes = uac_get_next_packet_bytes(dev);
+        if (total_bytes + pkt_target_bytes > xfer->data_buffer_size) {
+            pkt_target_bytes = (xfer->data_buffer_size > total_bytes) ? (xfer->data_buffer_size - total_bytes) : 0;
+        }
+
+        size_t available = dev->ring_count;
+        size_t to_take = (available >= pkt_target_bytes) ? pkt_target_bytes : available;
+        if (dev->frame_size > 0) {
+            to_take = (to_take / dev->frame_size) * dev->frame_size;
+        }
+
+        for (size_t b = 0; b < to_take; b++) {
+            xfer->data_buffer[total_bytes + b] = dev->ring_buffer[dev->ring_tail];
+            dev->ring_tail = (dev->ring_tail + 1) % dev->buffer_size;
+        }
+        dev->ring_count -= to_take;
+
+        for (size_t b = to_take; b < pkt_target_bytes; b++) {
+            xfer->data_buffer[total_bytes + b] = 0;
+        }
+        xfer->isoc_packet_desc[p].num_bytes = (int)pkt_target_bytes;
+        total_bytes += pkt_target_bytes;
+    }
+    xfer->num_bytes = (int)total_bytes;
+    return total_bytes;
+}
+
 static void uac_tx_transfer_cb(usb_transfer_t *transfer) {
     if (!transfer || !transfer->context) return;
     uac_interface *iface = (uac_interface*)transfer->context;
     if (!iface->is_started) return;
 
-    // Recycle transfer into free list or immediately resubmit if ring buffer has samples
-    if (iface->ring_count >= transfer->data_buffer_size) {
-        // Pop next isochronous frame from ring buffer
-        size_t to_copy = transfer->data_buffer_size;
-        for (size_t i = 0; i < to_copy; i++) {
-            transfer->data_buffer[i] = iface->ring_buffer[iface->ring_tail];
-            iface->ring_tail = (iface->ring_tail + 1) % iface->buffer_size;
-        }
-        iface->ring_count -= to_copy;
-        transfer->num_bytes = (int)to_copy;
-
-        int p_bytes = (iface->packet_num > 0) ? (int)(to_copy / iface->packet_num) : (int)to_copy;
-        for (int p = 0; p < iface->packet_num; p++) {
-            transfer->isoc_packet_desc[p].num_bytes = p_bytes;
-        }
-
+    if (iface->ring_count >= iface->frame_size) {
+        uac_fill_isoc_transfer(iface, transfer);
         usb_host_transfer_submit(transfer);
     } else {
         // Return to free list
@@ -483,8 +663,11 @@ static void uac_client_event_cb(const usb_host_client_event_msg_t *event, void *
         }
     } else if (event->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
         for (auto *dev : s_opened_devices) {
-            if (dev && dev->callback) {
-                dev->callback(dev, UAC_HOST_DRIVER_EVENT_DISCONNECTED, dev->callback_arg);
+            if (dev) {
+                dev->is_started = false;
+                if (dev->callback) {
+                    dev->callback(dev, UAC_HOST_DRIVER_EVENT_DISCONNECTED, dev->callback_arg);
+                }
             }
         }
     }
@@ -529,10 +712,22 @@ esp_err_t uac_host_install(const uac_host_driver_config_t *config) {
     // 3. Start hardware event pump tasks on ESP32-S3 FreeRTOS Core 0
 #if !defined(HOST_TEST)
     if (s_usb_lib_task_hdl == NULL) {
-        xTaskCreatePinnedToCore(usb_host_lib_task, "usb_lib_task", 4096, NULL, 5, &s_usb_lib_task_hdl, 0);
+        BaseType_t ret = xTaskCreatePinnedToCore(usb_host_lib_task, "usb_lib_task", 4096, NULL, 5, &s_usb_lib_task_hdl, 0);
+        if (ret != pdPASS) {
+            usb_host_client_deregister(s_client_handle);
+            s_client_handle = NULL;
+            s_driver_installed = false;
+            return ESP_ERR_NO_MEM;
+        }
     }
     if (s_uac_evt_task_hdl == NULL) {
-        xTaskCreatePinnedToCore(uac_host_event_task, "uac_evt_task", 4096, NULL, 5, &s_uac_evt_task_hdl, 0);
+        BaseType_t ret = xTaskCreatePinnedToCore(uac_host_event_task, "uac_evt_task", 4096, NULL, 5, &s_uac_evt_task_hdl, 0);
+        if (ret != pdPASS) {
+            s_driver_installed = false;
+            usb_host_client_deregister(s_client_handle);
+            s_client_handle = NULL;
+            return ESP_ERR_NO_MEM;
+        }
     }
 #endif
 
@@ -541,25 +736,51 @@ esp_err_t uac_host_install(const uac_host_driver_config_t *config) {
 
 esp_err_t uac_host_uninstall(void) {
     if (!s_driver_installed) return ESP_OK;
-    if (!s_opened_devices.empty()) return ESP_ERR_INVALID_STATE;
 
+    // 1. Close any open devices cleanly
+    while (!s_opened_devices.empty()) {
+        uac_interface *dev = s_opened_devices.back();
+        uac_host_device_close((uac_host_device_handle_t)dev);
+    }
+
+    // 2. Signal event pump task to stop
+    s_driver_installed = false;
+    memset(&s_driver_config, 0, sizeof(s_driver_config));
+
+#if !defined(HOST_TEST)
+    for (int i = 0; i < 25 && s_uac_evt_task_hdl != NULL; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (s_uac_evt_task_hdl) {
+        vTaskDelete(s_uac_evt_task_hdl);
+        s_uac_evt_task_hdl = NULL;
+    }
+#endif
+
+    // 3. Deregister client
     if (s_client_handle) {
         usb_host_client_deregister(s_client_handle);
         s_client_handle = NULL;
     }
-    if (s_usb_host_installed) {
-        usb_host_uninstall();
-        s_usb_host_installed = false;
-    }
 
-    s_driver_installed = false;
-    memset(&s_driver_config, 0, sizeof(s_driver_config));
+    // 4. Signal USB Host Library core task to stop
+    s_usb_host_installed = false;
+
 #if !defined(HOST_TEST)
-    vTaskDelay(pdMS_TO_TICKS(50));
+    for (int i = 0; i < 25 && s_usb_lib_task_hdl != NULL; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (s_usb_lib_task_hdl) {
+        vTaskDelete(s_usb_lib_task_hdl);
+        s_usb_lib_task_hdl = NULL;
+    }
+    usb_host_uninstall();
 #endif
+
     return ESP_OK;
 }
 
+// ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 // Dynamic USB Descriptor Parser & String Descriptor Fetcher
 // ----------------------------------------------------------------------------
@@ -569,6 +790,8 @@ static void uac_parse_descriptors(uac_interface *dev, const uint8_t *desc_bytes,
     const uint8_t *end = desc_bytes + total_len;
 
     dev->alt_settings.clear();
+    dev->uac_version = 1; // Default to UAC1 unless UAC2 is detected
+    dev->clock_source_id = 0;
     uint8_t cur_iface = 0;
     uint8_t cur_alt = 0;
     uint8_t cur_subclass = 0;
@@ -590,9 +813,13 @@ static void uac_parse_descriptors(uac_interface *dev, const uint8_t *desc_bytes,
             cur_alt = p[3];
             uint8_t iface_class = p[5];
             uint8_t iface_subclass = p[6];
+            uint8_t iface_protocol = (len >= 8) ? p[7] : 0;
 
             if (iface_class == 0x01) { // USB_CLASS_AUDIO
                 cur_subclass = iface_subclass;
+                if (iface_protocol == 0x20) { // IP_VERSION_02_00
+                    dev->uac_version = 2;
+                }
                 if (cur_subclass == 0x01) { // AUDIOCONTROL
                     dev->ctrl_iface_num = cur_iface;
                 } else if (cur_subclass == 0x02) { // AUDIOSTREAMING
@@ -601,7 +828,7 @@ static void uac_parse_descriptors(uac_interface *dev, const uint8_t *desc_bytes,
                         in_as_alt = true;
                         cur_alt_info.alt = cur_alt;
                         cur_alt_info.ep_addr = 0x01; // default
-                        cur_alt_info.ep_mps = 192;   // default
+                        cur_alt_info.ep_mps = (cur_alt == 2) ? 768 : 192;   // default
                     }
                 }
             } else {
@@ -609,29 +836,52 @@ static void uac_parse_descriptors(uac_interface *dev, const uint8_t *desc_bytes,
             }
         } else if (type == 0x24 && cur_subclass == 0x01) { // CS_INTERFACE in AudioControl
             uint8_t subtype = p[2];
-            if (subtype == 0x06 && len >= 6) { // FEATURE_UNIT
+            if (subtype == 0x01 && len >= 9) { // AC Header
+                uint16_t bcd_adc = p[3] | (p[4] << 8);
+                if (bcd_adc >= 0x0200) {
+                    dev->uac_version = 2;
+                }
+            } else if (subtype == 0x06 && len >= 6) { // FEATURE_UNIT
                 dev->feature_unit_id = p[3]; // bUnitID
+            } else if (subtype == 0x0A && len >= 8) { // CLOCK_SOURCE (UAC2)
+                dev->clock_source_id = p[3]; // bClockID
+                dev->uac_version = 2;
             }
         } else if (type == 0x24 && cur_subclass == 0x02 && in_as_alt) { // CS_INTERFACE in AudioStreaming
             uint8_t subtype = p[2];
-            if (subtype == 0x02 && len >= 8) { // FORMAT_TYPE
-                uint8_t format_type = p[3]; // 1 = FORMAT_TYPE_I
+            if (subtype == 0x02) { // FORMAT_TYPE
+                uint8_t format_type = (len >= 4) ? p[3] : 1;
                 if (format_type == 1) {
-                    cur_alt_info.channels = p[4];
-                    cur_alt_info.subframe_size = p[5];
-                    cur_alt_info.bit_resolution = p[6];
-                    uint8_t sam_freq_type = p[7];
-                    cur_alt_info.sample_freq_type = (sam_freq_type > UAC_FREQ_NUM_MAX) ? UAC_FREQ_NUM_MAX : sam_freq_type;
-                    if (sam_freq_type == 0 && len >= 14) {
-                        uint32_t min_f = p[8] | (p[9] << 8) | (p[10] << 16);
-                        uint32_t max_f = p[11] | (p[12] << 8) | (p[13] << 16);
-                        cur_alt_info.sample_freq[0] = min_f;
-                        cur_alt_info.sample_freq[1] = max_f;
-                        cur_alt_info.sample_freq_type = 2;
-                    } else {
-                        for (uint8_t k = 0; k < cur_alt_info.sample_freq_type; k++) {
-                            if (8 + 3 * k + 2 < len) {
-                                cur_alt_info.sample_freq[k] = p[8 + 3 * k] | (p[8 + 3 * k + 1] << 8) | (p[8 + 3 * k + 2] << 16);
+                    if (dev->uac_version == 2 && len >= 6) {
+                        // UAC2 Format Type I descriptor
+                        cur_alt_info.channels = 2; // Stereo
+                        cur_alt_info.subframe_size = p[4]; // bSubslotSize
+                        cur_alt_info.bit_resolution = p[5]; // bBitResolution
+                        cur_alt_info.sample_freq_type = 6;
+                        cur_alt_info.sample_freq[0] = 44100;
+                        cur_alt_info.sample_freq[1] = 48000;
+                        cur_alt_info.sample_freq[2] = 88200;
+                        cur_alt_info.sample_freq[3] = 96000;
+                        cur_alt_info.sample_freq[4] = 176400;
+                        cur_alt_info.sample_freq[5] = 192000;
+                    } else if (len >= 8) {
+                        // UAC1 Format Type I descriptor
+                        cur_alt_info.channels = p[4];
+                        cur_alt_info.subframe_size = p[5];
+                        cur_alt_info.bit_resolution = p[6];
+                        uint8_t sam_freq_type = p[7];
+                        cur_alt_info.sample_freq_type = (sam_freq_type > UAC_FREQ_NUM_MAX) ? UAC_FREQ_NUM_MAX : sam_freq_type;
+                        if (sam_freq_type == 0 && len >= 14) {
+                            uint32_t min_f = p[8] | (p[9] << 8) | (p[10] << 16);
+                            uint32_t max_f = p[11] | (p[12] << 8) | (p[13] << 16);
+                            cur_alt_info.sample_freq[0] = min_f;
+                            cur_alt_info.sample_freq[1] = max_f;
+                            cur_alt_info.sample_freq_type = 2;
+                        } else {
+                            for (uint8_t k = 0; k < cur_alt_info.sample_freq_type; k++) {
+                                if (8 + 3 * k + 2 < len) {
+                                    cur_alt_info.sample_freq[k] = p[8 + 3 * k] | (p[8 + 3 * k + 1] << 8) | (p[8 + 3 * k + 2] << 16);
+                                }
                             }
                         }
                     }
@@ -639,7 +889,7 @@ static void uac_parse_descriptors(uac_interface *dev, const uint8_t *desc_bytes,
             }
         } else if (type == 0x05 && cur_subclass == 0x02 && in_as_alt) { // ENDPOINT Descriptor
             uint8_t ep_addr = p[2];
-            if ((ep_addr & 0x80) == 0) { // Isochronous OUT
+            if ((ep_addr & 0x80) == 0 && len >= 7) { // Isochronous OUT
                 cur_alt_info.ep_addr = ep_addr;
                 cur_alt_info.ep_mps = p[4] | (p[5] << 8);
                 dev->ep_addr = ep_addr;
@@ -653,23 +903,19 @@ static void uac_parse_descriptors(uac_interface *dev, const uint8_t *desc_bytes,
     }
 }
 
-static void uac_fetch_string_desc(usb_host_client_handle_t client, usb_device_handle_t dev_hdl, usb_transfer_t *ctrl_xfer, uint8_t str_idx, wchar_t *out_str, size_t max_len) {
-    if (!str_idx || !ctrl_xfer || !out_str || max_len == 0) return;
+static void uac_fetch_string_desc(usb_host_client_handle_t client, usb_device_handle_t dev_hdl, uac_interface *dev, uint8_t str_idx, wchar_t *out_str, size_t max_len) {
+    if (!str_idx || !dev || !dev->ctrl_xfer || !out_str || max_len == 0) return;
 #if !defined(HOST_TEST)
-    usb_setup_packet_t *setup = (usb_setup_packet_t*)ctrl_xfer->data_buffer;
+    usb_setup_packet_t *setup = (usb_setup_packet_t*)dev->ctrl_xfer->data_buffer;
     setup->bmRequestType = 0x80; // In, Standard, Device
     setup->bRequest = 0x06;      // GET_DESCRIPTOR
     setup->wValue = (0x03 << 8) | str_idx; // STRING descriptor
     setup->wIndex = 0x0409;      // English (US)
     setup->wLength = 64;
-    ctrl_xfer->device_handle = dev_hdl;
-    ctrl_xfer->bEndpointAddress = 0;
-    ctrl_xfer->callback = NULL;
-    ctrl_xfer->context = NULL;
-    ctrl_xfer->timeout_ms = 500;
-    ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 64;
-    if (usb_host_transfer_submit_control(client, ctrl_xfer) == ESP_OK) {
-        uint8_t *desc = ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
+    dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 64;
+
+    if (uac_submit_control_transfer_sync(dev, 500) == ESP_OK) {
+        uint8_t *desc = dev->ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
         uint8_t bLength = desc[0];
         if (bLength >= 4 && desc[1] == 0x03) {
             size_t num_chars = (bLength - 2) / 2;
@@ -701,7 +947,12 @@ esp_err_t uac_host_device_open(const uac_host_device_config_t *config, uac_host_
     usb_host_get_active_config_descriptor(dev_hdl, &config_desc);
 
     // 3. Allocate UAC Interface
-    uac_interface *dev = new uac_interface();
+    uac_interface *dev = new (std::nothrow) uac_interface();
+    if (!dev) {
+        usb_host_device_close(s_client_handle, dev_hdl);
+        return ESP_ERR_NO_MEM;
+    }
+
     dev->dev_hdl = dev_hdl;
     dev->addr = config->addr;
     dev->iface_num = config->iface_num;
@@ -709,10 +960,27 @@ esp_err_t uac_host_device_open(const uac_host_device_config_t *config, uac_host_
     dev->buffer_threshold = (config->buffer_threshold > 0) ? config->buffer_threshold : 4096;
     dev->callback = config->callback;
     dev->callback_arg = config->callback_arg;
+    dev->ctrl_xfer = NULL;
+    dev->ctrl_sem = NULL;
+    dev->free_xfer_list = NULL;
+    dev->active_xfer_list = NULL;
+    dev->ring_buffer = NULL;
+
+    // Allocate control completion semaphore
+    dev->ctrl_sem = xSemaphoreCreateBinary();
+    if (!dev->ctrl_sem) {
+        uac_device_cleanup(dev);
+        usb_host_device_close(s_client_handle, dev_hdl);
+        return ESP_ERR_NO_MEM;
+    }
 
     // Allocate control transfer buffer
-    dev->ctrl_xfer = NULL;
-    usb_host_transfer_alloc(64, 0, &dev->ctrl_xfer);
+    err = usb_host_transfer_alloc(128, 0, &dev->ctrl_xfer);
+    if (err != ESP_OK || !dev->ctrl_xfer) {
+        uac_device_cleanup(dev);
+        usb_host_device_close(s_client_handle, dev_hdl);
+        return ESP_ERR_NO_MEM;
+    }
 
     // Read real identity descriptors
     if (device_desc) {
@@ -730,21 +998,21 @@ esp_err_t uac_host_device_open(const uac_host_device_config_t *config, uac_host_
 
     // Dynamic string descriptor extraction
     if (device_desc && device_desc->iManufacturer) {
-        uac_fetch_string_desc(s_client_handle, dev_hdl, dev->ctrl_xfer, device_desc->iManufacturer, dev->manufacturer, UAC_STR_DESC_MAX_LENGTH);
+        uac_fetch_string_desc(s_client_handle, dev_hdl, dev, device_desc->iManufacturer, dev->manufacturer, UAC_STR_DESC_MAX_LENGTH);
     }
     if (wcslen(dev->manufacturer) == 0) {
         wcsncpy(dev->manufacturer, L"FiiO", UAC_STR_DESC_MAX_LENGTH);
     }
 
     if (device_desc && device_desc->iProduct) {
-        uac_fetch_string_desc(s_client_handle, dev_hdl, dev->ctrl_xfer, device_desc->iProduct, dev->product, UAC_STR_DESC_MAX_LENGTH);
+        uac_fetch_string_desc(s_client_handle, dev_hdl, dev, device_desc->iProduct, dev->product, UAC_STR_DESC_MAX_LENGTH);
     }
     if (wcslen(dev->product) == 0) {
         wcsncpy(dev->product, L"FiiO KA11", UAC_STR_DESC_MAX_LENGTH);
     }
 
     if (device_desc && device_desc->iSerialNumber) {
-        uac_fetch_string_desc(s_client_handle, dev_hdl, dev->ctrl_xfer, device_desc->iSerialNumber, dev->serial, UAC_STR_DESC_MAX_LENGTH);
+        uac_fetch_string_desc(s_client_handle, dev_hdl, dev, device_desc->iSerialNumber, dev->serial, UAC_STR_DESC_MAX_LENGTH);
     }
     if (wcslen(dev->serial) == 0) {
         wcsncpy(dev->serial, L"KA11-CS43131", UAC_STR_DESC_MAX_LENGTH);
@@ -767,27 +1035,54 @@ esp_err_t uac_host_device_open(const uac_host_device_config_t *config, uac_host_
     dev->ep_addr = (dev->ep_addr > 0) ? dev->ep_addr : 0x01;
     dev->ep_mps = (dev->ep_mps > 0) ? dev->ep_mps : 192;
     dev->packet_num = 4; // 4 packets per isochronous frame transfer
+    dev->frame_size = 4; // Default 16-bit stereo = 4 bytes
+    dev->sample_accum = 0;
 
     // Allocate ring buffer
     dev->ring_buffer = (uint8_t*)malloc(dev->buffer_size);
+    if (!dev->ring_buffer) {
+        uac_device_cleanup(dev);
+        usb_host_device_close(s_client_handle, dev_hdl);
+        return ESP_ERR_NO_MEM;
+    }
     dev->ring_head = 0;
     dev->ring_tail = 0;
     dev->ring_count = 0;
 
     // Allocate isochronous OUT transfers with packet_num > 0
     dev->xfer_num = 3;
-    dev->free_xfer_list = new usb_transfer_t*[dev->xfer_num];
-    dev->active_xfer_list = new usb_transfer_t*[dev->xfer_num];
-    size_t xfer_buf_size = dev->ep_mps * dev->packet_num;
+    dev->free_xfer_list = new (std::nothrow) usb_transfer_t*[dev->xfer_num];
+    dev->active_xfer_list = new (std::nothrow) usb_transfer_t*[dev->xfer_num];
+    if (!dev->free_xfer_list || !dev->active_xfer_list) {
+        uac_device_cleanup(dev);
+        usb_host_device_close(s_client_handle, dev_hdl);
+        return ESP_ERR_NO_MEM;
+    }
+
     for (int i = 0; i < dev->xfer_num; i++) {
-        usb_host_transfer_alloc(xfer_buf_size, dev->packet_num, &dev->free_xfer_list[i]);
-        if (dev->free_xfer_list[i]) {
-            dev->free_xfer_list[i]->device_handle = dev_hdl;
-            dev->free_xfer_list[i]->bEndpointAddress = dev->ep_addr; // Dynamic Isochronous OUT endpoint
-            dev->free_xfer_list[i]->callback = uac_tx_transfer_cb;
-            dev->free_xfer_list[i]->context = dev;
-        }
+        dev->free_xfer_list[i] = NULL;
         dev->active_xfer_list[i] = NULL;
+    }
+
+    // Determine max possible packet size across all alternate settings (e.g. 768 for 96k 24-bit)
+    size_t max_ep_mps = dev->ep_mps;
+    for (const auto &s : dev->alt_settings) {
+        if (s.ep_mps > max_ep_mps) max_ep_mps = s.ep_mps;
+    }
+    if (max_ep_mps < 768) max_ep_mps = 768; // Support up to 96k 24-bit
+    size_t xfer_buf_size = max_ep_mps * dev->packet_num;
+
+    for (int i = 0; i < dev->xfer_num; i++) {
+        err = usb_host_transfer_alloc(xfer_buf_size, dev->packet_num, &dev->free_xfer_list[i]);
+        if (err != ESP_OK || !dev->free_xfer_list[i]) {
+            uac_device_cleanup(dev);
+            usb_host_device_close(s_client_handle, dev_hdl);
+            return ESP_ERR_NO_MEM;
+        }
+        dev->free_xfer_list[i]->device_handle = dev_hdl;
+        dev->free_xfer_list[i]->bEndpointAddress = dev->ep_addr;
+        dev->free_xfer_list[i]->callback = uac_tx_transfer_cb;
+        dev->free_xfer_list[i]->context = dev;
     }
 
     s_opened_devices.push_back(dev);
@@ -811,34 +1106,16 @@ esp_err_t uac_host_device_close(uac_host_device_handle_t uac_dev_handle) {
         uac_host_device_stop(uac_dev_handle);
     }
 
+    usb_device_handle_t dev_hdl = dev->dev_hdl;
+    uint8_t iface_num = dev->iface_num;
+
     // Release USB interface and free transfer URBs
-    usb_host_interface_release(s_client_handle, dev->dev_hdl, dev->iface_num);
+    usb_host_interface_release(s_client_handle, dev_hdl, iface_num);
 
-    if (dev->ctrl_xfer) {
-        usb_host_transfer_free(dev->ctrl_xfer);
-        dev->ctrl_xfer = NULL;
-    }
-
-    if (dev->free_xfer_list) {
-        for (int i = 0; i < dev->xfer_num; i++) {
-            if (dev->free_xfer_list[i]) {
-                usb_host_transfer_free(dev->free_xfer_list[i]);
-            }
-        }
-        delete[] dev->free_xfer_list;
-    }
-    if (dev->active_xfer_list) {
-        delete[] dev->active_xfer_list;
-    }
-
-    if (dev->ring_buffer) {
-        free(dev->ring_buffer);
-        dev->ring_buffer = NULL;
-    }
-
-    usb_host_device_close(s_client_handle, dev->dev_hdl);
+    uac_device_cleanup(dev);
     s_opened_devices.erase(it);
-    delete dev;
+
+    usb_host_device_close(s_client_handle, dev_hdl);
     return ESP_OK;
 }
 
@@ -848,14 +1125,22 @@ esp_err_t uac_host_get_device_info(uac_host_device_handle_t uac_dev_handle, uac_
 
     uac_dev_info->type = UAC_STREAM_TX;
     uac_dev_info->iface_num = dev->iface_num;
-    uac_dev_info->iface_alt_num = 2; // Alt 1 (16-bit) & Alt 2 (24-bit High-Res)
+    uac_dev_info->iface_alt_num = (uint8_t)dev->alt_settings.size();
+    if (uac_dev_info->iface_alt_num == 0) uac_dev_info->iface_alt_num = 2;
     uac_dev_info->addr = dev->addr;
+    uac_dev_info->protocol_version = dev->uac_version;
     uac_dev_info->VID = dev->vid;
     uac_dev_info->PID = dev->pid;
     wcsncpy(uac_dev_info->iManufacturer, dev->manufacturer, UAC_STR_DESC_MAX_LENGTH);
     wcsncpy(uac_dev_info->iProduct, dev->product, UAC_STR_DESC_MAX_LENGTH);
     wcsncpy(uac_dev_info->iSerialNumber, dev->serial, UAC_STR_DESC_MAX_LENGTH);
     return ESP_OK;
+}
+
+uint8_t uac_host_get_device_protocol_version(uac_host_device_handle_t uac_dev_handle) {
+    if (!uac_dev_handle) return 0;
+    uac_interface *dev = (uac_interface*)uac_dev_handle;
+    return dev->uac_version;
 }
 
 esp_err_t uac_host_get_device_alt_param(uac_host_device_handle_t uac_dev_handle,
@@ -871,6 +1156,8 @@ esp_err_t uac_host_get_device_alt_param(uac_host_device_handle_t uac_dev_handle,
             uac_alt_param->subframe_size = alt.subframe_size ? alt.subframe_size : (alt.bit_resolution > 16 ? 4 : 2);
             uac_alt_param->bit_resolution = alt.bit_resolution ? alt.bit_resolution : (iface_alt == 2 ? 24 : 16);
             uac_alt_param->sample_freq_type = alt.sample_freq_type ? alt.sample_freq_type : 6;
+            uac_alt_param->ep_addr = alt.ep_addr ? alt.ep_addr : 0x01;
+            uac_alt_param->ep_mps = alt.ep_mps ? alt.ep_mps : (iface_alt == 2 ? 768 : 192);
             if (alt.sample_freq_type > 0) {
                 for (int i = 0; i < alt.sample_freq_type; i++) {
                     uac_alt_param->sample_freq[i] = alt.sample_freq[i];
@@ -897,14 +1184,17 @@ esp_err_t uac_host_get_device_alt_param(uac_host_device_handle_t uac_dev_handle,
     uac_alt_param->sample_freq[3] = 96000;
     uac_alt_param->sample_freq[4] = 176400;
     uac_alt_param->sample_freq[5] = 192000;
+    uac_alt_param->ep_addr = 0x01;
 
     if (iface_alt == 1) {
         uac_alt_param->subframe_size = 2;
         uac_alt_param->bit_resolution = 16;
+        uac_alt_param->ep_mps = 192;
         return ESP_OK;
     } else if (iface_alt == 2) {
         uac_alt_param->subframe_size = 4;
         uac_alt_param->bit_resolution = 24;
+        uac_alt_param->ep_mps = 768;
         return ESP_OK;
     }
 
@@ -923,10 +1213,39 @@ esp_err_t uac_host_device_start(uac_host_device_handle_t uac_dev_handle, const u
     if (!uac_dev_handle || !stream_config) return ESP_ERR_INVALID_ARG;
     uac_interface *dev = (uac_interface*)uac_dev_handle;
 
-    // 1. Select matching alternate setting and claim interface in host stack
+    // 1. Select matching alternate setting
     uint8_t alt = (stream_config->bit_resolution > 16) ? 2 : 1;
+
+    // Retrieve endpoint parameters for this alternate setting
+    uint8_t ep_addr = dev->ep_addr ? dev->ep_addr : 0x01;
+    uint16_t ep_mps = (alt == 2) ? 768 : 192;
+    uint8_t subframe_size = (stream_config->bit_resolution > 16) ? 4 : 2;
+    for (const auto &s : dev->alt_settings) {
+        if (s.alt == alt) {
+            ep_addr = s.ep_addr ? s.ep_addr : ep_addr;
+            ep_mps = s.ep_mps ? s.ep_mps : ep_mps;
+            subframe_size = s.subframe_size ? s.subframe_size : subframe_size;
+            break;
+        }
+    }
+
+    uint8_t channels = stream_config->channels ? stream_config->channels : 2;
+    uint32_t frame_size = channels * subframe_size;
+
+    // Check if endpoint MPS can support full-speed 1ms packet size
+    uint32_t max_pkt_samples = (stream_config->sample_freq + 999) / 1000;
+    uint32_t required_mps = max_pkt_samples * frame_size;
+    if (ep_mps > 0 && required_mps > ep_mps) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     esp_err_t err = usb_host_interface_claim(s_client_handle, dev->dev_hdl, dev->iface_num, alt);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
+
+    dev->ep_addr = ep_addr;
+    dev->ep_mps = ep_mps;
+    dev->frame_size = frame_size;
+    dev->sample_accum = 0;
 
     // 2. Dispatch real USB SET_INTERFACE standard control transfer to open isochronous streaming
     if (dev->ctrl_xfer && dev->dev_hdl) {
@@ -936,30 +1255,44 @@ esp_err_t uac_host_device_start(uac_host_device_handle_t uac_dev_handle, const u
         setup->wValue = alt;
         setup->wIndex = dev->iface_num;
         setup->wLength = 0;
-
-        dev->ctrl_xfer->device_handle = dev->dev_hdl;
-        dev->ctrl_xfer->bEndpointAddress = 0;
-        dev->ctrl_xfer->callback = NULL;
-        dev->ctrl_xfer->context = dev;
-        dev->ctrl_xfer->timeout_ms = 1000;
         dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t);
-        usb_host_transfer_submit_control(s_client_handle, dev->ctrl_xfer);
+        uac_submit_control_transfer_sync(dev, 1000);
 
-        // 3. Set endpoint sampling frequency via Class-Specific SET_CUR control transfer
+        // 3. Set endpoint sampling frequency via protocol-specific SET_CUR control transfer
         if (stream_config->sample_freq > 0) {
-            setup->bmRequestType = 0x22; // Host-to-Device, Class-Specific, Endpoint
-            setup->bRequest = UAC_SET_CUR; // 0x01
-            setup->wValue = (uint16_t)((UAC_SAMPLING_FREQ_CONTROL << 8) | 0);
-            setup->wIndex = dev->ep_addr;
-            setup->wLength = 3;
+            if (dev->uac_version == 2) {
+                // UAC 2.0: Clock Source entity request
+                uint8_t clk_id = dev->clock_source_id ? dev->clock_source_id : 1;
+                setup->bmRequestType = 0x21; // Host-to-Device, Class-Specific, Interface
+                setup->bRequest = UAC_SET_CUR; // 0x01 (UAC2_CS_CUR)
+                setup->wValue = (0x01 << 8) | 0; // CS_SAM_FREQ_CONTROL = 0x01
+                setup->wIndex = (uint16_t)((clk_id << 8) | dev->ctrl_iface_num);
+                setup->wLength = 4; // 32-bit frequency
 
-            uint8_t *freq_buf = dev->ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
-            freq_buf[0] = (uint8_t)(stream_config->sample_freq & 0xFF);
-            freq_buf[1] = (uint8_t)((stream_config->sample_freq >> 8) & 0xFF);
-            freq_buf[2] = (uint8_t)((stream_config->sample_freq >> 16) & 0xFF);
+                uint8_t *freq_buf = dev->ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
+                freq_buf[0] = (uint8_t)(stream_config->sample_freq & 0xFF);
+                freq_buf[1] = (uint8_t)((stream_config->sample_freq >> 8) & 0xFF);
+                freq_buf[2] = (uint8_t)((stream_config->sample_freq >> 16) & 0xFF);
+                freq_buf[3] = (uint8_t)((stream_config->sample_freq >> 24) & 0xFF);
 
-            dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 3;
-            usb_host_transfer_submit_control(s_client_handle, dev->ctrl_xfer);
+                dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 4;
+                uac_submit_control_transfer_sync(dev, 1000);
+            } else {
+                // UAC 1.0: Isochronous OUT endpoint request
+                setup->bmRequestType = 0x22; // Host-to-Device, Class-Specific, Endpoint
+                setup->bRequest = UAC_SET_CUR; // 0x01
+                setup->wValue = (uint16_t)((UAC_SAMPLING_FREQ_CONTROL << 8) | 0);
+                setup->wIndex = dev->ep_addr;
+                setup->wLength = 3; // 24-bit frequency
+
+                uint8_t *freq_buf = dev->ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
+                freq_buf[0] = (uint8_t)(stream_config->sample_freq & 0xFF);
+                freq_buf[1] = (uint8_t)((stream_config->sample_freq >> 8) & 0xFF);
+                freq_buf[2] = (uint8_t)((stream_config->sample_freq >> 16) & 0xFF);
+
+                dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 3;
+                uac_submit_control_transfer_sync(dev, 1000);
+            }
         }
     }
 
@@ -985,14 +1318,8 @@ esp_err_t uac_host_device_stop(uac_host_device_handle_t uac_dev_handle) {
         setup->wValue = 0;           // Alternate setting 0 (zero bandwidth)
         setup->wIndex = dev->iface_num;
         setup->wLength = 0;
-
-        dev->ctrl_xfer->device_handle = dev->dev_hdl;
-        dev->ctrl_xfer->bEndpointAddress = 0;
-        dev->ctrl_xfer->callback = NULL;
-        dev->ctrl_xfer->context = dev;
-        dev->ctrl_xfer->timeout_ms = 1000;
         dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t);
-        usb_host_transfer_submit_control(s_client_handle, dev->ctrl_xfer);
+        uac_submit_control_transfer_sync(dev, 1000);
     }
 
     dev->is_started = false;
@@ -1036,20 +1363,7 @@ esp_err_t uac_host_device_write(uac_host_device_handle_t uac_dev_handle, const u
         if (dev->free_xfer_list[i] && dev->ring_count >= dev->buffer_threshold) {
             usb_transfer_t *xfer = dev->free_xfer_list[i];
             dev->free_xfer_list[i] = NULL;
-
-            size_t frame_bytes = (dev->ring_count > xfer->data_buffer_size) ? xfer->data_buffer_size : dev->ring_count;
-            for (size_t b = 0; b < frame_bytes; b++) {
-                xfer->data_buffer[b] = dev->ring_buffer[dev->ring_tail];
-                dev->ring_tail = (dev->ring_tail + 1) % dev->buffer_size;
-            }
-            dev->ring_count -= frame_bytes;
-            xfer->num_bytes = (int)frame_bytes;
-
-            int p_bytes = (dev->packet_num > 0) ? (int)(frame_bytes / dev->packet_num) : (int)frame_bytes;
-            for (int p = 0; p < dev->packet_num; p++) {
-                xfer->isoc_packet_desc[p].num_bytes = p_bytes;
-            }
-
+            uac_fill_isoc_transfer(dev, xfer);
             usb_host_transfer_submit(xfer);
         }
     }
@@ -1078,26 +1392,20 @@ esp_err_t uac_host_device_set_volume(uac_host_device_handle_t uac_dev_handle, ui
     dev->volume_db = volume_db;
 
     if (!dev->ctrl_xfer) return ESP_ERR_INVALID_STATE;
-    usb_transfer_t *xfer = dev->ctrl_xfer;
-    xfer->device_handle = dev->dev_hdl;
-    xfer->bEndpointAddress = 0;
-    xfer->callback = NULL;
-    xfer->context = dev;
-    xfer->timeout_ms = 1000;
-    xfer->num_bytes = sizeof(usb_setup_packet_t) + 2;
 
-    usb_setup_packet_t *setup = (usb_setup_packet_t*)xfer->data_buffer;
-    setup->bmRequestType = 0x21;
+    usb_setup_packet_t *setup = (usb_setup_packet_t*)dev->ctrl_xfer->data_buffer;
+    setup->bmRequestType = 0x21; // Host-to-Device, Class-Specific, Interface
     setup->bRequest = UAC_SET_CUR;
     setup->wValue = (uint16_t)((UAC_VOLUME_CONTROL << 8) | 0);
     setup->wIndex = (uint16_t)((dev->feature_unit_id << 8) | dev->ctrl_iface_num);
     setup->wLength = 2;
 
-    uint8_t *payload = xfer->data_buffer + sizeof(usb_setup_packet_t);
+    uint8_t *payload = dev->ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
     payload[0] = (uint8_t)(volume_db & 0xFF);
     payload[1] = (uint8_t)((volume_db >> 8) & 0xFF);
 
-    return usb_host_transfer_submit_control(s_client_handle, xfer);
+    dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 2;
+    return uac_submit_control_transfer_sync(dev, 1000);
 }
 
 esp_err_t uac_host_device_get_volume(uac_host_device_handle_t uac_dev_handle, uint8_t *volume) {
@@ -1131,25 +1439,19 @@ esp_err_t uac_host_device_set_mute(uac_host_device_handle_t uac_dev_handle, bool
     dev->mute = mute;
 
     if (!dev->ctrl_xfer) return ESP_ERR_INVALID_STATE;
-    usb_transfer_t *xfer = dev->ctrl_xfer;
-    xfer->device_handle = dev->dev_hdl;
-    xfer->bEndpointAddress = 0;
-    xfer->callback = NULL;
-    xfer->context = dev;
-    xfer->timeout_ms = 1000;
-    xfer->num_bytes = sizeof(usb_setup_packet_t) + 1;
 
-    usb_setup_packet_t *setup = (usb_setup_packet_t*)xfer->data_buffer;
-    setup->bmRequestType = 0x21;
+    usb_setup_packet_t *setup = (usb_setup_packet_t*)dev->ctrl_xfer->data_buffer;
+    setup->bmRequestType = 0x21; // Host-to-Device, Class-Specific, Interface
     setup->bRequest = UAC_SET_CUR;
     setup->wValue = (uint16_t)((UAC_MUTE_CONTROL << 8) | 0);
     setup->wIndex = (uint16_t)((dev->feature_unit_id << 8) | dev->ctrl_iface_num);
     setup->wLength = 1;
 
-    uint8_t *payload = xfer->data_buffer + sizeof(usb_setup_packet_t);
+    uint8_t *payload = dev->ctrl_xfer->data_buffer + sizeof(usb_setup_packet_t);
     payload[0] = (uint8_t)(mute ? 1 : 0);
 
-    return usb_host_transfer_submit_control(s_client_handle, xfer);
+    dev->ctrl_xfer->num_bytes = sizeof(usb_setup_packet_t) + 1;
+    return uac_submit_control_transfer_sync(dev, 1000);
 }
 
 esp_err_t uac_host_device_get_mute(uac_host_device_handle_t uac_dev_handle, bool *mute) {

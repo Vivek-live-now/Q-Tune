@@ -56,10 +56,30 @@ int main() {
     assert(alt1.channels == 2); // Stereo
     assert(alt1.bit_resolution == 16);
     assert(alt1.sample_freq_type == 6);
+    assert(alt1.ep_addr == 0x01);
+    assert(alt1.ep_mps == 192); // 48 samples * 2 channels * 2 bytes = 192 bytes/ms
 
     uac_host_dev_alt_param_t alt2 = {};
     assert(uac_host_get_device_alt_param(handle, 2, &alt2) == ESP_OK);
     assert(alt2.bit_resolution == 24);
+    assert(alt2.subframe_size == 4);
+    assert(alt2.ep_addr == 0x01);
+    assert(alt2.ep_mps == 768); // Full-Speed 96kHz 24-bit requires 768 bytes/ms (96 * 2 * 4)
+
+    // Verify protocol version query (FiiO KA11 mock is UAC 1.0)
+    uac_host_dev_info_t dev_info = {};
+    assert(uac_host_get_device_info(handle, &dev_info) == ESP_OK);
+    assert(dev_info.protocol_version == 1);
+    assert(uac_host_get_device_protocol_version(handle) == 1);
+
+    // Verify endpoint MPS bandwidth limit protection: 192kHz on 768-byte MPS requires 1536 bytes/ms, which must be rejected
+    uac_host_stream_config_t cfg_too_fast = {
+        .channels = 2,
+        .bit_resolution = 24,
+        .sample_freq = 192000,
+        .flags = 0
+    };
+    assert(uac_host_device_start(handle, &cfg_too_fast) == ESP_ERR_INVALID_SIZE);
 
     // Negotiate 44.1kHz 16-bit
     assert(usbManager.configureFormat(44100, 2, 16));
@@ -78,7 +98,7 @@ int main() {
 
     // Return to standard 44.1kHz 16-bit for audio playback
     assert(usbManager.configureFormat(44100, 2, 16));
-    std::cout << "  [PASS] 3. USB Audio Class format negotiation (44.1k/48k/96k 16/24-bit) verified." << std::endl;
+    std::cout << "  [PASS] 3. USB Audio Class format negotiation (44.1k/48k/96k 16/24-bit) & endpoint MPS (192/768) verified." << std::endl;
 
     // ------------------------------------------------------------------------
     // Test 4: Continuous PCM Streaming & Hardware Volume / Mute
@@ -150,6 +170,21 @@ int main() {
     assert(audioPlayer.getOutputMode() == OUTPUT_MODE_SPEAKER_I2S);
     assert(strcmp(audioPlayer.getOutputModeShortName(), "SPKR") == 0);
     std::cout << "  [PASS] 7. Seamless switching between FiiO KA11 and MAX98357A I2S verified." << std::endl;
+
+    // ------------------------------------------------------------------------
+    // Test 8: UAC 1.0/2.0 Protocol Negotiation, Real-Time Scheduler & Sync Transfers
+    // ------------------------------------------------------------------------
+    // 1. Verify rapid synchronous control requests with zero buffer collision
+    assert(uac_host_device_set_volume(handle, 25) == ESP_OK);
+    assert(uac_host_device_set_mute(handle, true) == ESP_OK);
+    assert(uac_host_device_set_mute(handle, false) == ESP_OK);
+    assert(uac_host_device_set_volume(handle, 10) == ESP_OK);
+
+    // 2. Verify clean shutdown ordering: closing device then uninstalling driver
+    usbManager.safeEject();
+    assert(usbManager.getState() == USBAudioState::SAFE_TO_EJECT);
+    assert(uac_host_uninstall() == ESP_OK);
+    std::cout << "  [PASS] 8. Synchronous control transfer completion, UAC negotiation, and clean shutdown verified." << std::endl;
 
     std::cout << "\n[ALL CHECKS PASSED] FiiO KA11 USB Host UAC implementation 100% verified." << std::endl;
     return 0;

@@ -90,6 +90,7 @@ typedef struct {
     uint8_t iface_num;                                  /*!< UAC Interface Number */
     uint8_t iface_alt_num;                              /*!< UAC Interface Alternate Setting Total Number */
     uint8_t addr;                                       /*!< USB Address of connected UAC device */
+    uint8_t protocol_version;                           /*!< UAC Protocol Version (1 = UAC 1.0, 2 = UAC 2.0) */
     uint16_t VID;                                       /*!< Vendor ID (0x2972 for FiiO) */
     uint16_t PID;                                       /*!< Product ID (0x0053 for KA11) */
     wchar_t iManufacturer[UAC_STR_DESC_MAX_LENGTH];     /*!< Manufacturer string (L"FiiO") */
@@ -104,6 +105,8 @@ typedef struct {
     uint8_t bit_resolution;                             /*!< Audio bit resolution (16, 24, 32) */
     uint8_t sample_freq_type;                           /*!< 0: continuous range, non-zero: discrete count */
     uint32_t sample_freq[UAC_FREQ_NUM_MAX];             /*!< Supported discrete sample frequencies */
+    uint8_t ep_addr;                                    /*!< Isochronous endpoint address (e.g. 0x01) */
+    uint16_t ep_mps;                                    /*!< Endpoint maximum packet size */
 } uac_host_dev_alt_param_t;
 
 typedef struct {
@@ -141,6 +144,7 @@ esp_err_t uac_host_device_open_with_vid_pid(uint16_t vid, uint16_t pid, const ua
 esp_err_t uac_host_device_close(uac_host_device_handle_t uac_dev_handle);
 
 esp_err_t uac_host_get_device_info(uac_host_device_handle_t uac_dev_handle, uac_host_dev_info_t *uac_dev_info);
+uint8_t uac_host_get_device_protocol_version(uac_host_device_handle_t uac_dev_handle);
 esp_err_t uac_host_get_device_alt_param(uac_host_device_handle_t uac_dev_handle,
                                         uint8_t iface_alt,
                                         uac_host_dev_alt_param_t *uac_alt_param);
