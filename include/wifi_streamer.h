@@ -52,6 +52,7 @@ public:
     uint8_t getBitsPerSample() const;
     uint8_t getBufferFillPercentage() const;
     bool isStreaming() const;
+    String getDisconnectReason() const;
 
     // Credentials & Mode Management
     void setCredentials(const String &ssid, const String &password);
@@ -68,8 +69,14 @@ private:
     String savedPass;
     String currentTrackTitle;
     String currentTrackArtist;
+    String disconnectReason;
     uint32_t currentSampleRate;
     uint8_t currentBitsPerSample;
+    uint32_t lastSSDPAnnounce;
+    uint32_t lastUIRenderMs;
+    bool wavHeaderParsed;
+    uint8_t wavHeaderBuf[44];
+    size_t wavHeaderBytes;
 
     // Network Servers
     WebServer configServer;   // Port 80: Web Configuration & Status Portal
