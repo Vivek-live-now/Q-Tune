@@ -8,10 +8,13 @@
 #include "hw_config.h"
 #include "audio_decoder.h"
 
+#ifndef AUDIO_OUTPUT_MODE_DEFINED
+#define AUDIO_OUTPUT_MODE_DEFINED
 enum AudioOutputMode {
     OUTPUT_MODE_SPEAKER_I2S = 0,
     OUTPUT_MODE_FIIO_USB_DAC = 1
 };
+#endif
 
 struct WAVHeader {
     char riff[4];

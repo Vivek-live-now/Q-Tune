@@ -78,8 +78,12 @@
 // Strictly Avoided Strapping/System Pins:
 // GPIO 0, 3, 45, 46 (Boot / Strapping - DO NOT USE)
 
+#if !defined(HOST_TEST)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#else
+typedef void* SemaphoreHandle_t;
+#endif
 
 // Shared SPI Bus Mutex for multi-task arbitration (OLED Display vs microSD Card)
 extern SemaphoreHandle_t spiBusMutex;

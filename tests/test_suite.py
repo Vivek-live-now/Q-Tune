@@ -872,7 +872,25 @@ def test_fiio_ka11_usb_dac_and_safe_eject():
     assert "getOutputModeShortName" in ui_src, "UI player header must display active output mode badge"
     assert "KA11" in apcpp_src, "AudioPlayer must provide KA11 short badge string"
 
-    print("  [PASS] FiiO KA11 native USB Host (GPIO 19/20), Safe Mount & Eject protocol, dual output routing, and UI badges verified.")
+    # 5. Host C++ FiiO KA11 UAC Host Protocol & Continuous Streaming Test
+    uac_test_src = os.path.join(base_dir, "tests", "test_fiio_ka11_uac_host.cpp")
+    uac_host_cpp = os.path.join(base_dir, "src", "uac_host.cpp")
+    uac_test_bin = os.path.join(tempfile.gettempdir(), "test_qtune_fiio_host_bin")
+    uac_compile_cmd = [
+        "g++", "-std=c++17", "-O2", f"-I{os.path.join(base_dir, 'include')}", "-DHOST_TEST",
+        uac_test_src, usb_cpp, uac_host_cpp,
+        "-o", uac_test_bin
+    ]
+    uac_res_cmp = subprocess.run(uac_compile_cmd, cwd=base_dir, capture_output=True, text=True)
+    assert uac_res_cmp.returncode == 0, f"Failed to compile test_fiio_ka11_uac_host:\n{uac_res_cmp.stderr}"
+
+    uac_res_run = subprocess.run([uac_test_bin], cwd=base_dir, capture_output=True, text=True)
+    assert uac_res_run.returncode == 0, f"Host C++ FiiO KA11 UAC unit test failed:\n{uac_res_run.stderr}"
+    assert "[ALL CHECKS PASSED]" in uac_res_run.stdout, f"FiiO KA11 UAC Host test did not pass:\n{uac_res_run.stdout}"
+    if os.path.exists(uac_test_bin):
+        os.remove(uac_test_bin)
+
+    print("  [PASS] FiiO KA11 native USB Host (GPIO 19/20), Safe Mount & Eject protocol, dual output routing, UAC streaming and hotplug fallback verified.")
 
 def test_wifi_streaming_and_dlna_media_renderer():
     print("\n--- 18. Wi-Fi Audio Streaming & DLNA/UPnP MediaRenderer Subsystem Test ---")
