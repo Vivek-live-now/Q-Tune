@@ -96,37 +96,70 @@ void UIPlayer::enterFolder(const String &folderPath) {
 }
 
 void UIPlayer::playNextTrack() {
-    if (trackList.empty()) return;
-    manualLyricIndex = 0;
-    if (playbackMode == PLAY_MODE_REPEAT_ONE) {
-        audioPlayer.playFile(trackList[currentTrackIndex]);
-    } else if (playbackMode == PLAY_MODE_SHUFFLE) {
-        if (trackList.size() > 1) {
-            int next = rand() % trackList.size();
-            if (next == currentTrackIndex) next = (next + 1) % trackList.size();
-            currentTrackIndex = next;
-        }
-        audioPlayer.playFile(trackList[currentTrackIndex]);
-    } else if (playbackMode == PLAY_MODE_ALL) {
-        currentTrackIndex = (currentTrackIndex + 1) % trackList.size();
-        audioPlayer.playFile(trackList[currentTrackIndex]);
-    } else { // PLAY_MODE_SINGLE
-        audioPlayer.stop();
-        inListMode = true;
-        currentView = VIEW_CATEGORIES;
-        ledManager.onPlaybackStop();
+    if (trackList.empty()) {
+        refreshTrackList();
+        if (trackList.empty()) return;
     }
-    lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
-    albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    manualLyricIndex = 0;
+    bool started = false;
+    size_t attempts = 0;
+    size_t total = trackList.size();
+
+    while (!started && attempts < total) {
+        attempts++;
+        if (playbackMode == PLAY_MODE_REPEAT_ONE) {
+            started = audioPlayer.playFile(trackList[currentTrackIndex]);
+            if (!started) {
+                // If current file fails, advance to avoid getting stuck indefinitely
+                currentTrackIndex = (currentTrackIndex + 1) % total;
+            }
+        } else if (playbackMode == PLAY_MODE_SHUFFLE) {
+            if (total > 1) {
+                int next = rand() % total;
+                if (next == currentTrackIndex) next = (next + 1) % total;
+                currentTrackIndex = next;
+            }
+            started = audioPlayer.playFile(trackList[currentTrackIndex]);
+        } else if (playbackMode == PLAY_MODE_ALL) {
+            currentTrackIndex = (currentTrackIndex + 1) % total;
+            started = audioPlayer.playFile(trackList[currentTrackIndex]);
+        } else { // PLAY_MODE_SINGLE
+            audioPlayer.stop();
+            inListMode = true;
+            currentView = VIEW_CATEGORIES;
+            ledManager.onPlaybackStop();
+            break;
+        }
+    }
+
+    if (started) {
+        ledManager.onPlaybackStart();
+        lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+        albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    }
 }
 
 void UIPlayer::playPreviousTrack() {
-    if (trackList.empty()) return;
+    if (trackList.empty()) {
+        refreshTrackList();
+        if (trackList.empty()) return;
+    }
     manualLyricIndex = 0;
-    currentTrackIndex = (currentTrackIndex - 1 + trackList.size()) % trackList.size();
-    audioPlayer.playFile(trackList[currentTrackIndex]);
-    lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
-    albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    bool started = false;
+    size_t attempts = 0;
+    size_t total = trackList.size();
+
+    while (!started && attempts < total) {
+        attempts++;
+        currentTrackIndex = (currentTrackIndex - 1 + total) % total;
+        started = audioPlayer.playFile(trackList[currentTrackIndex]);
+    }
+
+    if (started) {
+        ledManager.onPlaybackStart();
+        lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+        albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    }
 }
 
 void UIPlayer::setPlaybackMode(PlaybackMode mode) {
@@ -169,8 +202,8 @@ void UIPlayer::resetTopBar() {
 }
 
 bool UIPlayer::update() {
-    // Check auto-advance on track completion
-    if (!inListMode && currentView == VIEW_PLAYER && audioPlayer.hasFinished()) {
+    // Check auto-advance on track completion across all player views
+    if (audioPlayer.hasFinished()) {
         audioPlayer.clearFinished();
         playNextTrack();
     }
@@ -441,6 +474,24 @@ bool UIPlayer::update() {
                     return true;
                 }
 
+                if (currentCategoryTitle == "ARTISTS" || currentCategoryTitle == "ALBUMS") {
+                    std::vector<String> allTracks = sdManager.listMusicFiles();
+                    std::vector<String> filtered;
+                    String matchStr = "/" + selected + "/";
+                    for (const auto &t : allTracks) {
+                        if (t.indexOf(matchStr) >= 0 || t.indexOf(selected) >= 0) {
+                            filtered.push_back(t);
+                        }
+                    }
+                    if (!filtered.empty()) {
+                        currentCategoryTitle = selected;
+                        trackList = filtered;
+                        currentTrackIndex = 0;
+                        trackScrollOffset = 0;
+                        return true;
+                    }
+                }
+
                 // If user selected the track that is ALREADY PLAYING:
                 // DO NOT RESTART FROM BEGINNING! Return straight to Now Playing!
                 if ((audioPlayer.isPlaying() || audioPlayer.isPaused()) &&
@@ -450,9 +501,13 @@ bool UIPlayer::update() {
                     return true;
                 }
 
-                audioPlayer.playFile(selected);
-                openNowPlaying();
-                ledManager.onPlaybackStart();
+                if (audioPlayer.playFile(selected)) {
+                    openNowPlaying();
+                    ledManager.onPlaybackStart();
+                } else {
+                    playNextTrack();
+                    openNowPlaying();
+                }
             } else {
                 refreshTrackList();
             }

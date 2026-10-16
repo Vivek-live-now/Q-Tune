@@ -298,15 +298,10 @@ void AudioPlayer::update() {
                 bytesPlayed += bytesRead;
             } else {
                 consecutiveReadErrors++;
-                bool streamAtEOF = false;
-                if (currentAudioType == 2) {
-                    streamAtEOF = (consecutiveReadErrors >= 3);
-                } else if (currentAudioType == 3 || currentAudioType == 4) {
-                    streamAtEOF = (consecutiveReadErrors >= 5 && (!wavFile || wavFile.available() == 0));
-                }
+                bool streamAtEOF = (consecutiveReadErrors >= 3);
                 if (streamAtEOF || consecutiveReadErrors >= 100) {
                     bool cardGone = false;
-                    if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                    if (!streamAtEOF && consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
                         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
                         cardGone = !SD.exists(currentTrackPath);
                         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -346,15 +341,10 @@ void AudioPlayer::update() {
                 bytesPlayed += bytesRead;
             } else {
                 consecutiveReadErrors++;
-                bool streamAtEOF = false;
-                if (currentAudioType == 2) {
-                    streamAtEOF = (consecutiveReadErrors >= 3);
-                } else if (currentAudioType == 3 || currentAudioType == 4) {
-                    streamAtEOF = (consecutiveReadErrors >= 5 && (!wavFile || wavFile.available() == 0));
-                }
+                bool streamAtEOF = (consecutiveReadErrors >= 3);
                 if (streamAtEOF || consecutiveReadErrors >= 100) {
                     bool cardGone = false;
-                    if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                    if (!streamAtEOF && consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
                         if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
                         cardGone = !SD.exists(currentTrackPath);
                         if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -417,10 +407,10 @@ void AudioPlayer::update() {
         } else {
             consecutiveReadErrors++;
             bool fileEnded = (bytesPlayed >= totalDataBytes && totalDataBytes > 0) ||
-                             (consecutiveReadErrors >= 3 && (!wavFile || wavFile.available() == 0));
+                             (consecutiveReadErrors >= 3);
             if (fileEnded || consecutiveReadErrors >= 100) {
                 bool cardGone = false;
-                if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                if (!fileEnded && consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
                     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
                     cardGone = !SD.exists(currentTrackPath);
                     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
@@ -475,10 +465,10 @@ void AudioPlayer::update() {
         } else {
             consecutiveReadErrors++;
             bool fileEnded = (bytesPlayed >= totalDataBytes && totalDataBytes > 0) ||
-                             (consecutiveReadErrors >= 3 && (!wavFile || wavFile.available() == 0));
+                             (consecutiveReadErrors >= 3);
             if (fileEnded || consecutiveReadErrors >= 100) {
                 bool cardGone = false;
-                if (consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
+                if (!fileEnded && consecutiveReadErrors >= 10 && currentTrackPath.length() > 0) {
                     if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
                     cardGone = !SD.exists(currentTrackPath);
                     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);

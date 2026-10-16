@@ -331,6 +331,12 @@ void loop() {
     ledManager.loop();
     powerManager.checkBatterySafety();
 
+    // Global background track auto-advance: ensures continuous playback across visualizer, menus, and RGB effects
+    if (currentMode != MODE_PLAYER && audioPlayer.hasFinished()) {
+        audioPlayer.clearFinished();
+        uiPlayer.playNextTrack();
+    }
+
     switch (currentMode) {
         case MODE_MAIN_MENU:
             updateMainMenu();
