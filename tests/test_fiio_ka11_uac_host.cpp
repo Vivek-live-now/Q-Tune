@@ -39,7 +39,10 @@ int main() {
     assert(usbManager.getPID() == FIIO_KA11_PID);
     assert(strcmp(usbManager.getProductName(), "FiiO KA11") == 0);
     assert(strcmp(usbManager.getManufacturer(), "FiiO") == 0);
-    std::cout << "  [PASS] 2. FiiO KA11 USB DAC enumeration verified (VID: 0x2972, PID: 0x0053)." << std::endl;
+
+    // Verify listener ear protection: initial volume automatically capped at 10%
+    assert(usbManager.getVolume() == 10);
+    std::cout << "  [PASS] 2. FiiO KA11 USB DAC enumeration (VID: 0x2972, PID: 0x0053) & ear safety volume (10%) verified." << std::endl;
 
     // ------------------------------------------------------------------------
     // Test 3: Audio Format Negotiation (UAC Alternate Settings)

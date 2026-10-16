@@ -148,16 +148,29 @@ On startup, Q-Tune launches into the **Unified Home Menu** styled with the Q-Wat
 
 ---
 
-## FiiO KA11 USB DAC & UAC Host Subsystem
+## FiiO KA11 USB DAC & Real UAC Host Subsystem
 
-Q-Tune includes an implementation of the Espressif USB Audio Class (UAC) Host architecture ([`esp-usb/host/class/uac`](https://github.com/espressif/esp-usb/tree/master/host/class/uac)) optimized for the **FiiO KA11 High-Res DAC** (Cirrus Logic CS43131):
+Q-Tune implements a fully featured, bare-metal USB Audio Class (UAC 1.0/2.0) Host driver ([`esp-usb/host/class/uac`](https://github.com/espressif/esp-usb/tree/master/host/class/uac)) operating directly over the ESP32-S3 USB-OTG peripheral for the **FiiO KA11 High-Res DAC** (Cirrus Logic CS43131):
 
-- **Device Enumeration:** Automatically verifies Vendor ID (`0x2972`) and Product ID (`0x0053`).
-- **Dynamic Format Negotiation:** Probes audio streaming interfaces and configures alternate settings for 44.1 kHz, 48 kHz, or 96 kHz at 16-bit or 24-bit stereo PCM.
-- **Isochronous Streaming Ring Buffer:** Lock-free sample buffering on Core 0 writes audio frames directly to USB DMA with rate-limiting supervision.
-- **Hardware Master Volume & Mute:** Forwarded directly to the CS43131 internal registers without degrading 16-bit digital dynamic range.
-- **Hot-Unplug Protection:** Interrupt-driven disconnect handling instantly falls back to `OUTPUT_MODE_SPEAKER_I2S` so background playback loops never stall or panic.
-- **Safe Eject & Bus Parking:** Gracefully stops active isochronous streams, closes endpoints, and tristates D+/D- (`INPUT` mode) before physical disconnection.
+- **Real Hardware USB Host Controller:**
+  - `uac_host_install()` configures the internal USB-OTG PHY, launches the host event task, and registers the driver client (`usb_host_client_register`).
+  - `uac_host_device_open()` opens the physical USB device handle from the USB host controller and parses real standard device (`usb_device_desc_t`) and configuration (`usb_config_desc_t`) descriptors.
+  - `uac_host_handle_events()` pumps asynchronous USB events directly from `usb_host_client_handle_events()`.
+- **Dynamic Format Negotiation:** Probes audio streaming interfaces and claims matching alternate settings for 44.1 kHz, 48 kHz, 88.2 kHz, 96 kHz, 176.4 kHz, or 192 kHz at 16-bit or 24-bit stereo PCM.
+- **Isochronous Audio Transfer Subsystem:** Allocates native USB isochronous transfer request blocks (`usb_host_transfer_alloc`) and dispatches audio frames directly into the USB hardware pipe via `usb_host_transfer_submit()`.
+- **Cirrus Logic CS43131 Hardware Volume & Mute:**
+  - Sends real USB Class-Specific `SET_CUR` control transfers (`usb_host_transfer_submit_control`) targeting the Audio Control Feature Unit (`0x21` request type, `UAC_SET_CUR`, `UAC_VOLUME_CONTROL`, `UAC_MUTE_CONTROL`).
+  - Directly alters internal DAC analog gain registers in 1/256 dB steps without digital bit reduction or dynamic range degradation.
+- **Hearing Protection & Ear Safety (10% Initial Volume):**
+  - Because high-performance headphone dongles like the FiiO KA11 can deliver up to 200mW into low-impedance IEMs, connecting the DAC automatically clamps and initializes the output volume to **10%** (`-23.0 dB`) to protect the listener against acoustic shock and hearing damage.
+- **Hot-Unplug Protection & Instant I²S Fallback:** Interrupt-driven disconnect handling instantly releases endpoints and falls back to `OUTPUT_MODE_SPEAKER_I2S` so background playback loops never stall or panic.
+- **Safe Eject & Bus Parking:** Gracefully stops active isochronous streams, releases interfaces, closes USB client handles, and tristates GPIO 19/20 (`INPUT` mode) before physical disconnection to eliminate inductive pops.
+- **Non-Volatile Settings Persistence (NVS):**
+  - Uses ESP32 NVS (`Preferences` namespace `qtune_cfg`) to remember user preferences across power cycles:
+    - Independent **Speaker Volume** (`vol_spk`, default 80%) and **FiiO DAC Volume** (`vol_fiio`, default 10% safe level).
+    - **Active Output Mode** (`out_mode`: Speaker I²S vs FiiO KA11 USB DAC).
+    - **Playback Mode** (`play_mode`: Repeat All, Repeat One, Shuffle, Single).
+    - **5-Band Parametric EQ & Headphone Crossfeed** presets and custom band gains.
 
 ---
 

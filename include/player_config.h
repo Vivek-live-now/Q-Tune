@@ -107,6 +107,16 @@ public:
     void cycleCrossfeedMode();
     const char* getCrossfeedModeName() const;
 
+    // Volume & Output / Playback Preferences
+    uint8_t getSpeakerVolume() const;
+    void setSpeakerVolume(uint8_t vol);
+    uint8_t getFiioVolume() const;
+    void setFiioVolume(uint8_t vol);
+    uint8_t getPlaybackMode() const;
+    void setPlaybackMode(uint8_t mode);
+    uint8_t getOutputMode() const;
+    void setOutputMode(uint8_t mode);
+
 private:
     PlayerLayout layout;
     DitherMode dither;
@@ -121,6 +131,10 @@ private:
     uint8_t eqPreset;
     int8_t eqBands[5];
     uint8_t crossfeedMode;
+    uint8_t speakerVolume; // 0..100, default 80
+    uint8_t fiioVolume;    // 0..100, default 10 (Ear Safety Protection!)
+    uint8_t playbackMode;  // 0..3, default 0 (PLAY_MODE_ALL)
+    uint8_t outputMode;    // 0..1, default 0 (OUTPUT_MODE_SPEAKER_I2S)
     Preferences prefs;
 };
 

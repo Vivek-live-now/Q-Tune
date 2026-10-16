@@ -41,12 +41,15 @@ class MockAudioPlayer {
 public:
     AudioOutputMode mode = OUTPUT_MODE_SPEAKER_I2S;
     bool playing = false;
+    uint8_t volume = 80;
     void setOutputMode(AudioOutputMode m) { mode = m; }
     AudioOutputMode getOutputMode() const { return mode; }
     const char* getOutputModeShortName() const {
         return (mode == OUTPUT_MODE_FIIO_USB_DAC) ? "KA11" : "SPKR";
     }
     bool isPlaying() const { return playing; }
+    void setVolume(uint8_t v) { volume = v; }
+    uint8_t getVolume() const { return volume; }
 };
 extern MockAudioPlayer audioPlayer;
 #endif

@@ -43,7 +43,7 @@ void UIPlayer::begin() {
     currentPage = PAGE_NOW_PLAYING;
     categorySelection = 0;
     categoryScrollOffset = 0;
-    playbackMode = PLAY_MODE_ALL;
+    playbackMode = (PlaybackMode)playerConfig.getPlaybackMode();
 }
 
 void UIPlayer::openNowPlaying() {
@@ -177,6 +177,7 @@ PlaybackMode UIPlayer::getPlaybackMode() const {
 
 void UIPlayer::cyclePlaybackMode() {
     playbackMode = (PlaybackMode)((playbackMode + 1) % 4);
+    playerConfig.setPlaybackMode((uint8_t)playbackMode);
 }
 
 const char* UIPlayer::getPlaybackModeString() const {

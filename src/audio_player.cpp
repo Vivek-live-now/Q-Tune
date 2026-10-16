@@ -4,6 +4,7 @@
 #include "usb_manager.h"
 #include "simd_accel.h"
 #include "audio_dsp.h"
+#include "player_config.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
@@ -43,6 +44,10 @@ bool AudioPlayer::begin() {
         return false;
     }
 
+#if !defined(HOST_TEST)
+    outputMode = (AudioOutputMode)playerConfig.getOutputMode();
+    currentVolume = (outputMode == OUTPUT_MODE_FIIO_USB_DAC) ? playerConfig.getFiioVolume() : playerConfig.getSpeakerVolume();
+#endif
     setVolume(currentVolume);
     startAudioTask();
 
@@ -573,6 +578,14 @@ void AudioPlayer::setVolume(uint8_t volume) {
     // Quadratic volume scaling for natural perceptual loudness:
     // (volume / 100)^2 * 256 = (volume * volume * 256) / 10000
     volumeScale = ((uint32_t)volume * volume * 256) / 10000;
+#if !defined(HOST_TEST)
+    if (outputMode == OUTPUT_MODE_FIIO_USB_DAC) {
+        playerConfig.setFiioVolume(volume);
+        usbManager.setVolume(volume);
+    } else {
+        playerConfig.setSpeakerVolume(volume);
+    }
+#endif
 }
 
 uint8_t AudioPlayer::getVolume() const {
@@ -591,6 +604,18 @@ void AudioPlayer::volumeDown(uint8_t step) {
 
 void AudioPlayer::setOutputMode(AudioOutputMode mode) {
     outputMode = mode;
+#if !defined(HOST_TEST)
+    playerConfig.setOutputMode((uint8_t)mode);
+    if (mode == OUTPUT_MODE_FIIO_USB_DAC) {
+        // Ear safety protection: retrieve fiioVolume (defaults to safe 10)
+        uint8_t safeVol = playerConfig.getFiioVolume();
+        if (safeVol == 0 || safeVol > 50) safeVol = 10;
+        setVolume(safeVol);
+        usbManager.setVolume(safeVol);
+    } else {
+        setVolume(playerConfig.getSpeakerVolume());
+    }
+#endif
 }
 
 AudioOutputMode AudioPlayer::getOutputMode() const {

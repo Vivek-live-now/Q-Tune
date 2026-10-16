@@ -12,7 +12,11 @@ PlayerConfig::PlayerConfig() :
     lyricsFont(LYRICS_FONT_CLASSIC),
     eqEnabled(true),
     eqPreset(0),
-    crossfeedMode(0) {
+    crossfeedMode(0),
+    speakerVolume(80),
+    fiioVolume(10), // Ear protection safe default
+    playbackMode(0),
+    outputMode(0) {
     for (int b = 0; b < 5; b++) eqBands[b] = 0;
 }
 
@@ -30,6 +34,10 @@ void PlayerConfig::begin() {
     eqEnabled = prefs.getBool("eq_en", true);
     eqPreset = prefs.getUChar("eq_pre", 0);
     crossfeedMode = prefs.getUChar("xfeed", 0);
+    speakerVolume = prefs.getUChar("vol_spk", 80);
+    fiioVolume    = prefs.getUChar("vol_fiio", 10);
+    playbackMode  = prefs.getUChar("play_mode", 0);
+    outputMode    = prefs.getUChar("out_mode", 0);
     for (int b = 0; b < 5; b++) {
         char key[8];
         snprintf(key, sizeof(key), "eq_b%d", b);
@@ -62,6 +70,10 @@ void PlayerConfig::save() {
     prefs.putBool("eq_en", eqEnabled);
     prefs.putUChar("eq_pre", eqPreset);
     prefs.putUChar("xfeed", crossfeedMode);
+    prefs.putUChar("vol_spk", speakerVolume);
+    prefs.putUChar("vol_fiio", fiioVolume);
+    prefs.putUChar("play_mode", playbackMode);
+    prefs.putUChar("out_mode", outputMode);
     for (int b = 0; b < 5; b++) {
         char key[8];
         snprintf(key, sizeof(key), "eq_b%d", b);
@@ -269,6 +281,42 @@ uint8_t PlayerConfig::getArtThreshold() const { return artThreshold; }
 void PlayerConfig::setArtThreshold(uint8_t val) {
     artThreshold = val;
     save();
+}
+
+uint8_t PlayerConfig::getSpeakerVolume() const { return speakerVolume; }
+void PlayerConfig::setSpeakerVolume(uint8_t vol) {
+    if (vol > 100) vol = 100;
+    if (speakerVolume != vol) {
+        speakerVolume = vol;
+        save();
+    }
+}
+
+uint8_t PlayerConfig::getFiioVolume() const { return fiioVolume; }
+void PlayerConfig::setFiioVolume(uint8_t vol) {
+    if (vol > 100) vol = 100;
+    if (fiioVolume != vol) {
+        fiioVolume = vol;
+        save();
+    }
+}
+
+uint8_t PlayerConfig::getPlaybackMode() const { return playbackMode; }
+void PlayerConfig::setPlaybackMode(uint8_t mode) {
+    if (mode > 3) mode = 0;
+    if (playbackMode != mode) {
+        playbackMode = mode;
+        save();
+    }
+}
+
+uint8_t PlayerConfig::getOutputMode() const { return outputMode; }
+void PlayerConfig::setOutputMode(uint8_t mode) {
+    if (mode > 1) mode = 0;
+    if (outputMode != mode) {
+        outputMode = mode;
+        save();
+    }
 }
 
 PlayerConfig playerConfig;

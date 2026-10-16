@@ -1,6 +1,7 @@
 #include "usb_manager.h"
 #if !defined(HOST_TEST)
 #include "audio_player.h"
+#include "player_config.h"
 #endif
 #include <cstdio>
 #include <cstdlib>
@@ -41,7 +42,7 @@ USBManager::USBManager() :
     currentSampleRate(44100),
     currentChannels(2),
     currentBitDepth(16),
-    currentVolume(80),
+    currentVolume(10), // Ear protection initial volume
     isMuted(false)
 {
     strcpy(productName, "FiiO KA11");
@@ -157,6 +158,17 @@ bool USBManager::mount() {
 
         // Negotiate audio format (default 44.1kHz 16-bit Stereo PCM)
         configureFormat(currentSampleRate, currentChannels, currentBitDepth);
+
+        // EAR SAFETY PROTECTION:
+        // Automatically set initial volume to safe 10% on connect to protect listener's ears
+        uint8_t safeVol = 10;
+#if !defined(HOST_TEST)
+        safeVol = playerConfig.getFiioVolume();
+        if (safeVol == 0 || safeVol > 50) safeVol = 10;
+        playerConfig.setFiioVolume(safeVol);
+#endif
+        setVolume(safeVol);
+        audioPlayer.setVolume(safeVol);
 
         dacDetected = true;
         state = USBAudioState::MOUNTED_READY;
