@@ -46,7 +46,7 @@ void renderMainMenu() {
 
     String vals[MAIN_MENU_COUNT];
     vals[0] = audioPlayer.isPlaying() ? "[PLAY]" : (audioPlayer.isPaused() ? "[PAUS]" : "[IDLE]");
-    vals[1] = String("[") + spectrumAnalyzer.getPresetName() + ":" + spectrumAnalyzer.getSensitivityShortName() + "]";
+    vals[1] = String("[") + spectrumAnalyzer.getPresetShortName() + ":" + spectrumAnalyzer.getSensitivityShortName() + "]";
     vals[2] = wifiStreamer.isStreaming() ? "[STRM]" : (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED ? "[CONN]" : "[WIFI]");
     vals[3] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
     vals[4] = "[11]";
@@ -143,7 +143,7 @@ void updateRgbEffectsMode() {
 
         String vals[RGB_MENU_COUNT];
         vals[0] = String("[") + ledManager.getEnabledName() + "]";
-        vals[1] = String("[") + ledManager.getModeName() + "]";
+        vals[1] = String("[") + ledManager.getShortModeName() + "]";
         vals[2] = String("[") + ledManager.getColorName() + "]";
         vals[3] = String("[") + brBuf + "]";
         vals[4] = String("[") + ledManager.getSensitivityName() + "]";

@@ -84,9 +84,17 @@ void Display::drawScrollBar(int offset, int item_count) {
 
 void Display::drawStandardMenu(const char* title, const char** items, int item_count, int selection, int offset, const String* values, const char* headerRight) {
     u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(2, 7, title);
-    if (headerRight && headerRight[0] != '\0') {
-        int hw = u8g2.getStrWidth(headerRight);
+    int hw = (headerRight && headerRight[0] != '\0') ? u8g2.getStrWidth(headerRight) : 0;
+    int maxTitleW = (hw > 0) ? (124 - hw) : 124;
+    String cleanTitle = title ? title : "";
+    if (u8g2.getStrWidth(cleanTitle.c_str()) > maxTitleW) {
+        while (cleanTitle.length() > 0 && (u8g2.getStrWidth(cleanTitle.c_str()) + 4) > maxTitleW) {
+            cleanTitle.remove(cleanTitle.length() - 1);
+        }
+        if (cleanTitle.length() > 0) cleanTitle += ".";
+    }
+    u8g2.drawStr(2, 7, cleanTitle.c_str());
+    if (hw > 0) {
         u8g2.drawStr(126 - hw, 7, headerRight);
     }
     u8g2.drawLine(0, 9, 128, 9);
@@ -95,20 +103,32 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
     int y_pos = 21;
 
     for (int i = offset; i < offset + 4 && i < item_count; i++) {
+        const char* valStr = (values && values[i].length() > 0) ? values[i].c_str() : nullptr;
+        int vw = valStr ? u8g2.getStrWidth(valStr) : 0;
+        int valX = 118 - vw;
+        int maxLabelW = (valStr && vw > 0) ? (valX - 4 - 3) : 114;
+        if (maxLabelW < 24) maxLabelW = 24;
+
+        String label = (items && items[i]) ? items[i] : "";
+        if (u8g2.getStrWidth(label.c_str()) > maxLabelW) {
+            while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxLabelW) {
+                label.remove(label.length() - 1);
+            }
+            if (label.length() > 0) label += ".";
+        }
+
         if (i == selection) {
             u8g2.drawBox(2, y_pos - 9, 118, 11);
             u8g2.setDrawColor(0);
-            u8g2.drawStr(4, y_pos, items[i]);
-            if (values && values[i].length() > 0) {
-                int vw = u8g2.getStrWidth(values[i].c_str());
-                u8g2.drawStr(118 - vw, y_pos, values[i].c_str());
+            u8g2.drawStr(4, y_pos, label.c_str());
+            if (valStr) {
+                u8g2.drawStr(valX, y_pos, valStr);
             }
             u8g2.setDrawColor(1);
         } else {
-            u8g2.drawStr(4, y_pos, items[i]);
-            if (values && values[i].length() > 0) {
-                int vw = u8g2.getStrWidth(values[i].c_str());
-                u8g2.drawStr(118 - vw, y_pos, values[i].c_str());
+            u8g2.drawStr(4, y_pos, label.c_str());
+            if (valStr) {
+                u8g2.drawStr(valX, y_pos, valStr);
             }
         }
         y_pos += 12;
@@ -119,9 +139,17 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
 
 void Display::drawStandardMenu(const char* title, const char** items, int item_count, int selection, int offset, const char* const* values, const char* headerRight) {
     u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(2, 7, title);
-    if (headerRight && headerRight[0] != '\0') {
-        int hw = u8g2.getStrWidth(headerRight);
+    int hw = (headerRight && headerRight[0] != '\0') ? u8g2.getStrWidth(headerRight) : 0;
+    int maxTitleW = (hw > 0) ? (124 - hw) : 124;
+    String cleanTitle = title ? title : "";
+    if (u8g2.getStrWidth(cleanTitle.c_str()) > maxTitleW) {
+        while (cleanTitle.length() > 0 && (u8g2.getStrWidth(cleanTitle.c_str()) + 4) > maxTitleW) {
+            cleanTitle.remove(cleanTitle.length() - 1);
+        }
+        if (cleanTitle.length() > 0) cleanTitle += ".";
+    }
+    u8g2.drawStr(2, 7, cleanTitle.c_str());
+    if (hw > 0) {
         u8g2.drawStr(126 - hw, 7, headerRight);
     }
     u8g2.drawLine(0, 9, 128, 9);
@@ -130,20 +158,32 @@ void Display::drawStandardMenu(const char* title, const char** items, int item_c
     int y_pos = 21;
 
     for (int i = offset; i < offset + 4 && i < item_count; i++) {
+        const char* valStr = (values && values[i] && values[i][0] != '\0') ? values[i] : nullptr;
+        int vw = valStr ? u8g2.getStrWidth(valStr) : 0;
+        int valX = 118 - vw;
+        int maxLabelW = (valStr && vw > 0) ? (valX - 4 - 3) : 114;
+        if (maxLabelW < 24) maxLabelW = 24;
+
+        String label = (items && items[i]) ? items[i] : "";
+        if (u8g2.getStrWidth(label.c_str()) > maxLabelW) {
+            while (label.length() > 0 && (u8g2.getStrWidth(label.c_str()) + 4) > maxLabelW) {
+                label.remove(label.length() - 1);
+            }
+            if (label.length() > 0) label += ".";
+        }
+
         if (i == selection) {
             u8g2.drawBox(2, y_pos - 9, 118, 11);
             u8g2.setDrawColor(0);
-            u8g2.drawStr(4, y_pos, items[i]);
-            if (values && values[i] && values[i][0] != '\0') {
-                int vw = u8g2.getStrWidth(values[i]);
-                u8g2.drawStr(118 - vw, y_pos, values[i]);
+            u8g2.drawStr(4, y_pos, label.c_str());
+            if (valStr) {
+                u8g2.drawStr(valX, y_pos, valStr);
             }
             u8g2.setDrawColor(1);
         } else {
-            u8g2.drawStr(4, y_pos, items[i]);
-            if (values && values[i] && values[i][0] != '\0') {
-                int vw = u8g2.getStrWidth(values[i]);
-                u8g2.drawStr(118 - vw, y_pos, values[i]);
+            u8g2.drawStr(4, y_pos, label.c_str());
+            if (valStr) {
+                u8g2.drawStr(valX, y_pos, valStr);
             }
         }
         y_pos += 12;
@@ -158,13 +198,19 @@ void Display::drawMenu(const char* title, const char** items, int item_count, in
 
 void Display::drawTopStatusBar(const char* title, int batteryPct) {
     u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(2, 7, title);
-
     char bStr[8];
     snprintf(bStr, sizeof(bStr), "%d%%", batteryPct);
     int bw = u8g2.getStrWidth(bStr);
+    int maxTitleW = 124 - bw;
+    String cleanTitle = title ? title : "";
+    if (u8g2.getStrWidth(cleanTitle.c_str()) > maxTitleW) {
+        while (cleanTitle.length() > 0 && (u8g2.getStrWidth(cleanTitle.c_str()) + 4) > maxTitleW) {
+            cleanTitle.remove(cleanTitle.length() - 1);
+        }
+        if (cleanTitle.length() > 0) cleanTitle += ".";
+    }
+    u8g2.drawStr(2, 7, cleanTitle.c_str());
     u8g2.drawStr(126 - bw, 7, bStr);
-
     u8g2.drawLine(0, 9, 128, 9);
 }
 

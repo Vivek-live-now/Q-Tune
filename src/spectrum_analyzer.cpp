@@ -821,6 +821,22 @@ const char* SpectrumAnalyzer::getPresetName() const {
     }
 }
 
+const char* SpectrumAnalyzer::getPresetShortName() const {
+    switch (currentPreset) {
+        case PRESET_ANALOG_VU:       return "VU";
+        case PRESET_HORIZ_BAR_VU:    return "HRZ";
+        case PRESET_VU_SPECTROMETER: return "V+S";
+        case PRESET_VINYL_VU:        return "VNL";
+        case PRESET_CASSETTE_PLAYER: return "CAS";
+        case PRESET_CD_PLAYER:       return "CD";
+        case PRESET_BAR_SPECTRUM:    return "BAR";
+        case PRESET_WAVEFORM:        return "WAV";
+        case PRESET_MILKDROP_PLASMA: return "PLS";
+        case PRESET_STARFIELD:       return "STR";
+        default:                     return "VU";
+    }
+}
+
 void SpectrumAnalyzer::render() {
     render(currentPreset);
 }

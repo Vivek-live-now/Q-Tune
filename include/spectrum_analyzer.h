@@ -61,6 +61,7 @@ public:
     VisualizerPreset getPreset() const { return currentPreset; }
     void setPreset(VisualizerPreset preset) { currentPreset = preset; }
     const char* getPresetName() const;
+    const char* getPresetShortName() const;
 
     // Mini spectrum equalizer renderer for player screen HUD
     void renderMiniBars(U8G2 &u8g2, int x, int y, int width, int height);

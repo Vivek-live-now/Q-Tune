@@ -708,14 +708,14 @@ void UIPlayer::renderPlayerSettings() {
 
     const int SETTINGS_COUNT = 8;
     const char* labels[SETTINGS_COUNT] = {
-        "Now Playing",
-        "Art Source",
-        "Art Settings",
-        "Lyrics Sync",
-        "Lyrics Font",
-        "Lyrics Size",
+        "Layout",
+        "Art Src",
+        "Art Style",
+        "LRC Sync",
+        "LRC Font",
+        "LRC Size",
         "Equalizer (DSP)",
-        "Back to Menu"
+        "Back"
     };
 
     String vals[SETTINGS_COUNT];
@@ -739,7 +739,10 @@ void UIPlayer::renderEqSettings() {
     // Top status line
     u8g2.setFont(u8g2_font_5x7_tr);
     char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "DSP EQ: %s", playerConfig.getEqPresetName());
+    snprintf(headerBuf, sizeof(headerBuf), "EQ: %s", playerConfig.getEqPresetName());
+    while (headerBuf[0] != '\0' && u8g2.getStrWidth(headerBuf) > 92) {
+        headerBuf[strlen(headerBuf) - 1] = '\0';
+    }
     u8g2.drawStr(0, 8, headerBuf);
 
     char batBuf[16];
@@ -793,7 +796,6 @@ void UIPlayer::renderEqSettings() {
         u8g2.drawBox(0, 48, 128, 9);
         u8g2.setDrawColor(0);
         u8g2.drawStr(2, 55, xfeedBuf);
-        u8g2.drawStr(74, 55, "[UP/DN:Chg]");
         u8g2.setDrawColor(1);
     } else {
         u8g2.drawStr(2, 55, xfeedBuf);
@@ -801,7 +803,11 @@ void UIPlayer::renderEqSettings() {
 
     // Footer hint line
     u8g2.setFont(u8g2_font_4x6_tr);
-    u8g2.drawStr(2, 63, "OK:Band  HOLD:Pre  CANCEL:Back");
+    if (eqBandSelection == 5) {
+        u8g2.drawStr(2, 63, "UP/DN:Adjust  OK:Band  CANCEL:Back");
+    } else {
+        u8g2.drawStr(2, 63, "OK:Band  HOLD:Pre  CANCEL:Back");
+    }
 
     display.sendBuffer();
 }
@@ -824,12 +830,12 @@ void UIPlayer::renderArtSettings() {
         char buf[32];
         snprintf(buf, sizeof(buf), "Dither: %s", dname);
         if (artSettingsRow == 0) {
-            u8g2.drawBox(0, 12, 128, 9);
+            u8g2.drawBox(0, 11, 128, 9);
             u8g2.setDrawColor(0);
-            u8g2.drawStr(2, 19, buf);
+            u8g2.drawStr(2, 18, buf);
             u8g2.setDrawColor(1);
         } else {
-            u8g2.drawStr(2, 19, buf);
+            u8g2.drawStr(2, 18, buf);
         }
     }
 
@@ -863,10 +869,10 @@ void UIPlayer::renderArtSettings() {
     };
 
     // Row 1: Brightness (-100..+100)
-    drawBar(1, "Bri", (int)playerConfig.getArtBrightness(), -100, 100, 22);
+    drawBar(1, "Bri", (int)playerConfig.getArtBrightness(), -100, 100, 21);
 
     // Row 2: Contrast (-100..+100)
-    drawBar(2, "Con", (int)playerConfig.getArtContrast(), -100, 100, 35);
+    drawBar(2, "Con", (int)playerConfig.getArtContrast(), -100, 100, 32);
 
     // Row 3: Threshold (0..255) — shown as 0..255
     {
@@ -876,15 +882,15 @@ void UIPlayer::renderArtSettings() {
         snprintf(buf, sizeof(buf), "Thr:%d", thr);
         u8g2.setFont(u8g2_font_5x7_tr);
         if (selected) {
-            u8g2.drawBox(0, 48, 128, 7);
+            u8g2.drawBox(0, 43, 128, 7);
             u8g2.setDrawColor(0);
-            u8g2.drawStr(2, 54, buf);
+            u8g2.drawStr(2, 49, buf);
             u8g2.setDrawColor(1);
         } else {
-            u8g2.drawStr(2, 54, buf);
+            u8g2.drawStr(2, 49, buf);
         }
         // bar
-        int barY = 56;
+        int barY = 51;
         int barX = 4;
         int barW = 120;
         u8g2.drawFrame(barX, barY, barW, 3);
@@ -1060,18 +1066,18 @@ void UIPlayer::renderPlayerPage1() {
                 if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
                 u8g2.drawStr(0, 23, displayName.c_str());
 
-                String stateStr = "■ STOPPED";
+                String stateStr = "■ STOP";
                 if (audioPlayer.isPlaying()) {
-                    stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
+                    stateStr = "▶ " + String(audioPlayer.getFormatName());
                 } else if (audioPlayer.isPaused()) {
-                    stateStr = "❚❚ PAUSED";
+                    stateStr = "❚❚ PAUS";
                 }
                 u8g2.drawStr(0, 35, stateStr.c_str());
 
                 uint32_t posSec = audioPlayer.getPositionMs() / 1000;
                 uint32_t durSec = audioPlayer.getDurationMs() / 1000;
                 char timeBuf[32];
-                snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+                snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
                 u8g2.drawStr(0, 47, timeBuf);
 
                 spectrumAnalyzer.sampleAudioStream();
@@ -1154,18 +1160,18 @@ void UIPlayer::renderPlayerPage1() {
             if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
             u8g2.drawStr(0, 23, displayName.c_str());
 
-            String stateStr = "■ STOPPED";
+            String stateStr = "■ STOP";
             if (audioPlayer.isPlaying()) {
-                stateStr = "▶ PLAYING (" + String(audioPlayer.getFormatName()) + ")";
+                stateStr = "▶ " + String(audioPlayer.getFormatName());
             } else if (audioPlayer.isPaused()) {
-                stateStr = "❚❚ PAUSED";
+                stateStr = "❚❚ PAUS";
             }
             u8g2.drawStr(0, 35, stateStr.c_str());
 
             uint32_t posSec = audioPlayer.getPositionMs() / 1000;
             uint32_t durSec = audioPlayer.getDurationMs() / 1000;
             char timeBuf[32];
-            snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u / %02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
+            snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u/%02u:%02u", posSec / 60, posSec % 60, durSec / 60, durSec % 60);
             u8g2.drawStr(0, 47, timeBuf);
 
             spectrumAnalyzer.sampleAudioStream();
@@ -1363,7 +1369,7 @@ void UIPlayer::renderPlayerPage2() {
     if (showBar) {
         u8g2.setFont(u8g2_font_5x7_tr);
         char headerBuf[32];
-        snprintf(headerBuf, sizeof(headerBuf), "TRACK INFO  [2/3]  B:%d%%", battery.getPercentage());
+        snprintf(headerBuf, sizeof(headerBuf), "INFO [2/3] B:%d%%", battery.getPercentage());
         u8g2.drawStr(0, 8, headerBuf);
         u8g2.drawHLine(0, 10, 128);
 
@@ -1384,7 +1390,7 @@ void UIPlayer::renderPlayerPage2() {
         snprintf(buf, sizeof(buf), "Size: %u.%01u MB", sz / 1048576, (sz % 1048576) / 104857);
         u8g2.drawStr(2, 46, buf);
 
-        snprintf(buf, sizeof(buf), "Out: %s", audioPlayer.getOutputModeName());
+        snprintf(buf, sizeof(buf), "Out: %s", audioPlayer.getOutputModeShortName());
         u8g2.drawStr(2, 55, buf);
 
         snprintf(buf, sizeof(buf), "Mode: %s (OK: Cycle)", getPlaybackModeString());
@@ -1418,7 +1424,7 @@ void UIPlayer::renderPlayerPage2() {
         snprintf(buf, sizeof(buf), "Audio: %u kbps (%u.%01uMB)", kbps, sz / 1048576, (sz % 1048576) / 104857);
         u8g2.drawStr(2, 43, buf);
 
-        snprintf(buf, sizeof(buf), "Out:   %s", audioPlayer.getOutputModeName());
+        snprintf(buf, sizeof(buf), "Out:   %s", audioPlayer.getOutputModeShortName());
         u8g2.drawStr(2, 53, buf);
 
         snprintf(buf, sizeof(buf), "Mode:  %s", getPlaybackModeString());
