@@ -955,7 +955,15 @@ def test_wifi_streaming_and_dlna_media_renderer():
     assert "htmlEscape(currentTrackArtist)" in wcpp_src, "WiFiStreamer must escape currentTrackArtist against XSS"
     assert "wifiStreamer.updateUI()" in main_src, "main.cpp loop must update WiFiStreamer UI"
 
-    print("  [PASS] Wi-Fi Audio Streaming, DLNA/UPnP MediaRenderer, 384KB PSRAM buffer, 4MB partition table, and dual output routing verified.")
+    # 7. Verify UPnP UDA 1.0 SCPD ArgumentLists & AirMusic DLNA Interoperability
+    assert "<argumentList>" in wcpp_src, "UPnP SCPD must provide action argumentList"
+    assert "<relatedStateVariable>AVTransportURI</relatedStateVariable>" in wcpp_src, "SetAVTransportURI must define relatedStateVariable"
+    assert "<relatedStateVariable>SinkProtocolInfo</relatedStateVariable>" in wcpp_src, "GetProtocolInfo must define Sink argument"
+    assert "audio/L16" in wcpp_src and "audio/wav" in wcpp_src, "SinkProtocolInfo must support L16 and WAV"
+    assert "<URLBase>" in wcpp_src, "Device description must define URLBase"
+    assert "SOAPAction" in wcpp_src, "UPnP server must inspect SOAPAction header"
+
+    print("  [PASS] Wi-Fi Audio Streaming, DLNA/UPnP MediaRenderer, UPnP UDA 1.0 SCPD argumentLists, AirMusic compatibility, 384KB PSRAM buffer, 4MB partition table, and dual output routing verified.")
 
 def test_mp3_and_m4a_audio_decoders():
     print("\n--- 19. MP3 & M4A/AAC Multi-Format Audio Decoding Test ---")

@@ -19,8 +19,52 @@ static const char* UPNP_DEVICE_XML =
     "    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>\r\n"
     "    <friendlyName>Q-Tune Audiophile Player</friendlyName>\r\n"
     "    <manufacturer>Q-Tune</manufacturer>\r\n"
+    "    <manufacturerURL>http://q-tunes.local</manufacturerURL>\r\n"
+    "    <modelDescription>Q-Tune Audiophile UPnP/DLNA Hi-Res Network Streamer</modelDescription>\r\n"
     "    <modelName>SuperMini S3</modelName>\r\n"
     "    <modelNumber>Q-TUNE-1.0</modelNumber>\r\n"
+    "    <modelURL>http://q-tunes.local</modelURL>\r\n"
+    "    <UDN>uuid:q-tune-audiophile-player</UDN>\r\n"
+    "    <serviceList>\r\n"
+    "      <service>\r\n"
+    "        <serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType>\r\n"
+    "        <serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId>\r\n"
+    "        <SCPDURL>/RenderingControl/desc.xml</SCPDURL>\r\n"
+    "        <controlURL>/RenderingControl/control</controlURL>\r\n"
+    "        <eventSubURL>/RenderingControl/event</eventSubURL>\r\n"
+    "      </service>\r\n"
+    "      <service>\r\n"
+    "        <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>\r\n"
+    "        <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>\r\n"
+    "        <SCPDURL>/AVTransport/desc.xml</SCPDURL>\r\n"
+    "        <controlURL>/AVTransport/control</controlURL>\r\n"
+    "        <eventSubURL>/AVTransport/event</eventSubURL>\r\n"
+    "      </service>\r\n"
+    "      <service>\r\n"
+    "        <serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>\r\n"
+    "        <serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId>\r\n"
+    "        <SCPDURL>/ConnectionManager/desc.xml</SCPDURL>\r\n"
+    "        <controlURL>/ConnectionManager/control</controlURL>\r\n"
+    "        <eventSubURL>/ConnectionManager/event</eventSubURL>\r\n"
+    "      </service>\r\n"
+    "    </serviceList>\r\n"
+    "  </device>\r\n"
+    "</root>\r\n";
+
+static const char* UPNP_DEVICE_XML_TEMPLATE =
+    "<?xml version=\"1.0\"?>\r\n"
+    "<root xmlns=\"urn:schemas-upnp-org:device-1-0\">\r\n"
+    "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
+    "  <URLBase>http://%s:8080/</URLBase>\r\n"
+    "  <device>\r\n"
+    "    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>\r\n"
+    "    <friendlyName>Q-Tune Audiophile Player</friendlyName>\r\n"
+    "    <manufacturer>Q-Tune</manufacturer>\r\n"
+    "    <manufacturerURL>http://q-tunes.local</manufacturerURL>\r\n"
+    "    <modelDescription>Q-Tune Audiophile UPnP/DLNA Hi-Res Network Streamer</modelDescription>\r\n"
+    "    <modelName>SuperMini S3</modelName>\r\n"
+    "    <modelNumber>Q-TUNE-1.0</modelNumber>\r\n"
+    "    <modelURL>http://q-tunes.local</modelURL>\r\n"
     "    <UDN>uuid:q-tune-audiophile-player</UDN>\r\n"
     "    <serviceList>\r\n"
     "      <service>\r\n"
@@ -49,52 +93,212 @@ static const char* UPNP_DEVICE_XML =
     "</root>\r\n";
 
 static const char* UPNP_CONNECTION_MANAGER_SCPD_XML =
-    "<?xml version=\"1.0\"?>\r\n"
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
     "<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">\r\n"
     "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
     "  <actionList>\r\n"
-    "    <action><name>GetProtocolInfo</name></action>\r\n"
-    "    <action><name>GetCurrentConnectionIDs</name></action>\r\n"
-    "    <action><name>GetCurrentConnectionInfo</name></action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetProtocolInfo</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>Source</name><direction>out</direction><relatedStateVariable>SourceProtocolInfo</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Sink</name><direction>out</direction><relatedStateVariable>SinkProtocolInfo</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetCurrentConnectionIDs</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>ConnectionIDs</name><direction>out</direction><relatedStateVariable>CurrentConnectionIDs</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetCurrentConnectionInfo</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>ConnectionID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ConnectionID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RcsID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_RcsID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>AVTransportID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_AVTransportID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>ProtocolInfo</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ProtocolInfo</relatedStateVariable></argument>\r\n"
+    "        <argument><name>PeerConnectionManager</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ConnectionManager</relatedStateVariable></argument>\r\n"
+    "        <argument><name>PeerConnectionID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ConnectionID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Direction</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Direction</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Status</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ConnectionStatus</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
     "  </actionList>\r\n"
     "  <serviceStateTable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>SourceProtocolInfo</name><dataType>string</dataType></stateVariable>\r\n"
     "    <stateVariable sendEvents=\"no\"><name>SinkProtocolInfo</name><dataType>string</dataType></stateVariable>\r\n"
     "    <stateVariable sendEvents=\"no\"><name>CurrentConnectionIDs</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_ConnectionStatus</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_ConnectionManager</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_Direction</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_ProtocolInfo</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_ConnectionID</name><dataType>i4</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_AVTransportID</name><dataType>i4</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_RcsID</name><dataType>i4</dataType></stateVariable>\r\n"
     "  </serviceStateTable>\r\n"
     "</scpd>\r\n";
 
 static const char* UPNP_AVTRANSPORT_SCPD_XML =
-    "<?xml version=\"1.0\"?>\r\n"
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
     "<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">\r\n"
     "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
     "  <actionList>\r\n"
-    "    <action><name>SetAVTransportURI</name></action>\r\n"
-    "    <action><name>Play</name></action>\r\n"
-    "    <action><name>Pause</name></action>\r\n"
-    "    <action><name>Stop</name></action>\r\n"
-    "    <action><name>GetTransportInfo</name></action>\r\n"
-    "    <action><name>GetMediaInfo</name></action>\r\n"
-    "    <action><name>GetPositionInfo</name></action>\r\n"
-    "    <action><name>GetDeviceCapabilities</name></action>\r\n"
-    "    <action><name>GetTransportSettings</name></action>\r\n"
+    "    <action>\r\n"
+    "      <name>SetAVTransportURI</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentURI</name><direction>in</direction><relatedStateVariable>AVTransportURI</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentURIMetaData</name><direction>in</direction><relatedStateVariable>AVTransportURIMetaData</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>Play</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Speed</name><direction>in</direction><relatedStateVariable>TransportPlaySpeed</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>Pause</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>Stop</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetTransportInfo</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentTransportState</name><direction>out</direction><relatedStateVariable>TransportState</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentTransportStatus</name><direction>out</direction><relatedStateVariable>TransportStatus</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentSpeed</name><direction>out</direction><relatedStateVariable>TransportPlaySpeed</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetMediaInfo</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>NrTracks</name><direction>out</direction><relatedStateVariable>NumberOfTracks</relatedStateVariable></argument>\r\n"
+    "        <argument><name>MediaDuration</name><direction>out</direction><relatedStateVariable>CurrentMediaDuration</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentURI</name><direction>out</direction><relatedStateVariable>AVTransportURI</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentURIMetaData</name><direction>out</direction><relatedStateVariable>AVTransportURIMetaData</relatedStateVariable></argument>\r\n"
+    "        <argument><name>NextURI</name><direction>out</direction><relatedStateVariable>NextAVTransportURI</relatedStateVariable></argument>\r\n"
+    "        <argument><name>NextURIMetaData</name><direction>out</direction><relatedStateVariable>NextAVTransportURIMetaData</relatedStateVariable></argument>\r\n"
+    "        <argument><name>PlayMedium</name><direction>out</direction><relatedStateVariable>PlaybackStorageMedium</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RecordMedium</name><direction>out</direction><relatedStateVariable>RecordStorageMedium</relatedStateVariable></argument>\r\n"
+    "        <argument><name>WriteStatus</name><direction>out</direction><relatedStateVariable>RecordMediumWriteStatus</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetPositionInfo</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Track</name><direction>out</direction><relatedStateVariable>CurrentTrack</relatedStateVariable></argument>\r\n"
+    "        <argument><name>TrackDuration</name><direction>out</direction><relatedStateVariable>CurrentTrackDuration</relatedStateVariable></argument>\r\n"
+    "        <argument><name>TrackMetaData</name><direction>out</direction><relatedStateVariable>CurrentTrackMetaData</relatedStateVariable></argument>\r\n"
+    "        <argument><name>TrackURI</name><direction>out</direction><relatedStateVariable>CurrentTrackURI</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RelTime</name><direction>out</direction><relatedStateVariable>RelativeTimePosition</relatedStateVariable></argument>\r\n"
+    "        <argument><name>AbsTime</name><direction>out</direction><relatedStateVariable>AbsoluteTimePosition</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RelCount</name><direction>out</direction><relatedStateVariable>RelativeCounterPosition</relatedStateVariable></argument>\r\n"
+    "        <argument><name>AbsCount</name><direction>out</direction><relatedStateVariable>AbsoluteCounterPosition</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetDeviceCapabilities</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>PlayMedia</name><direction>out</direction><relatedStateVariable>PossiblePlaybackStorageMedia</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RecMedia</name><direction>out</direction><relatedStateVariable>PossibleRecordStorageMedia</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RecQualityModes</name><direction>out</direction><relatedStateVariable>PossibleRecordQualityModes</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetTransportSettings</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>PlayMode</name><direction>out</direction><relatedStateVariable>CurrentPlayMode</relatedStateVariable></argument>\r\n"
+    "        <argument><name>RecQualityMode</name><direction>out</direction><relatedStateVariable>CurrentRecordQualityMode</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
     "  </actionList>\r\n"
     "  <serviceStateTable>\r\n"
     "    <stateVariable sendEvents=\"yes\"><name>TransportState</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>TransportStatus</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>PlaybackStorageMedium</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>RecordStorageMedium</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>PossiblePlaybackStorageMedia</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>PossibleRecordStorageMedia</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentPlayMode</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>TransportPlaySpeed</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>RecordMediumWriteStatus</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentRecordQualityMode</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>PossibleRecordQualityModes</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>NumberOfTracks</name><dataType>ui4</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentTrack</name><dataType>ui4</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentTrackDuration</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentMediaDuration</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentTrackMetaData</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>CurrentTrackURI</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>AVTransportURI</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>AVTransportURIMetaData</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>NextAVTransportURI</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>NextAVTransportURIMetaData</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>RelativeTimePosition</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>AbsoluteTimePosition</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>RelativeCounterPosition</name><dataType>i4</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>AbsoluteCounterPosition</name><dataType>i4</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_InstanceID</name><dataType>ui4</dataType></stateVariable>\r\n"
     "  </serviceStateTable>\r\n"
     "</scpd>\r\n";
 
 static const char* UPNP_RENDERING_CONTROL_SCPD_XML =
-    "<?xml version=\"1.0\"?>\r\n"
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
     "<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">\r\n"
     "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
     "  <actionList>\r\n"
-    "    <action><name>SetVolume</name></action>\r\n"
-    "    <action><name>GetVolume</name></action>\r\n"
-    "    <action><name>SetMute</name></action>\r\n"
-    "    <action><name>GetMute</name></action>\r\n"
+    "    <action>\r\n"
+    "      <name>SetVolume</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>\r\n"
+    "        <argument><name>DesiredVolume</name><direction>in</direction><relatedStateVariable>Volume</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetVolume</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentVolume</name><direction>out</direction><relatedStateVariable>Volume</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>SetMute</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>\r\n"
+    "        <argument><name>DesiredMute</name><direction>in</direction><relatedStateVariable>Mute</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
+    "    <action>\r\n"
+    "      <name>GetMute</name>\r\n"
+    "      <argumentList>\r\n"
+    "        <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>\r\n"
+    "        <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>\r\n"
+    "        <argument><name>CurrentMute</name><direction>out</direction><relatedStateVariable>Mute</relatedStateVariable></argument>\r\n"
+    "      </argumentList>\r\n"
+    "    </action>\r\n"
     "  </actionList>\r\n"
     "  <serviceStateTable>\r\n"
     "    <stateVariable sendEvents=\"yes\"><name>Volume</name><dataType>ui2</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"yes\"><name>Mute</name><dataType>boolean</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_Channel</name><dataType>string</dataType></stateVariable>\r\n"
+    "    <stateVariable sendEvents=\"no\"><name>A_ARG_TYPE_InstanceID</name><dataType>ui4</dataType></stateVariable>\r\n"
     "  </serviceStateTable>\r\n"
     "</scpd>\r\n";
 
@@ -446,6 +650,8 @@ size_t WiFiStreamer::pullFromRingBuffer(uint8_t *dest, size_t maxLen) {
 void WiFiStreamer::sendSSDPAnnounce() {
     IPAddress localIp = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
     char notifyPacket[512];
+
+    // Announce MediaRenderer:1
     snprintf(notifyPacket, sizeof(notifyPacket),
         "NOTIFY * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
@@ -457,7 +663,22 @@ void WiFiStreamer::sendSSDPAnnounce() {
         "USN: uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n",
         localIp.toString().c_str()
     );
+    ssdpUdp.beginPacket(IPAddress(239, 255, 255, 250), 1900);
+    ssdpUdp.write((const uint8_t*)notifyPacket, strlen(notifyPacket));
+    ssdpUdp.endPacket();
 
+    // Announce upnp:rootdevice
+    snprintf(notifyPacket, sizeof(notifyPacket),
+        "NOTIFY * HTTP/1.1\r\n"
+        "HOST: 239.255.255.250:1900\r\n"
+        "CACHE-CONTROL: max-age=1800\r\n"
+        "LOCATION: http://%s:8080/description.xml\r\n"
+        "NT: upnp:rootdevice\r\n"
+        "NTS: ssdp:alive\r\n"
+        "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
+        "USN: uuid:q-tune-audiophile-player::upnp:rootdevice\r\n\r\n",
+        localIp.toString().c_str()
+    );
     ssdpUdp.beginPacket(IPAddress(239, 255, 255, 250), 1900);
     ssdpUdp.write((const uint8_t*)notifyPacket, strlen(notifyPacket));
     ssdpUdp.endPacket();
@@ -474,9 +695,23 @@ void WiFiStreamer::handleSSDP() {
         if (strstr(buffer, "M-SEARCH") != NULL &&
             (strstr(buffer, "MediaRenderer") != NULL ||
              strstr(buffer, "ssdp:all") != NULL ||
-             strstr(buffer, "upnp:rootdevice") != NULL)) {
+             strstr(buffer, "upnp:rootdevice") != NULL ||
+             strstr(buffer, "AVTransport") != NULL ||
+             strstr(buffer, "ConnectionManager") != NULL ||
+             strstr(buffer, "RenderingControl") != NULL)) {
 
             IPAddress localIp = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
+            const char* stTarget = "urn:schemas-upnp-org:device:MediaRenderer:1";
+            if (strstr(buffer, "upnp:rootdevice") != NULL) {
+                stTarget = "upnp:rootdevice";
+            } else if (strstr(buffer, "AVTransport") != NULL) {
+                stTarget = "urn:schemas-upnp-org:service:AVTransport:1";
+            } else if (strstr(buffer, "ConnectionManager") != NULL) {
+                stTarget = "urn:schemas-upnp-org:service:ConnectionManager:1";
+            } else if (strstr(buffer, "RenderingControl") != NULL) {
+                stTarget = "urn:schemas-upnp-org:service:RenderingControl:1";
+            }
+
             char response[512];
             snprintf(response, sizeof(response),
                 "HTTP/1.1 200 OK\r\n"
@@ -484,10 +719,12 @@ void WiFiStreamer::handleSSDP() {
                 "EXT:\r\n"
                 "LOCATION: http://%s:8080/description.xml\r\n"
                 "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
-                "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n"
-                "USN: uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1\r\n"
+                "ST: %s\r\n"
+                "USN: uuid:q-tune-audiophile-player::%s\r\n"
                 "BOOTID.UPNP.ORG: 1\r\n\r\n",
-                localIp.toString().c_str()
+                localIp.toString().c_str(),
+                stTarget,
+                stTarget
             );
 
             ssdpUdp.beginPacket(ssdpUdp.remoteIP(), ssdpUdp.remotePort());
@@ -784,42 +1021,57 @@ void WiFiStreamer::setupConfigServer() {
 }
 
 void WiFiStreamer::setupUpnpServer() {
+    const char* upnpHeaders[] = {"SOAPAction", "soapaction", "Content-Type", "content-type", "SID", "TIMEOUT", "CALLBACK", "NT"};
+    upnpServer.collectHeaders(upnpHeaders, 8);
+
     upnpServer.on("/description.xml", HTTP_GET, [this]() {
-        upnpServer.send(200, "text/xml", UPNP_DEVICE_XML);
+        IPAddress localIp = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
+        char descBuf[1536];
+        snprintf(descBuf, sizeof(descBuf), UPNP_DEVICE_XML_TEMPLATE, localIp.toString().c_str());
+        upnpServer.sendHeader("EXT", "");
+        upnpServer.send(200, "text/xml; charset=\"utf-8\"", descBuf);
     });
 
     upnpServer.on("/RenderingControl/desc.xml", HTTP_GET, [this]() {
-        upnpServer.send(200, "text/xml", UPNP_RENDERING_CONTROL_SCPD_XML);
+        upnpServer.sendHeader("EXT", "");
+        upnpServer.send(200, "text/xml; charset=\"utf-8\"", UPNP_RENDERING_CONTROL_SCPD_XML);
     });
     upnpServer.on("/AVTransport/desc.xml", HTTP_GET, [this]() {
-        upnpServer.send(200, "text/xml", UPNP_AVTRANSPORT_SCPD_XML);
+        upnpServer.sendHeader("EXT", "");
+        upnpServer.send(200, "text/xml; charset=\"utf-8\"", UPNP_AVTRANSPORT_SCPD_XML);
     });
     upnpServer.on("/ConnectionManager/desc.xml", HTTP_GET, [this]() {
-        upnpServer.send(200, "text/xml", UPNP_CONNECTION_MANAGER_SCPD_XML);
+        upnpServer.sendHeader("EXT", "");
+        upnpServer.send(200, "text/xml; charset=\"utf-8\"", UPNP_CONNECTION_MANAGER_SCPD_XML);
     });
 
     // ConnectionManager Control Endpoint (ProtocolInfo & Connection IDs)
     upnpServer.on("/ConnectionManager/control", HTTP_POST, [this]() {
         String body = upnpServer.arg("plain");
-        if (body.indexOf("GetProtocolInfo") != -1) {
-            String soap = "<?xml version=\"1.0\"?>\r\n"
+        String soapAction = upnpServer.header("SOAPAction");
+        if (soapAction.length() == 0) soapAction = upnpServer.header("soapaction");
+
+        upnpServer.sendHeader("EXT", "");
+
+        if (body.indexOf("GetProtocolInfo") != -1 || soapAction.indexOf("GetProtocolInfo") != -1) {
+            String soap = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                           "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                           "  <s:Body><u:GetProtocolInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:ConnectionManager:1\">\r\n"
                           "    <Source></Source>\r\n"
-                          "    <Sink>http-get:*:audio/L16:*,http-get:*:audio/x-wav:*,http-get:*:audio/wav:*,http-get:*:audio/wave:*,http-get:*:audio/mpeg:*,http-get:*:audio/mp3:*,http-get:*:audio/x-m4a:*,http-get:*:audio/aac:*,http-get:*:audio/flac:*,http-get:*:audio/x-flac:*</Sink>\r\n"
+                          "    <Sink>http-get:*:audio/L16;rate=44100;channels=2:DLNA.ORG_PN=LPCM,http-get:*:audio/L16;rate=48000;channels=2:DLNA.ORG_PN=LPCM,http-get:*:audio/L16:*,http-get:*:audio/wav:DLNA.ORG_PN=WAV,http-get:*:audio/wav:*,http-get:*:audio/x-wav:*,http-get:*:audio/wave:*,http-get:*:audio/vnd.wave:*,http-get:*:audio/mpeg:DLNA.ORG_PN=MP3,http-get:*:audio/mpeg:*,http-get:*:audio/mp3:*,http-get:*:audio/mp4:*,http-get:*:audio/x-m4a:*,http-get:*:audio/aac:*,http-get:*:audio/flac:*,http-get:*:audio/x-flac:*,http-get:*:audio/ogg:*,http-get:*:application/ogg:*</Sink>\r\n"
                           "  </u:GetProtocolInfoResponse></s:Body>\r\n"
                           "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soap);
-        } else if (body.indexOf("GetCurrentConnectionIDs") != -1) {
-            String soap = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soap);
+        } else if (body.indexOf("GetCurrentConnectionIDs") != -1 || soapAction.indexOf("GetCurrentConnectionIDs") != -1) {
+            String soap = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                           "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                           "  <s:Body><u:GetCurrentConnectionIDsResponse xmlns:u=\"urn:schemas-upnp-org:service:ConnectionManager:1\">\r\n"
                           "    <ConnectionIDs>0</ConnectionIDs>\r\n"
                           "  </u:GetCurrentConnectionIDsResponse></s:Body>\r\n"
                           "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soap);
-        } else if (body.indexOf("GetCurrentConnectionInfo") != -1) {
-            String soap = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soap);
+        } else if (body.indexOf("GetCurrentConnectionInfo") != -1 || soapAction.indexOf("GetCurrentConnectionInfo") != -1) {
+            String soap = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                           "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                           "  <s:Body><u:GetCurrentConnectionInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:ConnectionManager:1\">\r\n"
                           "    <RcsID>0</RcsID>\r\n"
@@ -831,38 +1083,78 @@ void WiFiStreamer::setupUpnpServer() {
                           "    <Status>OK</Status>\r\n"
                           "  </u:GetCurrentConnectionInfoResponse></s:Body>\r\n"
                           "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soap);
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soap);
         } else {
-            upnpServer.send(200, "text/xml", "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body/></s:Envelope>");
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", "<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body/></s:Envelope>");
         }
     });
 
     // AVTransport Control Endpoint (SetAVTransportURI, Play, Pause, Stop, GetMediaInfo, GetPositionInfo, GetDeviceCapabilities, GetTransportSettings)
     upnpServer.on("/AVTransport/control", HTTP_POST, [this]() {
         String body = upnpServer.arg("plain");
+        String soapAction = upnpServer.header("SOAPAction");
+        if (soapAction.length() == 0) soapAction = upnpServer.header("soapaction");
 
-        if (body.indexOf("SetAVTransportURI") != -1) {
-            // Extract URI
-            int uriStart = body.indexOf("<CurrentURI>");
-            int uriEnd = body.indexOf("</CurrentURI>");
-            if (uriStart != -1 && uriEnd != -1) {
-                activeStreamUrl = body.substring(uriStart + 12, uriEnd);
-                activeStreamUrl.trim();
+        upnpServer.sendHeader("EXT", "");
+
+        if (body.indexOf("SetAVTransportURI") != -1 || soapAction.indexOf("SetAVTransportURI") != -1) {
+            // Extract CurrentURI with CDATA, attribute, and XML entity resilience
+            int tagIdx = body.indexOf("CurrentURI");
+            if (tagIdx != -1) {
+                int openAngle = body.indexOf('>', tagIdx);
+                int closeAngle = body.indexOf('<', openAngle);
+                if (openAngle != -1 && closeAngle != -1 && closeAngle > openAngle) {
+                    String uri = body.substring(openAngle + 1, closeAngle);
+                    uri.trim();
+                    if (uri.startsWith("<![CDATA[") && uri.endsWith("]]>")) {
+                        uri = uri.substring(9, uri.length() - 3);
+                        uri.trim();
+                    }
+                    uri.replace("&amp;", "&");
+                    uri.replace("&lt;", "<");
+                    uri.replace("&gt;", ">");
+                    uri.replace("&quot;", "\"");
+                    uri.replace("&apos;", "'");
+                    if (uri.length() > 0 && (uri.startsWith("http://") || uri.startsWith("https://"))) {
+                        activeStreamUrl = uri;
+                    }
+                }
             }
 
             // Extract metadata (Title & Artist)
-            int titleStart = body.indexOf("&lt;dc:title&gt;");
-            int titleEnd = body.indexOf("&lt;/dc:title&gt;");
-            if (titleStart != -1 && titleEnd != -1) {
-                currentTrackTitle = body.substring(titleStart + 16, titleEnd);
+            int titleIdx = body.indexOf("dc:title");
+            if (titleIdx != -1) {
+                int openAngle = body.indexOf('>', titleIdx);
+                int closeAngle = body.indexOf('<', openAngle);
+                if (openAngle != -1 && closeAngle != -1 && closeAngle > openAngle) {
+                    String t = body.substring(openAngle + 1, closeAngle);
+                    t.trim();
+                    t.replace("&amp;", "&");
+                    t.replace("&lt;", "<");
+                    t.replace("&gt;", ">");
+                    t.replace("&quot;", "\"");
+                    t.replace("&apos;", "'");
+                    if (t.length() > 0) currentTrackTitle = t;
+                }
             } else {
-                currentTrackTitle = "DLNA Stream";
+                currentTrackTitle = "AirMusic Stream";
             }
 
-            int artistStart = body.indexOf("&lt;upnp:artist&gt;");
-            int artistEnd = body.indexOf("&lt;/upnp:artist&gt;");
-            if (artistStart != -1 && artistEnd != -1) {
-                currentTrackArtist = body.substring(artistStart + 19, artistEnd);
+            int artistIdx = body.indexOf("upnp:artist");
+            if (artistIdx == -1) artistIdx = body.indexOf("dc:creator");
+            if (artistIdx != -1) {
+                int openAngle = body.indexOf('>', artistIdx);
+                int closeAngle = body.indexOf('<', openAngle);
+                if (openAngle != -1 && closeAngle != -1 && closeAngle > openAngle) {
+                    String a = body.substring(openAngle + 1, closeAngle);
+                    a.trim();
+                    a.replace("&amp;", "&");
+                    a.replace("&lt;", "<");
+                    a.replace("&gt;", ">");
+                    a.replace("&quot;", "\"");
+                    a.replace("&apos;", "'");
+                    if (a.length() > 0) currentTrackArtist = a;
+                }
             } else {
                 currentTrackArtist = "Wi-Fi Cast";
             }
@@ -870,37 +1162,37 @@ void WiFiStreamer::setupUpnpServer() {
             wavHeaderParsed = false;
             wavHeaderBytes = 0;
 
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:SetAVTransportURIResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("Play") != -1) {
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("Play") != -1 || soapAction.indexOf("Play") != -1) {
             hasActiveStream = true;
-            streamState = STREAM_BUFFERING;
+            streamState = STREAM_PLAYING;
             wavHeaderParsed = false;
             wavHeaderBytes = 0;
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:PlayResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("Pause") != -1) {
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("Pause") != -1 || soapAction.indexOf("Pause") != -1) {
             pauseStream();
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:PauseResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("Stop") != -1) {
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("Stop") != -1 || soapAction.indexOf("Stop") != -1) {
             stopStream();
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:StopResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("GetMediaInfo") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("GetMediaInfo") != -1 || soapAction.indexOf("GetMediaInfo") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetMediaInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">\r\n"
                               "    <NrTracks>1</NrTracks>\r\n"
@@ -914,9 +1206,9 @@ void WiFiStreamer::setupUpnpServer() {
                               "    <WriteStatus>NOT_IMPLEMENTED</WriteStatus>\r\n"
                               "  </u:GetMediaInfoResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("GetPositionInfo") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("GetPositionInfo") != -1 || soapAction.indexOf("GetPositionInfo") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetPositionInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">\r\n"
                               "    <Track>1</Track>\r\n"
@@ -929,9 +1221,9 @@ void WiFiStreamer::setupUpnpServer() {
                               "    <AbsCount>2147483647</AbsCount>\r\n"
                               "  </u:GetPositionInfoResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("GetDeviceCapabilities") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("GetDeviceCapabilities") != -1 || soapAction.indexOf("GetDeviceCapabilities") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetDeviceCapabilitiesResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">\r\n"
                               "    <PlayMedia>NETWORK</PlayMedia>\r\n"
@@ -939,22 +1231,22 @@ void WiFiStreamer::setupUpnpServer() {
                               "    <RecQualityModes>NOT_IMPLEMENTED</RecQualityModes>\r\n"
                               "  </u:GetDeviceCapabilitiesResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("GetTransportSettings") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("GetTransportSettings") != -1 || soapAction.indexOf("GetTransportSettings") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetTransportSettingsResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">\r\n"
                               "    <PlayMode>NORMAL</PlayMode>\r\n"
                               "    <RecQualityMode>NOT_IMPLEMENTED</RecQualityMode>\r\n"
                               "  </u:GetTransportSettingsResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
         } else {
             // Default: GetTransportInfo
-            String stateStr = (streamState == STREAM_PLAYING) ? "PLAYING" :
-                              (streamState == STREAM_PAUSED) ? "PAUSED_PLAYBACK" :
-                              (streamState == STREAM_BUFFERING) ? "TRANSITIONING" : "STOPPED";
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            String stateStr = (hasActiveStream && streamState != STREAM_PAUSED && streamState != STREAM_IDLE) ? "PLAYING" :
+                              (streamState == STREAM_PLAYING) ? "PLAYING" :
+                              (streamState == STREAM_PAUSED) ? "PAUSED_PLAYBACK" : "STOPPED";
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetTransportInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">\r\n"
                               "    <CurrentTransportState>" + stateStr + "</CurrentTransportState>\r\n"
@@ -962,57 +1254,74 @@ void WiFiStreamer::setupUpnpServer() {
                               "    <CurrentSpeed>1</CurrentSpeed>\r\n"
                               "  </u:GetTransportInfoResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
         }
     });
 
     // RenderingControl Control Endpoint (Volume & Mute control)
     upnpServer.on("/RenderingControl/control", HTTP_POST, [this]() {
         String body = upnpServer.arg("plain");
-        if (body.indexOf("SetVolume") != -1) {
-            int volStart = body.indexOf("<DesiredVolume>");
-            int volEnd = body.indexOf("</DesiredVolume>");
-            if (volStart != -1 && volEnd != -1) {
-                int vol = body.substring(volStart + 15, volEnd).toInt();
-                audioPlayer.setVolume((uint8_t)constrain(vol, 0, 100));
+        String soapAction = upnpServer.header("SOAPAction");
+        if (soapAction.length() == 0) soapAction = upnpServer.header("soapaction");
+
+        upnpServer.sendHeader("EXT", "");
+
+        if (body.indexOf("SetVolume") != -1 || soapAction.indexOf("SetVolume") != -1) {
+            int volTag = body.indexOf("DesiredVolume");
+            if (volTag != -1) {
+                int start = body.indexOf('>', volTag);
+                int end = body.indexOf('<', start);
+                if (start != -1 && end != -1 && end > start) {
+                    int vol = body.substring(start + 1, end).toInt();
+                    audioPlayer.setVolume((uint8_t)constrain(vol, 0, 100));
+                }
             }
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:SetVolumeResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\"/></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("GetVolume") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("GetVolume") != -1 || soapAction.indexOf("GetVolume") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetVolumeResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">\r\n"
                               "    <CurrentVolume>" + String(audioPlayer.getVolume()) + "</CurrentVolume>\r\n"
                               "  </u:GetVolumeResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("SetMute") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("SetMute") != -1 || soapAction.indexOf("SetMute") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:SetMuteResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\"/></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
-        } else if (body.indexOf("GetMute") != -1) {
-            String soapResp = "<?xml version=\"1.0\"?>\r\n"
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("GetMute") != -1 || soapAction.indexOf("GetMute") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
                               "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
                               "  <s:Body><u:GetMuteResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">\r\n"
                               "    <CurrentMute>0</CurrentMute>\r\n"
                               "  </u:GetMuteResponse></s:Body>\r\n"
                               "</s:Envelope>\r\n";
-            upnpServer.send(200, "text/xml", soapResp);
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
+        } else if (body.indexOf("ListPresets") != -1 || soapAction.indexOf("ListPresets") != -1) {
+            String soapResp = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
+                              "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                              "  <s:Body><u:ListPresetsResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">\r\n"
+                              "    <CurrentPresetList>FactoryDefaults</CurrentPresetList>\r\n"
+                              "  </u:ListPresetsResponse></s:Body>\r\n"
+                              "</s:Envelope>\r\n";
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", soapResp);
         } else {
-            upnpServer.send(200, "text/xml", "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body/></s:Envelope>");
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", "<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body/></s:Envelope>");
         }
     });
 
     // Event Subscription Endpoints
     auto handleEventSub = [this]() {
+        upnpServer.sendHeader("EXT", "");
         upnpServer.sendHeader("SID", "uuid:q-tune-sub-12345");
         upnpServer.sendHeader("TIMEOUT", "Second-1800");
-        upnpServer.send(200, "text/xml", "");
+        upnpServer.send(200, "text/xml; charset=\"utf-8\"", "");
     };
     upnpServer.on("/AVTransport/event", handleEventSub);
     upnpServer.on("/RenderingControl/event", handleEventSub);
@@ -1022,7 +1331,8 @@ void WiFiStreamer::setupUpnpServer() {
         if (upnpServer.uri().endsWith("/event")) {
             handleEventSub();
         } else {
-            upnpServer.send(200, "text/xml", "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body/></s:Envelope>");
+            upnpServer.sendHeader("EXT", "");
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", "<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body/></s:Envelope>");
         }
     });
 
@@ -1037,34 +1347,65 @@ void WiFiStreamer::streamTaskFunction(void *param) {
         if (streamer->hasActiveStream && streamer->streamState != STREAM_PAUSED) {
             // Check socket connection
             if (!streamer->activeStreamClient.connected()) {
-                if (streamer->activeStreamUrl.length() > 0) {
-                    // Parse URL e.g. http://192.168.1.50:5000/stream.wav
-                    String url = streamer->activeStreamUrl;
-                    if (url.startsWith("http://")) url = url.substring(7);
-                    int slashIdx = url.indexOf('/');
-                    String hostPort = (slashIdx != -1) ? url.substring(0, slashIdx) : url;
-                    String path = (slashIdx != -1) ? url.substring(slashIdx) : "/";
+                static uint32_t lastConnectAttempt = 0;
+                if (millis() - lastConnectAttempt >= 300) {
+                    lastConnectAttempt = millis();
+                    if (streamer->activeStreamUrl.length() > 0) {
+                        // Parse URL e.g. http://192.168.1.50:50000/AirMusic.wav
+                        String url = streamer->activeStreamUrl;
+                        if (url.startsWith("http://")) url = url.substring(7);
+                        else if (url.startsWith("https://")) url = url.substring(8);
 
-                    int colonIdx = hostPort.indexOf(':');
-                    String host = (colonIdx != -1) ? hostPort.substring(0, colonIdx) : hostPort;
-                    uint16_t port = (colonIdx != -1) ? hostPort.substring(colonIdx + 1).toInt() : 80;
+                        int slashIdx = url.indexOf('/');
+                        String hostPort = (slashIdx != -1) ? url.substring(0, slashIdx) : url;
+                        String path = (slashIdx != -1) ? url.substring(slashIdx) : "/";
 
-                    if (streamer->activeStreamClient.connect(host.c_str(), port)) {
-                        streamer->activeStreamClient.printf("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path.c_str(), host.c_str());
+                        int colonIdx = hostPort.indexOf(':');
+                        String host = (colonIdx != -1) ? hostPort.substring(0, colonIdx) : hostPort;
+                        uint16_t port = (colonIdx != -1) ? hostPort.substring(colonIdx + 1).toInt() : 80;
 
-                        // Read headers
-                        while (streamer->activeStreamClient.connected()) {
-                            String line = streamer->activeStreamClient.readStringUntil('\n');
-                            if (line == "\r" || line.length() == 0) break;
+                        if (streamer->activeStreamClient.connect(host.c_str(), port)) {
+                            streamer->activeStreamClient.setTimeout(3000);
+                            streamer->activeStreamClient.printf(
+                                "GET %s HTTP/1.1\r\n"
+                                "Host: %s:%u\r\n"
+                                "User-Agent: Q-Tune/1.0 DLNA/1.50\r\n"
+                                "Accept: */*\r\n"
+                                "Connection: close\r\n\r\n",
+                                path.c_str(), host.c_str(), port
+                            );
+
+                            // Wait for HTTP response headers
+                            uint32_t t0 = millis();
+                            while (!streamer->activeStreamClient.available() && streamer->activeStreamClient.connected() && (millis() - t0 < 3000)) {
+                                vTaskDelay(pdMS_TO_TICKS(10));
+                            }
+
+                            bool isLpcm = false;
+                            while (streamer->activeStreamClient.connected()) {
+                                String line = streamer->activeStreamClient.readStringUntil('\n');
+                                line.trim();
+                                if (line.length() == 0) break;
+                                line.toLowerCase();
+                                if (line.indexOf("audio/l16") != -1 || line.indexOf("audio/pcm") != -1) {
+                                    isLpcm = true;
+                                }
+                            }
+
+                            streamer->streamState = STREAM_PLAYING;
+                            streamer->wavHeaderParsed = isLpcm; // If LPCM, no WAV header needed
+                            streamer->wavHeaderBytes = 0;
+                            if (isLpcm) {
+                                streamer->currentSampleRate = 44100;
+                                streamer->currentBitsPerSample = 16;
+                                audioPlayer.prepareForStream(44100);
+                            }
                         }
-                        streamer->streamState = STREAM_BUFFERING;
-                        streamer->wavHeaderParsed = false;
-                        streamer->wavHeaderBytes = 0;
                     }
                 }
             }
 
-            // Ingest incoming data into PSRAM ring buffer
+            // Ingest incoming audio data into PSRAM ring buffer
             if (streamer->activeStreamClient.connected() && streamer->activeStreamClient.available() > 0) {
                 int avail = streamer->activeStreamClient.available();
                 int toRead = (avail > (int)sizeof(readChunk)) ? sizeof(readChunk) : avail;
@@ -1092,11 +1433,14 @@ void WiFiStreamer::streamTaskFunction(void *param) {
 
                                 audioPlayer.prepareForStream(streamer->currentSampleRate);
 
-                                size_t pcmOffset = toCopy;
-                                if (bytesRead > (int)pcmOffset) {
-                                    streamer->pushToRingBuffer(readChunk + pcmOffset, bytesRead - pcmOffset);
+                                if (bytesRead > (int)toCopy) {
+                                    streamer->pushToRingBuffer(readChunk + toCopy, bytesRead - toCopy);
                                 }
                             } else {
+                                // Raw PCM / LPCM stream without RIFF header
+                                streamer->currentSampleRate = 44100;
+                                streamer->currentBitsPerSample = 16;
+                                audioPlayer.prepareForStream(44100);
                                 streamer->pushToRingBuffer(streamer->wavHeaderBuf, streamer->wavHeaderBytes);
                                 if (bytesRead > (int)toCopy) {
                                     streamer->pushToRingBuffer(readChunk + toCopy, bytesRead - toCopy);
@@ -1109,14 +1453,6 @@ void WiFiStreamer::streamTaskFunction(void *param) {
                 }
             }
 
-            // Buffer state transition
-            if (streamer->streamState == STREAM_BUFFERING) {
-                // Pre-buffer at least 32 KB (~180ms) before playing
-                if (streamer->ringCount >= 32768) {
-                    streamer->streamState = STREAM_PLAYING;
-                }
-            }
-
             // Audio output consumption
             if (streamer->streamState == STREAM_PLAYING) {
                 uint8_t playBuffer[512];
@@ -1126,11 +1462,6 @@ void WiFiStreamer::streamTaskFunction(void *param) {
                     pulled &= ~3;
                     size_t frameCount = pulled / 4;
                     audioPlayer.playStreamChunk((const int16_t*)playBuffer, frameCount);
-                } else if (pulled == 0 && streamer->ringCount < 4) {
-                    // Underflow: brief re-buffer
-                    if (streamer->activeStreamClient.connected()) {
-                        streamer->streamState = STREAM_BUFFERING;
-                    }
                 }
             }
 
