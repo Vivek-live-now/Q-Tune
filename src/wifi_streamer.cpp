@@ -11,45 +11,6 @@
 
 WiFiStreamer wifiStreamer;
 
-static const char* UPNP_DEVICE_XML =
-    "<?xml version=\"1.0\"?>\r\n"
-    "<root xmlns=\"urn:schemas-upnp-org:device-1-0\">\r\n"
-    "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
-    "  <device>\r\n"
-    "    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>\r\n"
-    "    <friendlyName>Q-Tune Audiophile Player</friendlyName>\r\n"
-    "    <manufacturer>Q-Tune</manufacturer>\r\n"
-    "    <manufacturerURL>http://q-tunes.local</manufacturerURL>\r\n"
-    "    <modelDescription>Q-Tune Audiophile UPnP/DLNA Hi-Res Network Streamer</modelDescription>\r\n"
-    "    <modelName>SuperMini S3</modelName>\r\n"
-    "    <modelNumber>Q-TUNE-1.0</modelNumber>\r\n"
-    "    <modelURL>http://q-tunes.local</modelURL>\r\n"
-    "    <UDN>uuid:q-tune-audiophile-player</UDN>\r\n"
-    "    <serviceList>\r\n"
-    "      <service>\r\n"
-    "        <serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType>\r\n"
-    "        <serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId>\r\n"
-    "        <SCPDURL>/RenderingControl/desc.xml</SCPDURL>\r\n"
-    "        <controlURL>/RenderingControl/control</controlURL>\r\n"
-    "        <eventSubURL>/RenderingControl/event</eventSubURL>\r\n"
-    "      </service>\r\n"
-    "      <service>\r\n"
-    "        <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>\r\n"
-    "        <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>\r\n"
-    "        <SCPDURL>/AVTransport/desc.xml</SCPDURL>\r\n"
-    "        <controlURL>/AVTransport/control</controlURL>\r\n"
-    "        <eventSubURL>/AVTransport/event</eventSubURL>\r\n"
-    "      </service>\r\n"
-    "      <service>\r\n"
-    "        <serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>\r\n"
-    "        <serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId>\r\n"
-    "        <SCPDURL>/ConnectionManager/desc.xml</SCPDURL>\r\n"
-    "        <controlURL>/ConnectionManager/control</controlURL>\r\n"
-    "        <eventSubURL>/ConnectionManager/event</eventSubURL>\r\n"
-    "      </service>\r\n"
-    "    </serviceList>\r\n"
-    "  </device>\r\n"
-    "</root>\r\n";
 
 static const char* UPNP_DEVICE_XML_TEMPLATE =
     "<?xml version=\"1.0\"?>\r\n"
@@ -651,37 +612,37 @@ void WiFiStreamer::sendSSDPAnnounce() {
     IPAddress localIp = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
     char notifyPacket[512];
 
-    // Announce MediaRenderer:1
-    snprintf(notifyPacket, sizeof(notifyPacket),
-        "NOTIFY * HTTP/1.1\r\n"
-        "HOST: 239.255.255.250:1900\r\n"
-        "CACHE-CONTROL: max-age=1800\r\n"
-        "LOCATION: http://%s:8080/description.xml\r\n"
-        "NT: urn:schemas-upnp-org:device:MediaRenderer:1\r\n"
-        "NTS: ssdp:alive\r\n"
-        "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
-        "USN: uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n",
-        localIp.toString().c_str()
-    );
-    ssdpUdp.beginPacket(IPAddress(239, 255, 255, 250), 1900);
-    ssdpUdp.write((const uint8_t*)notifyPacket, strlen(notifyPacket));
-    ssdpUdp.endPacket();
+    auto sendNotify = [&](const char* nt, const char* usn) {
+        snprintf(notifyPacket, sizeof(notifyPacket),
+            "NOTIFY * HTTP/1.1\r\n"
+            "HOST: 239.255.255.250:1900\r\n"
+            "CACHE-CONTROL: max-age=1800\r\n"
+            "LOCATION: http://%s:8080/description.xml\r\n"
+            "NT: %s\r\n"
+            "NTS: ssdp:alive\r\n"
+            "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
+            "USN: %s\r\n"
+            "BOOTID.UPNP.ORG: 1\r\n\r\n",
+            localIp.toString().c_str(),
+            nt,
+            usn
+        );
+        ssdpUdp.beginPacket(IPAddress(239, 255, 255, 250), 1900);
+        ssdpUdp.write((const uint8_t*)notifyPacket, strlen(notifyPacket));
+        ssdpUdp.endPacket();
+    };
 
-    // Announce upnp:rootdevice
-    snprintf(notifyPacket, sizeof(notifyPacket),
-        "NOTIFY * HTTP/1.1\r\n"
-        "HOST: 239.255.255.250:1900\r\n"
-        "CACHE-CONTROL: max-age=1800\r\n"
-        "LOCATION: http://%s:8080/description.xml\r\n"
-        "NT: upnp:rootdevice\r\n"
-        "NTS: ssdp:alive\r\n"
-        "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
-        "USN: uuid:q-tune-audiophile-player::upnp:rootdevice\r\n\r\n",
-        localIp.toString().c_str()
-    );
-    ssdpUdp.beginPacket(IPAddress(239, 255, 255, 250), 1900);
-    ssdpUdp.write((const uint8_t*)notifyPacket, strlen(notifyPacket));
-    ssdpUdp.endPacket();
+    // 1. Announce MediaRenderer:1
+    sendNotify("urn:schemas-upnp-org:device:MediaRenderer:1",
+               "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1");
+
+    // 2. Announce upnp:rootdevice
+    sendNotify("upnp:rootdevice",
+               "uuid:q-tune-audiophile-player::upnp:rootdevice");
+
+    // 3. Announce device UUID
+    sendNotify("uuid:q-tune-audiophile-player",
+               "uuid:q-tune-audiophile-player");
 }
 
 void WiFiStreamer::handleSSDP() {
@@ -701,35 +662,56 @@ void WiFiStreamer::handleSSDP() {
              strstr(buffer, "RenderingControl") != NULL)) {
 
             IPAddress localIp = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
-            const char* stTarget = "urn:schemas-upnp-org:device:MediaRenderer:1";
-            if (strstr(buffer, "upnp:rootdevice") != NULL) {
-                stTarget = "upnp:rootdevice";
+
+            auto sendResponse = [&](const char* st, const char* usn) {
+                char response[512];
+                snprintf(response, sizeof(response),
+                    "HTTP/1.1 200 OK\r\n"
+                    "CACHE-CONTROL: max-age=1800\r\n"
+                    "EXT:\r\n"
+                    "LOCATION: http://%s:8080/description.xml\r\n"
+                    "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
+                    "ST: %s\r\n"
+                    "USN: %s\r\n"
+                    "BOOTID.UPNP.ORG: 1\r\n\r\n",
+                    localIp.toString().c_str(),
+                    st,
+                    usn
+                );
+                ssdpUdp.beginPacket(ssdpUdp.remoteIP(), ssdpUdp.remotePort());
+                ssdpUdp.write((const uint8_t*)response, strlen(response));
+                ssdpUdp.endPacket();
+            };
+
+            // If control point queries ssdp:all or upnp:rootdevice, send both MediaRenderer:1 and rootdevice
+            if (strstr(buffer, "ssdp:all") != NULL) {
+                sendResponse("urn:schemas-upnp-org:device:MediaRenderer:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1");
+                sendResponse("upnp:rootdevice",
+                             "uuid:q-tune-audiophile-player::upnp:rootdevice");
+                sendResponse("uuid:q-tune-audiophile-player",
+                             "uuid:q-tune-audiophile-player");
+            } else if (strstr(buffer, "upnp:rootdevice") != NULL) {
+                sendResponse("upnp:rootdevice",
+                             "uuid:q-tune-audiophile-player::upnp:rootdevice");
+                sendResponse("urn:schemas-upnp-org:device:MediaRenderer:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1");
+            } else if (strstr(buffer, "MediaRenderer") != NULL) {
+                sendResponse("urn:schemas-upnp-org:device:MediaRenderer:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1");
             } else if (strstr(buffer, "AVTransport") != NULL) {
-                stTarget = "urn:schemas-upnp-org:service:AVTransport:1";
+                sendResponse("urn:schemas-upnp-org:service:AVTransport:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:service:AVTransport:1");
             } else if (strstr(buffer, "ConnectionManager") != NULL) {
-                stTarget = "urn:schemas-upnp-org:service:ConnectionManager:1";
+                sendResponse("urn:schemas-upnp-org:service:ConnectionManager:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:service:ConnectionManager:1");
             } else if (strstr(buffer, "RenderingControl") != NULL) {
-                stTarget = "urn:schemas-upnp-org:service:RenderingControl:1";
+                sendResponse("urn:schemas-upnp-org:service:RenderingControl:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:service:RenderingControl:1");
+            } else {
+                sendResponse("urn:schemas-upnp-org:device:MediaRenderer:1",
+                             "uuid:q-tune-audiophile-player::urn:schemas-upnp-org:device:MediaRenderer:1");
             }
-
-            char response[512];
-            snprintf(response, sizeof(response),
-                "HTTP/1.1 200 OK\r\n"
-                "CACHE-CONTROL: max-age=1800\r\n"
-                "EXT:\r\n"
-                "LOCATION: http://%s:8080/description.xml\r\n"
-                "SERVER: POSIX/1.0 UPnP/1.0 Q-Tune/1.0\r\n"
-                "ST: %s\r\n"
-                "USN: uuid:q-tune-audiophile-player::%s\r\n"
-                "BOOTID.UPNP.ORG: 1\r\n\r\n",
-                localIp.toString().c_str(),
-                stTarget,
-                stTarget
-            );
-
-            ssdpUdp.beginPacket(ssdpUdp.remoteIP(), ssdpUdp.remotePort());
-            ssdpUdp.write((const uint8_t*)response, strlen(response));
-            ssdpUdp.endPacket();
         }
     }
 }
@@ -1026,10 +1008,15 @@ void WiFiStreamer::setupUpnpServer() {
 
     upnpServer.on("/description.xml", HTTP_GET, [this]() {
         IPAddress localIp = (wifiState == WIFI_STATE_AP_MODE) ? WiFi.softAPIP() : WiFi.localIP();
-        char descBuf[1536];
-        snprintf(descBuf, sizeof(descBuf), UPNP_DEVICE_XML_TEMPLATE, localIp.toString().c_str());
-        upnpServer.sendHeader("EXT", "");
-        upnpServer.send(200, "text/xml; charset=\"utf-8\"", descBuf);
+        char *descBuf = (char*)malloc(2560);
+        if (descBuf) {
+            snprintf(descBuf, 2560, UPNP_DEVICE_XML_TEMPLATE, localIp.toString().c_str());
+            upnpServer.sendHeader("EXT", "");
+            upnpServer.send(200, "text/xml; charset=\"utf-8\"", descBuf);
+            free(descBuf);
+        } else {
+            upnpServer.send(500, "text/plain", "OOM");
+        }
     });
 
     upnpServer.on("/RenderingControl/desc.xml", HTTP_GET, [this]() {
@@ -1159,6 +1146,11 @@ void WiFiStreamer::setupUpnpServer() {
                 currentTrackArtist = "Wi-Fi Cast";
             }
 
+            if (activeStreamClient.connected()) {
+                activeStreamClient.stop();
+            }
+            hasActiveStream = true;
+            streamState = STREAM_BUFFERING;
             wavHeaderParsed = false;
             wavHeaderBytes = 0;
 

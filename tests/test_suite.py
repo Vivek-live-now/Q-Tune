@@ -962,6 +962,8 @@ def test_wifi_streaming_and_dlna_media_renderer():
     assert "audio/L16" in wcpp_src and "audio/wav" in wcpp_src, "SinkProtocolInfo must support L16 and WAV"
     assert "<URLBase>" in wcpp_src, "Device description must define URLBase"
     assert "SOAPAction" in wcpp_src, "UPnP server must inspect SOAPAction header"
+    assert "malloc(2560)" in wcpp_src or "descBuf[2" in wcpp_src, "description.xml buffer must be >= 2048 bytes to prevent truncation"
+    assert "sendResponse" in wcpp_src, "SSDP discovery must provide multi-target responses"
 
     print("  [PASS] Wi-Fi Audio Streaming, DLNA/UPnP MediaRenderer, UPnP UDA 1.0 SCPD argumentLists, AirMusic compatibility, 384KB PSRAM buffer, 4MB partition table, and dual output routing verified.")
 
