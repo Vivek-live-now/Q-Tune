@@ -142,7 +142,7 @@ On startup, Q-Tune launches into the **Unified Home Menu** styled with the Q-Wat
    - 7 music-reactive modes + 4 ambient modes.
    - Real-time adjustment of brightness, color palette, and audio sensitivity.
 6. **Hardware Diagnostics**:
-   - Interactive 12-point hardware test suite (including FiiO KA11 USB DAC test and Vocal Reactive Check).
+   - Interactive 12-point hardware test suite (including Dual Speaker Left/Right/Both test, FiiO KA11 USB DAC test, and Vocal Reactive Check).
 7. **System Info**:
    - Battery voltage and percentage, CPU frequency governor, SD card filesystem usage, and manual Safe Eject SD toggle.
 

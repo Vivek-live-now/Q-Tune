@@ -10,7 +10,7 @@ static const char* testNames[] = {
     "6. Pin Matrix Map",
     "7. Battery ADC",
     "8. RGB LED Test",
-    "9. I2S Audio Test",
+    "9. Both Speaker Test",
     "10. INMP441 Mic Test",
     "11. FiiO KA11 USB DAC",
     "12. Vocal Reactive Check",
@@ -272,23 +272,99 @@ void Diagnostics::testRGBLED() {
 }
 
 void Diagnostics::testI2SAudio() {
-    display.clear();
-    U8G2 &u8g2 = display.getU8g2();
-    u8g2.drawStr(0, 10, "I2S Audio Test:");
-    u8g2.drawStr(0, 30, "Playing 1kHz Tone...");
-    u8g2.drawStr(0, 55, "MAX98357A Output");
-    display.sendBuffer();
+    auto drawSpeakerScreen = [](const char* status, uint8_t activeChannel) {
+        display.clear();
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(0, 10, "DUAL SPEAKER TEST");
+        u8g2.drawHLine(0, 12, 128);
 
-    audioPlayer.playTestTone(1000, 1500);
+        // Left Speaker Box: x=6, y=17, w=54, h=18
+        if (activeChannel == AudioPlayer::AUDIO_TEST_LEFT || activeChannel == AudioPlayer::AUDIO_TEST_BOTH) {
+            u8g2.drawBox(6, 17, 54, 18);
+            u8g2.setDrawColor(0);
+            u8g2.drawStr(12, 30, "[L] SPKR");
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawFrame(6, 17, 54, 18);
+            u8g2.drawStr(12, 30, "[L] SPKR");
+        }
 
-    u8g2.drawStr(0, 42, "Tone Finished!");
-    display.sendBuffer();
-    unsigned long lastPoll = millis();
-    while (buttonManager.update() != BTN_EVENT_SEL_PRESS) {
-        while (millis() - lastPoll < 10) {
+        // Right Speaker Box: x=68, y=17, w=54, h=18
+        if (activeChannel == AudioPlayer::AUDIO_TEST_RIGHT || activeChannel == AudioPlayer::AUDIO_TEST_BOTH) {
+            u8g2.drawBox(68, 17, 54, 18);
+            u8g2.setDrawColor(0);
+            u8g2.drawStr(74, 30, "[R] SPKR");
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawFrame(68, 17, 54, 18);
+            u8g2.drawStr(74, 30, "[R] SPKR");
+        }
+
+        // Status text
+        u8g2.drawStr(0, 48, status);
+
+        // Navigation hints
+        u8g2.drawStr(0, 61, "UP:L  DN:R  OK:Both");
+        display.sendBuffer();
+    };
+
+    auto runToneTest = [&](const char* status, uint16_t freq, uint16_t durMs, uint8_t ch) {
+        drawSpeakerScreen(status, ch);
+        if (ch == AudioPlayer::AUDIO_TEST_LEFT) {
+            ledManager.triggerButtonPulse(CRGB::Red, 1, 50);
+        } else if (ch == AudioPlayer::AUDIO_TEST_RIGHT) {
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 50);
+        } else {
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 50);
+        }
+        audioPlayer.playTestTone(freq, durMs, ch);
+    };
+
+    // Stage 1: Auto Cycle Sequence (Left -> Right -> Both)
+    runToneTest("1/3: LEFT SPKR (800Hz)", 800, 1000, AudioPlayer::AUDIO_TEST_LEFT);
+    unsigned long tGap = millis();
+    while (millis() - tGap < 250) {
+        if (buttonManager.update() == BTN_EVENT_CANCEL_PRESS) return;
+        yield();
+    }
+
+    runToneTest("2/3: RIGHT SPKR (1.2k)", 1200, 1000, AudioPlayer::AUDIO_TEST_RIGHT);
+    tGap = millis();
+    while (millis() - tGap < 250) {
+        if (buttonManager.update() == BTN_EVENT_CANCEL_PRESS) return;
+        yield();
+    }
+
+    runToneTest("3/3: BOTH SPKRS (1.0k)", 1000, 1200, AudioPlayer::AUDIO_TEST_BOTH);
+    tGap = millis();
+    while (millis() - tGap < 200) {
+        if (buttonManager.update() == BTN_EVENT_CANCEL_PRESS) return;
+        yield();
+    }
+
+    // Stage 2: Interactive Manual Mode
+    drawSpeakerScreen("Ready! Choose Speaker", 3); // 3 = idle (both outlined)
+
+    while (true) {
+        ButtonEvent evt = buttonManager.update();
+        if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+            break;
+        } else if (evt == BTN_EVENT_UP_PRESS) {
+            runToneTest("Manual: LEFT (800Hz)", 800, 800, AudioPlayer::AUDIO_TEST_LEFT);
+            drawSpeakerScreen("Ready! Choose Speaker", 3);
+        } else if (evt == BTN_EVENT_DN_PRESS) {
+            runToneTest("Manual: RIGHT (1.2k)", 1200, 800, AudioPlayer::AUDIO_TEST_RIGHT);
+            drawSpeakerScreen("Ready! Choose Speaker", 3);
+        } else if (evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_OK_PRESS) {
+            runToneTest("Manual: BOTH (1.0k)", 1000, 1000, AudioPlayer::AUDIO_TEST_BOTH);
+            drawSpeakerScreen("Ready! Choose Speaker", 3);
+        }
+
+        unsigned long tPoll = millis();
+        while (millis() - tPoll < 10) {
             yield();
         }
-        lastPoll = millis();
     }
 }
 

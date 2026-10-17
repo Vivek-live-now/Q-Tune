@@ -34,10 +34,17 @@ struct WAVHeader {
 
 class AudioPlayer {
 public:
+    enum AudioTestChannel : uint8_t {
+        AUDIO_TEST_BOTH  = 0,
+        AUDIO_TEST_LEFT  = 1,
+        AUDIO_TEST_RIGHT = 2
+    };
+
     AudioPlayer();
     bool begin();
     bool playFile(const String &path);
     void playTestTone(uint16_t frequencyHz, uint16_t durationMs);
+    void playTestTone(uint16_t frequencyHz, uint16_t durationMs, uint8_t channel);
     void update();
     void pause();
     void resume();

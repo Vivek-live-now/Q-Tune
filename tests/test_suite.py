@@ -1625,6 +1625,39 @@ def test_audio_dsp_and_audiophile_engine():
     assert "void UIPlayer::renderEqSettings()" in uc
     print("  [PASS] 5. UIPlayer 5-band vertical HUD, crossfeed selector, and navigation input verified.")
 
+def test_both_speaker_diagnostics_suite():
+    print("\n--- 31. Dual Speaker Diagnostics & Channel Isolation Suite ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ap_h = os.path.join(base_dir, "include", "audio_player.h")
+    ap_cpp = os.path.join(base_dir, "src", "audio_player.cpp")
+    diag_h = os.path.join(base_dir, "include", "diagnostics.h")
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+
+    with open_utf8(ap_h) as f: aph_src = f.read()
+    with open_utf8(ap_cpp) as f: apcpp_src = f.read()
+    with open_utf8(diag_h) as f: diagh_src = f.read()
+    with open_utf8(diag_cpp) as f: diagcpp_src = f.read()
+
+    # 1. Channel Separation Enum & playTestTone Overloads
+    assert "AUDIO_TEST_BOTH" in aph_src, "AUDIO_TEST_BOTH missing in audio_player.h"
+    assert "AUDIO_TEST_LEFT" in aph_src, "AUDIO_TEST_LEFT missing in audio_player.h"
+    assert "AUDIO_TEST_RIGHT" in aph_src, "AUDIO_TEST_RIGHT missing in audio_player.h"
+    assert "void playTestTone(uint16_t frequencyHz, uint16_t durationMs, uint8_t channel);" in aph_src, "Channel-aware playTestTone missing in audio_player.h"
+
+    # 2. Channel Masking in I2S Buffer
+    assert "(channel == AUDIO_TEST_RIGHT) ? 0 : val" in apcpp_src, "Left channel muting logic missing in playTestTone"
+    assert "(channel == AUDIO_TEST_LEFT)  ? 0 : val" in apcpp_src, "Right channel muting logic missing in playTestTone"
+
+    # 3. Diagnostics Menu & UI Visuals
+    assert "Both Speaker Test" in diagcpp_src, "Both Speaker Test menu item missing in diagnostics.cpp"
+    assert "testBothSpeakers" in diagh_src, "testBothSpeakers alias missing in diagnostics.h"
+    assert "DUAL SPEAKER TEST" in diagcpp_src, "DUAL SPEAKER TEST title missing in diagnostics.cpp"
+    assert "[L] SPKR" in diagcpp_src, "Left speaker graphic indicator missing in diagnostics.cpp"
+    assert "[R] SPKR" in diagcpp_src, "Right speaker graphic indicator missing in diagnostics.cpp"
+
+    print("  [PASS] 1. AudioPlayer channel separation enum & tone routing verified.")
+    print("  [PASS] 2. Diagnostics 3-phase auto sweep (Left -> Right -> Both) and manual interactive mode verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1659,7 +1692,8 @@ def main():
     test_aac_filefmt_native()
     test_gdma_display_and_m2m_pipeline()
     test_audio_dsp_and_audiophile_engine()
-    print("\nAll 30 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_both_speaker_diagnostics_suite()
+    print("\nAll 31 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

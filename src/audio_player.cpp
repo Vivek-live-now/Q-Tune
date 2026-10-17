@@ -549,6 +549,10 @@ uint32_t AudioPlayer::getDurationMs() const {
 }
 
 void AudioPlayer::playTestTone(uint16_t frequencyHz, uint16_t durationMs) {
+    playTestTone(frequencyHz, durationMs, (uint8_t)AUDIO_TEST_BOTH);
+}
+
+void AudioPlayer::playTestTone(uint16_t frequencyHz, uint16_t durationMs, uint8_t channel) {
     stop();
     setupI2S(44100, 2, 16);
 
@@ -561,8 +565,8 @@ void AudioPlayer::playTestTone(uint16_t frequencyHz, uint16_t durationMs) {
         for (int i = 0; i < chunkSamples; i++) {
             double t = (double)(samplesGenerated + i) / 44100.0;
             int16_t val = (int16_t)(sin(2.0 * M_PI * frequencyHz * t) * 10000.0);
-            toneBuffer[2 * i] = val;
-            toneBuffer[2 * i + 1] = val;
+            toneBuffer[2 * i]     = (channel == AUDIO_TEST_RIGHT) ? 0 : val; // Left channel (muted if Right only)
+            toneBuffer[2 * i + 1] = (channel == AUDIO_TEST_LEFT)  ? 0 : val; // Right channel (muted if Left only)
         }
         size_t bytesWritten = 0;
         i2s_write(I2S_NUM, toneBuffer, chunkSamples * 4, &bytesWritten, portMAX_DELAY);

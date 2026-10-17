@@ -35,6 +35,7 @@ private:
     void testBattery();
     void testRGBLED();
     void testI2SAudio();
+    void testBothSpeakers() { testI2SAudio(); }
     void testINMP441Mic();
     void testFiiOKA11USB();
 };
