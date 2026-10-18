@@ -177,8 +177,8 @@ String GeminiClient::buildSystemStateJson() const {
     json += "\"state\":\"" + String(audioPlayer.isPlaying() ? "PLAYING" : (audioPlayer.isPaused() ? "PAUSED" : "IDLE")) + "\",";
     json += "\"volume\":" + String(audioPlayer.getVolume()) + ",";
     json += "\"output\":\"" + String(audioPlayer.getOutputModeShortName()) + "\",";
-    json += "\"eq\":\"" + String(audioDSP.getPresetName(audioDSP.getPreset())) + "\",";
-    json += "\"crossfeed\":\"" + String(audioDSP.getCrossfeedName(audioDSP.getCrossfeedMode())) + "\",";
+    json += "\"eq\":\"" + String(audioDSP.getPresetName()) + "\",";
+    json += "\"crossfeed\":\"" + String(audioDSP.getCrossfeedModeName()) + "\",";
     json += "\"visualizer\":\"" + String(spectrumAnalyzer.getPresetShortName()) + "\",";
     json += "\"led_mode\":\"" + String(ledManager.getShortModeName()) + "\",";
     json += "\"battery\":" + String(battery.getPercentage()) + ",";
@@ -303,8 +303,11 @@ bool GeminiClient::executeAction(const String &action) {
         if (eq == "FLAT") audioDSP.setPreset(EQ_PRESET_FLAT);
         else if (eq == "BASS_BOOST" || eq == "BASS") audioDSP.setPreset(EQ_PRESET_BASS_BOOST);
         else if (eq == "VOCAL") audioDSP.setPreset(EQ_PRESET_VOCAL);
-        else if (eq == "ACOUSTIC") audioDSP.setPreset(EQ_PRESET_ACOUSTIC);
-        else if (eq == "CLUB") audioDSP.setPreset(EQ_PRESET_CLUB);
+        else if (eq == "ROCK") audioDSP.setPreset(EQ_PRESET_ROCK);
+        else if (eq == "POP") audioDSP.setPreset(EQ_PRESET_POP);
+        else if (eq == "JAZZ") audioDSP.setPreset(EQ_PRESET_JAZZ);
+        else if (eq == "CLASSICAL") audioDSP.setPreset(EQ_PRESET_CLASSICAL);
+        else if (eq == "ELECTRONIC" || eq == "CLUB") audioDSP.setPreset(EQ_PRESET_ELECTRONIC);
         return true;
     }
 
@@ -322,12 +325,15 @@ bool GeminiClient::executeAction(const String &action) {
     if (action.startsWith("SET_LED:")) {
         String mode = action.substring(8);
         mode.toUpperCase();
-        if (mode.indexOf("OFF") != -1) ledManager.setEnabled(false);
-        else {
+        if (mode.indexOf("OFF") != -1) {
+            ledManager.setEnabled(false);
+        } else {
             ledManager.setEnabled(true);
-            if (mode.indexOf("VOCAL") != -1) ledManager.setMode(LED_MODE_VOCAL_LIGHTNING);
-            else if (mode.indexOf("BASS") != -1) ledManager.setMode(LED_MODE_BASS_PULSE);
-            else if (mode.indexOf("DISCO") != -1) ledManager.setMode(LED_MODE_DISCO);
+            if (mode.indexOf("VOCAL") != -1) ledManager.setMode(LedMode::REACT_VOCAL_LIGHTNING);
+            else if (mode.indexOf("BASS") != -1) ledManager.setMode(LedMode::REACT_BASS_PULSE);
+            else if (mode.indexOf("DISCO") != -1) ledManager.setMode(LedMode::REACT_DISCO_FLASH);
+            else if (mode.indexOf("HUE") != -1 || mode.indexOf("SPECTRUM") != -1) ledManager.setMode(LedMode::REACT_SPECTRUM_HUE);
+            else ledManager.setMode(LedMode::REACT_RAINBOW_FLOW);
         }
         return true;
     }
