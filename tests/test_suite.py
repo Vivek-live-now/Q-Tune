@@ -1658,6 +1658,110 @@ def test_both_speaker_diagnostics_suite():
     print("  [PASS] 1. AudioPlayer channel separation enum & tone routing verified.")
     print("  [PASS] 2. Diagnostics 3-phase auto sweep (Left -> Right -> Both) and manual interactive mode verified.")
 
+def test_ai_companion_gemini_and_anim_engine():
+    print("\n--- 32. AI Companion (DJ Neko & Mochi), Gemini API & AnimEngine Suite ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    anim_dir = os.path.join(base_dir, "sdcard", "anim")
+    anim_h = os.path.join(base_dir, "include", "anim_engine.h")
+    anim_cpp = os.path.join(base_dir, "src", "anim_engine.cpp")
+    ai_h = os.path.join(base_dir, "include", "ai_companion.h")
+    ai_cpp = os.path.join(base_dir, "src", "ai_companion.cpp")
+    gem_h = os.path.join(base_dir, "include", "gemini_client.h")
+    gem_cpp = os.path.join(base_dir, "src", "gemini_client.cpp")
+    main_cpp = os.path.join(base_dir, "src", "main.cpp")
+    wifi_cpp = os.path.join(base_dir, "src", "wifi_streamer.cpp")
+
+    # 1. Verify all 65 .anim files in sdcard/anim with valid QANM headers
+    assert os.path.exists(anim_dir), "sdcard/anim directory missing"
+    anim_files = [f for f in os.listdir(anim_dir) if f.endswith(".anim")]
+    assert len(anim_files) == 65, f"Expected 65 .anim files, found {len(anim_files)}"
+
+    for af in anim_files:
+        fpath = os.path.join(anim_dir, af)
+        with open(fpath, "rb") as f:
+            header = f.read(16)
+            magic, ver, w, h, frames, delay, flags, rsv = struct.unpack("<IHBBHHHH", header)
+            assert magic == 0x4D4E4151, f"{af} invalid QANM magic: {hex(magic)}"
+            assert ver == 1, f"{af} invalid version: {ver}"
+            assert w == 128 and h == 64, f"{af} invalid dimensions: {w}x{h}"
+            assert frames > 0, f"{af} zero frames"
+
+    print(f"  [PASS] 1. Consolidated {len(anim_files)} .anim files verified with valid 128x64 QANM binary headers.")
+
+    # 2. Verify AnimEngine declarations & PSRAM caching
+    with open_utf8(anim_h) as f:
+        ah_text = f.read()
+    with open_utf8(anim_cpp) as f:
+        acpp_text = f.read()
+
+    assert "ANIM_MAGIC" in ah_text and "ANIM_FRAME_BYTES" in ah_text
+    assert "psram_anim_buf" in ah_text, "PSRAM buffer declaration missing in anim_engine.h"
+    assert "using_psram" in ah_text
+    assert "heap_caps_malloc" in acpp_text, "PSRAM allocation missing in anim_engine.cpp"
+    assert "listAnimFiles" in ah_text and "animExists" in ah_text
+    print("  [PASS] 2. AnimEngine SD card loader, SPI mutex arbitration, and PSRAM preloading verified.")
+
+    # 3. Verify AICompanion DJ Neko (Cat) and Mochi Architecture
+    with open_utf8(ai_h) as f:
+        aih_text = f.read()
+    with open_utf8(ai_cpp) as f:
+        aicpp_text = f.read()
+
+    assert "COMPANION_CAT" in aih_text and "COMPANION_MOCHI" in aih_text
+    assert "VISUAL_HYBRID" in aih_text and "VISUAL_REACTIVE" in aih_text and "VISUAL_ANIM_ONLY" in aih_text
+    assert "renderLiveCat" in aih_text and "renderLiveMochi" in aih_text
+    assert "renderNekoAccessories" in aih_text
+    assert "playMeow" in aih_text and "playPurr" in aih_text
+    assert "toggleCompanion" in aih_text
+    assert "head_bob_y" in aih_text and "whisker_vibe" in aih_text and "ear_twitch" in aih_text
+    print("  [PASS] 3. Cute DJ Neko (Cat) & Mochi companion state machines, audio reactivity, and switching verified.")
+
+    # 4. Verify Gemini API Client & Q-Tune Awareness
+    with open_utf8(gem_h) as f:
+        gh_text = f.read()
+    with open_utf8(gem_cpp) as f:
+        gcpp_text = f.read()
+
+    assert "buildSystemStateJson" in gh_text
+    assert "buildPrompt" in gh_text
+    assert "parseResponse" in gh_text
+    assert "executeAction" in gh_text
+    assert "SWITCH_COMPANION:" in gcpp_text
+    assert "SET_VOLUME:" in gcpp_text
+    assert "SET_EQ:" in gcpp_text
+    assert "gemini_cfg" in gcpp_text
+
+    # 5. Verify Main App Shell & Web Remote routes
+    with open_utf8(main_cpp) as f:
+        m_text = f.read()
+    with open_utf8(wifi_cpp) as f:
+        w_text = f.read()
+
+    assert "MODE_AI_COMPANION" in m_text, "MODE_AI_COMPANION missing in main.cpp"
+    assert "AI Companion" in m_text, "AI Companion menu item missing in main.cpp"
+    assert "updateAICompanionMode" in m_text, "updateAICompanionMode missing in main.cpp"
+    assert "/api/ai/chat" in w_text, "/api/ai/chat route missing in wifi_streamer.cpp"
+    assert "/api/ai/companion" in w_text, "/api/ai/companion route missing in wifi_streamer.cpp"
+    print("  [PASS] 4. Gemini API context serialization, action execution, and Web Remote routes verified.")
+
+    # 6. Execute Native Host Unit Binary
+    bin_path = os.path.join(base_dir, "tests", "test_ai_companion_bin")
+    compile_cmd = [
+        "g++", "-std=c++17", "-O2", f"-I{os.path.join(base_dir, 'include')}", "-DHOST_TEST",
+        os.path.join(base_dir, "tests", "test_ai_companion_host.cpp"),
+        os.path.join(base_dir, "src", "anim_engine.cpp"),
+        os.path.join(base_dir, "src", "ai_companion.cpp"),
+        os.path.join(base_dir, "src", "gemini_client.cpp"),
+        "-o", bin_path
+    ]
+    compile_res = subprocess.run(compile_cmd, capture_output=True, text=True)
+    assert compile_res.returncode == 0, f"Compilation failed: {compile_res.stderr}"
+
+    run_res = subprocess.run([bin_path], capture_output=True, text=True)
+    assert run_res.returncode == 0, f"Native execution failed: {run_res.stderr}"
+    assert "All AI Companion & AnimEngine Native Tests PASSED!" in run_res.stdout
+    print("  [PASS] 5. Native host test binary compiled and executed with 100% assertions passed.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1693,7 +1797,8 @@ def main():
     test_gdma_display_and_m2m_pipeline()
     test_audio_dsp_and_audiophile_engine()
     test_both_speaker_diagnostics_suite()
-    print("\nAll 31 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_ai_companion_gemini_and_anim_engine()
+    print("\nAll 32 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

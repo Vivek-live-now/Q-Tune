@@ -12,6 +12,9 @@
 #include "spectrum_analyzer.h"
 #include "usb_manager.h"
 #include "wifi_streamer.h"
+#include "anim_engine.h"
+#include "ai_companion.h"
+#include "gemini_client.h"
 
 // Multi-core thread-safe SPI arbitration mutex (OLED vs microSD)
 SemaphoreHandle_t spiBusMutex = NULL;
@@ -22,6 +25,7 @@ enum AppMode {
     MODE_VISUALIZER,
     MODE_WIFI_STREAMER,
     MODE_RGB_EFFECTS,
+    MODE_AI_COMPANION,
     MODE_DIAGNOSTICS,
     MODE_SYSTEM_INFO
 };
@@ -29,12 +33,13 @@ enum AppMode {
 AppMode currentMode = MODE_MAIN_MENU;
 int menuSelection = 0;
 int menuScrollOffset = 0;
-const int MAIN_MENU_COUNT = 6;
+const int MAIN_MENU_COUNT = 7;
 const char* menuLabels[] = {
     "Music Player",
     "Spectrum Visualizer",
     "Wi-Fi Audio Stream",
     "RGB Light Effects",
+    "AI Companion",
     "Diagnostics",
     "System Info"
 };
@@ -49,8 +54,9 @@ void renderMainMenu() {
     vals[1] = String("[") + spectrumAnalyzer.getPresetShortName() + ":" + spectrumAnalyzer.getSensitivityShortName() + "]";
     vals[2] = wifiStreamer.isStreaming() ? "[STRM]" : (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED ? "[CONN]" : "[WIFI]");
     vals[3] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
-    vals[4] = "[11]";
-    vals[5] = "[INFO]";
+    vals[4] = String("[") + (aiCompanion.getCompanion() == COMPANION_CAT ? "NEKO" : "MOCHI") + "]";
+    vals[5] = "[11]";
+    vals[6] = "[INFO]";
 
     display.drawStandardMenu("Q-TUNES", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -98,10 +104,13 @@ void updateMainMenu() {
                 ledManager.setMenuPreview(true);
                 break;
             case 4:
+                currentMode = MODE_AI_COMPANION;
+                break;
+            case 5:
                 currentMode = MODE_DIAGNOSTICS;
                 diagnostics.begin();
                 break;
-            case 5:
+            case 6:
                 currentMode = MODE_SYSTEM_INFO;
                 break;
         }
@@ -440,6 +449,112 @@ void updateVisualizerMode() {
     }
 }
 
+int aiActionSelection = 0;
+const int AI_ACTION_COUNT = 5;
+const char* aiActionLabels[] = {
+    "Ask Gemini / Vibe",
+    "Switch Pet",
+    "Visual Mode",
+    "Bass Boost / EQ",
+    "Dance With Me!"
+};
+String aiStatusBubble = "Ready to groove!";
+
+void updateAICompanionMode() {
+    static unsigned long lastAiRender = 0;
+    ButtonEvent evt = buttonManager.update();
+    unsigned long now = millis();
+
+    if (evt == BTN_EVENT_UP_PRESS) {
+        aiActionSelection = (aiActionSelection == 0) ? (AI_ACTION_COUNT - 1) : (aiActionSelection - 1);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+    } else if (evt == BTN_EVENT_DN_PRESS) {
+        aiActionSelection = (aiActionSelection + 1) % AI_ACTION_COUNT;
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+    } else if (evt == BTN_EVENT_UP_HOLD) {
+        aiCompanion.toggleCompanion();
+        aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Meow! DJ Neko here!" : "Mochi activated!";
+        ledManager.triggerButtonPulse(CRGB::Purple, 2, 80);
+    } else if (evt == BTN_EVENT_SEL_PRESS) {
+        ledManager.triggerButtonPulse(CRGB::Green, 1, 50);
+        switch (aiActionSelection) {
+            case 0: {
+                if (!geminiClient.hasApiKey()) {
+                    aiStatusBubble = "Set key in /gemini.txt";
+                    aiCompanion.playAnim("surprised", 3000);
+                } else if (wifiStreamer.getWiFiState() != WIFI_STATE_CONNECTED) {
+                    aiStatusBubble = "Connect Wi-Fi first!";
+                    aiCompanion.playAnim("crying", 3000);
+                } else {
+                    aiStatusBubble = "Listening / Thinking...";
+                    String outMsg, outEmote, outAct;
+                    bool ok = geminiClient.ask("Give me an audiophile music tip or suggest a track from SD card!", outMsg, outEmote, outAct);
+                    if (ok) {
+                        aiStatusBubble = outMsg;
+                    } else {
+                        aiStatusBubble = outMsg.length() > 0 ? outMsg : "AI request failed";
+                    }
+                }
+                break;
+            }
+            case 1: {
+                aiCompanion.toggleCompanion();
+                aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Switched to DJ Neko!" : "Switched to Mochi!";
+                break;
+            }
+            case 2: {
+                aiCompanion.cycleVisualMode();
+                aiStatusBubble = String("Visual: ") + aiCompanion.getVisualModeName();
+                break;
+            }
+            case 3: {
+                aiCompanion.playAnim("furious", 3000);
+                geminiClient.executeAction("SET_EQ:BASS_BOOST");
+                aiStatusBubble = "Bass Boost engaged!";
+                break;
+            }
+            case 4: {
+                aiCompanion.playAnim("dancing", 5000);
+                aiStatusBubble = "Let's dance to the beat!";
+                break;
+            }
+        }
+    } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+        currentMode = MODE_MAIN_MENU;
+    }
+
+    if (now - lastAiRender >= 25) {
+        lastAiRender = now;
+        display.clear();
+
+        display.drawTopStatusBar(aiCompanion.getCompanionName(), battery.getPercentage());
+        aiCompanion.render(0, 10, 60, 54);
+
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_5x7_tr);
+        u8g2.drawFrame(61, 10, 66, 38);
+        u8g2.setDrawColor(1);
+
+        for (int i = 0; i < 3; i++) {
+            int idx = (aiActionSelection + i) % AI_ACTION_COUNT;
+            int yPos = 21 + i * 11;
+            if (i == 0) {
+                u8g2.drawBox(63, yPos - 8, 62, 10);
+                u8g2.setDrawColor(0);
+                u8g2.drawStr(64, yPos, aiActionLabels[idx]);
+                u8g2.setDrawColor(1);
+            } else {
+                u8g2.drawStr(64, yPos, aiActionLabels[idx]);
+            }
+        }
+
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(2, 62, aiStatusBubble.substring(0, 28).c_str());
+
+        display.sendBuffer();
+    }
+}
+
 void updateSystemInfoMode() {
     static unsigned long lastSysRender = 0;
     ButtonEvent evt = buttonManager.update();
@@ -515,12 +630,16 @@ void setup() {
     uiPlayer.begin();
     usbManager.begin();
     wifiStreamer.begin();
+    animEngine.begin();
+    aiCompanion.begin();
+    geminiClient.begin();
     Serial.println("[SYSTEM] Boot sequence complete. Entering main loop.\n");
 }
 
 void loop() {
     usbManager.loop();
     ledManager.loop();
+    aiCompanion.update(0.033f);
     powerManager.checkBatterySafety();
 
     // Global background track auto-advance: ensures continuous playback across visualizer, menus, and RGB effects
@@ -549,6 +668,9 @@ void loop() {
             break;
         case MODE_RGB_EFFECTS:
             updateRgbEffectsMode();
+            break;
+        case MODE_AI_COMPANION:
+            updateAICompanionMode();
             break;
         case MODE_DIAGNOSTICS:
             if (!diagnostics.runMenu()) {

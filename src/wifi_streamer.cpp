@@ -7,6 +7,8 @@
 #include "battery.h"
 #include "power_manager.h"
 #include "sd_manager.h"
+#include "ai_companion.h"
+#include "gemini_client.h"
 #include <esp_heap_caps.h>
 
 WiFiStreamer wifiStreamer;
@@ -952,6 +954,46 @@ void WiFiStreamer::setupConfigServer() {
             }
         }
         configServer.send(400, "application/json", "{\"error\":\"Missing URL\"}");
+    });
+
+    configServer.on("/api/ai/chat", HTTP_POST, [this]() {
+        String query = "";
+        if (configServer.hasArg("query")) {
+            query = configServer.arg("query");
+        } else if (configServer.hasArg("plain")) {
+            query = configServer.arg("plain");
+        }
+        query.trim();
+        if (query.length() == 0) {
+            configServer.send(400, "application/json", "{\"error\":\"Empty query\"}");
+            return;
+        }
+
+        String reply, emote, action;
+        bool ok = geminiClient.ask(query.c_str(), reply, emote, action);
+        String json = "{";
+        json += "\"status\":\"" + String(ok ? "ok" : "error") + "\",";
+        json += "\"reply\":\"" + reply + "\",";
+        json += "\"emote\":\"" + emote + "\",";
+        json += "\"action\":\"" + action + "\",";
+        json += "\"companion\":\"" + String(aiCompanion.getCompanion() == COMPANION_CAT ? "DJ_NEKO" : "MOCHI") + "\"";
+        json += "}";
+        configServer.send(200, "application/json", json);
+    });
+
+    configServer.on("/api/ai/companion", HTTP_POST, [this]() {
+        if (configServer.hasArg("type")) {
+            String t = configServer.arg("type");
+            t.toUpperCase();
+            if (t.indexOf("CAT") != -1 || t.indexOf("NEKO") != -1) {
+                aiCompanion.setCompanion(COMPANION_CAT);
+            } else if (t.indexOf("MOCHI") != -1) {
+                aiCompanion.setCompanion(COMPANION_MOCHI);
+            }
+        } else {
+            aiCompanion.toggleCompanion();
+        }
+        configServer.send(200, "application/json", "{\"companion\":\"" + String(aiCompanion.getCompanionName()) + "\"}");
     });
 
     configServer.on("/scan", HTTP_GET, [this]() {

@@ -138,12 +138,17 @@ On startup, Q-Tune launches into the **Unified Home Menu** styled with the Q-Wat
    - 5-band vertical slider HUD (`60Hz`, `250Hz`, `1kHz`, `4kHz`, `12kHz`).
    - Quick preset switcher (`FLAT`, `BASS BOOST`, `VOCAL`, `ACOUSTIC`, `CLUB`, `CUSTOM`).
    - Jan Meier headphone crossfeed selector (`OFF`, `SUBTLE`, `NATURAL`).
-5. **RGB Light Effects**:
+5. **AI Companion (DJ Neko & Mochi)**:
+   - **Dual Personality System:** Toggle between **DJ Neko** (cute music-loving cat with studio headphones, twitching ears, and bass-reactive whiskers) and **Classic Mochi** (the iconic Dasai pet from Q-Watch).
+   - **Live Audio Reactivity (60 FPS):** Whiskers and ear twitches react to low/high frequency bands, head bobs to live BPM, and headphone cups feature animated miniature spectrum analyzers.
+   - **65 Authentic `.anim` Faces:** Seamless playback from microSD card `/anim/` preloaded into PSRAM for zero-SPI glitch audio streaming.
+   - **Google Gemini API Intelligence:** Aware of all Q-Tune player controls, volume, EQ presets, visualizers, and SD tracks. Executes actions on command via on-device menu, INMP441 voice, or Web Remote at `http://q-tunes.local/ai`.
+6. **RGB Light Effects**:
    - 7 music-reactive modes + 4 ambient modes.
    - Real-time adjustment of brightness, color palette, and audio sensitivity.
-6. **Hardware Diagnostics**:
+7. **Hardware Diagnostics**:
    - Interactive 12-point hardware test suite (including Dual Speaker Left/Right/Both test, FiiO KA11 USB DAC test, and Vocal Reactive Check).
-7. **System Info**:
+8. **System Info**:
    - Battery voltage and percentage, CPU frequency governor, SD card filesystem usage, and manual Safe Eject SD toggle.
 
 ---
@@ -302,8 +307,10 @@ python3 tests/test_suite.py
 --- 28. Native AAC File Format Header Parsing & Bitrate Calculation Test --- [PASS]
 --- 29. ESP32-S3 GDMA Subsystem & Shared-SPI Display Pipeline --- [PASS]
 --- 30. Audiophile Audio DSP Engine Test (5-Band Parametric EQ, Crossfeed & Soft Limiter) --- [PASS]
+--- 31. Dual Speaker Diagnostics & Channel Isolation Suite --- [PASS]
+--- 32. AI Companion (DJ Neko & Mochi), Gemini API & AnimEngine Suite --- [PASS]
 
-All 30 Q-Tune static/source verification checks PASSED (100%)!
+All 32 Q-Tune static/source verification checks PASSED (100%)!
 ```
 
 ---
