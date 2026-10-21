@@ -8,6 +8,8 @@
 #include <driver/gpio.h>
 #endif
 
+static std::vector<MetadataIndexEntry> inMemoryMetadataCache;
+
 SDManager::SDManager() :
     mounted(false), safeToRemove(true),
     cardIsSDXC(false), cardIsExFAT(false), cardIsGPT(false), cardCapacityMB(0),
@@ -701,8 +703,6 @@ bool SDManager::lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSy
     if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
     return found;
 }
-
-static std::vector<MetadataIndexEntry> inMemoryMetadataCache;
 
 static uint32_t getFileSizeHelper(const String &path) {
     if (!SD.exists(path)) return 0;
