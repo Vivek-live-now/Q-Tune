@@ -1762,6 +1762,87 @@ def test_ai_companion_gemini_and_anim_engine():
     assert "All AI Companion & AnimEngine Native Tests PASSED!" in run_res.stdout
     print("  [PASS] 5. Native host test binary compiled and executed with 100% assertions passed.")
 
+def test_metadata_tag_engine_and_page_layout():
+    print("\n--- 33. Multi-Format Metadata Tag Engine (MP3/FLAC/M4A/WAV) & 4-Page Player Test ---")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    meta_h = os.path.join(base_dir, "include", "metadata_parser.h")
+    meta_cpp = os.path.join(base_dir, "src", "metadata_parser.cpp")
+    ui_h = os.path.join(base_dir, "include", "ui_player.h")
+    ui_cpp = os.path.join(base_dir, "src", "ui_player.cpp")
+
+    assert os.path.exists(meta_h), "metadata_parser.h missing from include directory"
+    assert os.path.exists(meta_cpp), "metadata_parser.cpp missing from src directory"
+
+    with open_utf8(meta_h) as f: mh_text = f.read()
+    with open_utf8(meta_cpp) as f: mcpp_text = f.read()
+    with open_utf8(ui_h) as f: uih_text = f.read()
+    with open_utf8(ui_cpp) as f: uicpp_text = f.read()
+
+    # 1. Multi-Format Parser Declarations
+    assert "class MetadataParser" in mh_text, "MetadataParser class missing"
+    assert "struct TrackMetadata" in mh_text, "TrackMetadata struct missing"
+    assert "parseMP3" in mh_text, "parseMP3 declaration missing"
+    assert "parseFLAC" in mh_text, "parseFLAC declaration missing"
+    assert "parseM4A" in mh_text, "parseM4A declaration missing"
+    assert "parseWAV" in mh_text, "parseWAV declaration missing"
+    assert "parseID3v2" in mh_text, "parseID3v2 declaration missing"
+    assert "parseID3v1" in mh_text, "parseID3v1 declaration missing"
+    assert "normalizeGenre" in mh_text, "normalizeGenre helper missing"
+    print("  [PASS] 1. MetadataParser multi-format API, ID3v2/v1, Vorbis, M4A ilst, and RIFF INFO declarations verified.")
+
+    # 2. 4-Page Player Architecture (Page 1: Player, Page 2: Metatags, Page 3: Lyrics, Page 4: Song Info)
+    assert "PAGE_NOW_PLAYING = 0" in uih_text, "PAGE_NOW_PLAYING must be 0"
+    assert "PAGE_METATAGS = 1" in uih_text, "PAGE_METATAGS must be 1 (Page 2)"
+    assert "PAGE_LYRICS = 2" in uih_text, "PAGE_LYRICS must be 2 (Page 3)"
+    assert "PAGE_TRACK_INFO = 3" in uih_text, "PAGE_TRACK_INFO must be 3 (Page 4)"
+
+    assert "renderPlayerPage1()" in uih_text, "renderPlayerPage1 missing in ui_player.h"
+    assert "renderPlayerPage2()" in uih_text, "renderPlayerPage2 missing in ui_player.h"
+    assert "renderPlayerPage3()" in uih_text, "renderPlayerPage3 missing in ui_player.h"
+    assert "renderPlayerPage4()" in uih_text, "renderPlayerPage4 missing in ui_player.h"
+
+    assert "(currentPage + 1) % 4" in uicpp_text, "cyclePage must modulo 4 pages"
+    assert "case PAGE_METATAGS:" in uicpp_text, "PAGE_METATAGS dispatch missing in renderPlayer"
+    assert "TAGS [2/4]" in uicpp_text, "TAGS [2/4] header missing in renderPlayerPage2"
+    assert "INFO [4/4]" in uicpp_text, "INFO [4/4] header missing in renderPlayerPage4"
+    assert "metadataParser.getLoadedAudioPath() != audioPlayer.getCurrentTrackPath()" in uicpp_text, "Negative scan caching missing in renderPlayerPage2"
+    print("  [PASS] 2. 4-Page Now Playing architecture, headers ([1/4]..[4/4]), and negative-scan caching verified.")
+
+    # 3. Compile and Run Native Multi-Format Test Binary
+    bin_path = os.path.join(base_dir, "tests", "test_metadata_bin")
+    compile_cmd = [
+        "g++", "-std=c++17", "-O2", f"-I{os.path.join(base_dir, 'include')}", "-DHOST_TEST",
+        os.path.join(base_dir, "tests", "test_metadata_native.cpp"),
+        os.path.join(base_dir, "src", "metadata_parser.cpp"),
+        "-o", bin_path
+    ]
+    compile_res = subprocess.run(compile_cmd, capture_output=True, text=True)
+    assert compile_res.returncode == 0, f"Metadata test compilation failed: {compile_res.stderr}"
+
+    run_res = subprocess.run([bin_path], capture_output=True, text=True)
+    assert run_res.returncode == 0, f"Metadata native test execution failed: {run_res.stderr}"
+    assert "All MetadataParser Multi-Format Native Tests PASSED" in run_res.stdout
+    print("  [PASS] 3. Native host test binary verified 100% test assertions across MP3, FLAC, M4A, and WAV fixtures.")
+
+    # 4. Binary Persistent Metadata Index & Classification Engine (QTMD Spec v1)
+    sd_h = os.path.join(base_dir, "include", "sd_manager.h")
+    sd_cpp = os.path.join(base_dir, "src", "sd_manager.cpp")
+    with open_utf8(sd_h) as f: sdh_text = f.read()
+    with open_utf8(sd_cpp) as f: sdcpp_text = f.read()
+
+    assert "METADATA_INDEX_MAGIC" in mh_text, "METADATA_INDEX_MAGIC missing from metadata_parser.h"
+    assert "METADATA_INDEX_VERSION" in mh_text, "METADATA_INDEX_VERSION missing from metadata_parser.h"
+    assert "struct MetadataIndexEntry" in mh_text, "MetadataIndexEntry struct missing from metadata_parser.h"
+    assert "sizeof(MetadataIndexEntry) == 256" in mh_text, "256-byte stride assertion missing for MetadataIndexEntry"
+    assert "buildMetadataIndex" in sdh_text and "buildMetadataIndex" in sdcpp_text, "buildMetadataIndex missing"
+    assert "hasMetadataIndex" in sdh_text and "lookupMetadataIndex" in sdh_text, "Metadata index methods missing in sd_manager.h"
+    assert "listGenres" in sdh_text and "listTracksByArtist" in sdh_text, "listGenres/listTracksByArtist missing in sd_manager.h"
+    assert "listTracksByAlbum" in sdh_text and "listTracksByGenre" in sdh_text, "listTracksByAlbum/listTracksByGenre missing in sd_manager.h"
+    assert "/music/metadata_index.bin" in sdcpp_text, "metadata_index.bin path missing in sd_manager.cpp"
+    assert "/music/metadata_index.tmp" in sdcpp_text, "metadata_index.tmp atomic path missing in sd_manager.cpp"
+    assert "Genres" in uicpp_text, "Genres category missing from ui_player.cpp"
+    print("  [PASS] 4. Persistent Metadata Index ('QTMD' 256B), atomic swap, and PSRAM classification engine verified.")
+
 def main():
     print("==================================================")
     print("        Q-TUNE AUTOMATED VERIFICATION SUITE       ")
@@ -1798,7 +1879,8 @@ def main():
     test_audio_dsp_and_audiophile_engine()
     test_both_speaker_diagnostics_suite()
     test_ai_companion_gemini_and_anim_engine()
-    print("\nAll 32 Q-Tune static/source verification checks PASSED (100%)!\n")
+    test_metadata_tag_engine_and_page_layout()
+    print("\nAll 33 Q-Tune static/source verification checks PASSED (100%)!\n")
 
 if __name__ == '__main__':
     main()

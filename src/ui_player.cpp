@@ -54,6 +54,7 @@ void UIPlayer::openNowPlaying() {
     manualLyricIndex = 0;
     lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    metadataParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     wakeTopBar(5000);
 }
 
@@ -68,7 +69,7 @@ void UIPlayer::setPage(PlayerPage page) {
 }
 
 void UIPlayer::cyclePage() {
-    currentPage = (PlayerPage)((currentPage + 1) % 3);
+    currentPage = (PlayerPage)((currentPage + 1) % 4);
     playerTrackStartTime = millis();
     wakeTopBar(5000);
     if (currentPage == PAGE_LYRICS) {
@@ -76,6 +77,8 @@ void UIPlayer::cyclePage() {
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     } else if (currentPage == PAGE_NOW_PLAYING) {
         albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+    } else if (currentPage == PAGE_METATAGS) {
+        metadataParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 }
 
@@ -141,6 +144,7 @@ void UIPlayer::playNextTrack() {
         ledManager.onPlaybackStart();
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
         albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+        metadataParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 }
 
@@ -164,6 +168,7 @@ void UIPlayer::playPreviousTrack() {
         ledManager.onPlaybackStart();
         lyricsParser.loadForTrack(audioPlayer.getCurrentTrackPath());
         albumArtManager.loadForTrack(audioPlayer.getCurrentTrackPath());
+        metadataParser.loadForTrack(audioPlayer.getCurrentTrackPath());
     }
 }
 
@@ -236,6 +241,7 @@ bool UIPlayer::update() {
         catLabels.push_back("Folders");
         catLabels.push_back("Artists");
         catLabels.push_back("Albums");
+        catLabels.push_back("Genres");
         catLabels.push_back("Playlists");
         catLabels.push_back("Recently Played");
         catLabels.push_back(String("Playback: ") + getPlaybackModeString());
@@ -297,7 +303,15 @@ bool UIPlayer::update() {
                     trackScrollOffset = 0;
                     currentTrackIndex = 0;
                     break;
-                case 4: // Playlists
+                case 4: // Genres
+                    currentCategoryTitle = "GENRES";
+                    trackList = sdManager.listGenres();
+                    currentView = VIEW_TRACK_LIST;
+                    inListMode = true;
+                    trackScrollOffset = 0;
+                    currentTrackIndex = 0;
+                    break;
+                case 5: // Playlists
                     currentCategoryTitle = "PLAYLISTS";
                     trackList = sdManager.listPlaylists();
                     currentView = VIEW_TRACK_LIST;
@@ -305,7 +319,7 @@ bool UIPlayer::update() {
                     trackScrollOffset = 0;
                     currentTrackIndex = 0;
                     break;
-                case 5: // Recently Played
+                case 6: // Recently Played
                     currentCategoryTitle = "RECENT TRACKS";
                     trackList = sdManager.getRecentTracks();
                     currentView = VIEW_TRACK_LIST;
@@ -313,15 +327,15 @@ bool UIPlayer::update() {
                     trackScrollOffset = 0;
                     currentTrackIndex = 0;
                     break;
-                case 6: // Playback Mode toggle
+                case 7: // Playback Mode toggle
                     cyclePlaybackMode();
                     break;
-                case 7: // Player Settings
+                case 8: // Player Settings
                     currentView = VIEW_PLAYER_SETTINGS;
                     settingsSelection = 0;
                     settingsScrollOffset = 0;
                     break;
-                case 8: // Rescan Library
+                case 9: // Rescan Library
                     display.clear();
                     display.drawTopStatusBar("INDEXING...", battery.getPercentage());
                     display.getU8g2().setFont(u8g2_font_6x10_tr);
@@ -488,15 +502,26 @@ bool UIPlayer::update() {
                     return true;
                 }
 
-                if (currentCategoryTitle == "ARTISTS" || currentCategoryTitle == "ALBUMS") {
-                    std::vector<String> allTracks = sdManager.listMusicFiles();
-                    std::vector<String> filtered;
-                    String matchStr = "/" + selected + "/";
-                    for (const auto &t : allTracks) {
-                        if (t.indexOf(matchStr) >= 0 || t.indexOf(selected) >= 0) {
-                            filtered.push_back(t);
-                        }
+                if (currentCategoryTitle == "ARTISTS") {
+                    std::vector<String> filtered = sdManager.listTracksByArtist(selected);
+                    if (!filtered.empty()) {
+                        currentCategoryTitle = selected;
+                        trackList = filtered;
+                        currentTrackIndex = 0;
+                        trackScrollOffset = 0;
+                        return true;
                     }
+                } else if (currentCategoryTitle == "ALBUMS") {
+                    std::vector<String> filtered = sdManager.listTracksByAlbum(selected);
+                    if (!filtered.empty()) {
+                        currentCategoryTitle = selected;
+                        trackList = filtered;
+                        currentTrackIndex = 0;
+                        trackScrollOffset = 0;
+                        return true;
+                    }
+                } else if (currentCategoryTitle == "GENRES") {
+                    std::vector<String> filtered = sdManager.listTracksByGenre(selected);
                     if (!filtered.empty()) {
                         currentCategoryTitle = selected;
                         trackList = filtered;
@@ -671,7 +696,7 @@ bool UIPlayer::update() {
             audioPlayer.volumeDown(5);
             showVolumeOverlay();
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
-            if (currentPage == PAGE_TRACK_INFO || currentPage == PAGE_LYRICS) {
+            if (currentPage != PAGE_NOW_PLAYING) {
                 currentPage = PAGE_NOW_PLAYING;
             } else {
                 currentView = VIEW_CATEGORIES;
@@ -703,6 +728,7 @@ void UIPlayer::renderCategories() {
     items.push_back("Folders");
     items.push_back("Artists");
     items.push_back("Albums");
+    items.push_back("Genres");
     items.push_back("Playlists");
     items.push_back("Recently Played");
     items.push_back(String("Playback: ") + getPlaybackModeString());
@@ -1035,11 +1061,14 @@ void UIPlayer::renderFolderBrowser() {
 
 void UIPlayer::renderPlayer() {
     switch (currentPage) {
-        case PAGE_TRACK_INFO:
+        case PAGE_METATAGS:
             renderPlayerPage2();
             break;
         case PAGE_LYRICS:
             renderPlayerPage3();
+            break;
+        case PAGE_TRACK_INFO:
+            renderPlayerPage4();
             break;
         case PAGE_NOW_PLAYING:
         default:
@@ -1065,7 +1094,7 @@ void UIPlayer::renderPlayerPage1() {
 
             if (showBar) {
                 char headerBuf[32];
-                snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+                snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/4]",
                          battery.getPercentage(), audioPlayer.getOutputModeShortName());
                 u8g2.drawStr(0, 10, headerBuf);
                 u8g2.drawHLine(0, 12, 128);
@@ -1157,7 +1186,7 @@ void UIPlayer::renderPlayerPage1() {
 
         if (showBar) {
             char headerBuf[32];
-            snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+            snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/4]",
                      battery.getPercentage(), audioPlayer.getOutputModeShortName());
             u8g2.drawStr(0, 10, headerBuf);
             u8g2.drawHLine(0, 12, 128);
@@ -1251,7 +1280,7 @@ void UIPlayer::renderPlayerSplitArt() {
         // Top status header
         u8g2.setFont(u8g2_font_5x7_tr);
         char headerBuf[32];
-        snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/3]",
+        snprintf(headerBuf, sizeof(headerBuf), "B:%d%% [%s] [1/4]",
                  battery.getPercentage(), audioPlayer.getOutputModeShortName());
         u8g2.drawStr(0, 8, headerBuf);
         u8g2.drawHLine(0, 9, 128);
@@ -1372,7 +1401,115 @@ void UIPlayer::renderPlayerCoverHero() {
 // ============================================================================
 // Page 2: Track & Audio Technical Details
 // ============================================================================
+// ============================================================================
+// Page 2: Metadata Tags (ID3 / Vorbis / M4A / RIFF INFO)
+// ============================================================================
 void UIPlayer::renderPlayerPage2() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+
+    if (metadataParser.getLoadedAudioPath() != audioPlayer.getCurrentTrackPath()) {
+        metadataParser.loadForTrack(audioPlayer.getCurrentTrackPath());
+    }
+
+    bool showBar = isTopBarVisible();
+    const TrackMetadata &meta = metadataParser.getMetadata();
+
+    if (showBar) {
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char headerBuf[32];
+        snprintf(headerBuf, sizeof(headerBuf), "TAGS [2/4] B:%d%%", battery.getPercentage());
+        u8g2.drawStr(0, 8, headerBuf);
+        u8g2.drawHLine(0, 10, 128);
+
+        if (meta.hasTags) {
+            String tStr = meta.title.length() > 0 ? meta.title : audioPlayer.getCurrentTrackName();
+            char lineBuf[64];
+            snprintf(lineBuf, sizeof(lineBuf), "T: %s", tStr.c_str());
+            Display::drawScrollingText(u8g2, lineBuf, 2, 19, 124, playerTrackStartTime, true);
+
+            String aStr = meta.artist.length() > 0 ? meta.artist : "Unknown Artist";
+            snprintf(lineBuf, sizeof(lineBuf), "A: %s", aStr.c_str());
+            Display::drawScrollingText(u8g2, lineBuf, 2, 28, 124, playerTrackStartTime, true);
+
+            String alStr = meta.album.length() > 0 ? meta.album : "Unknown Album";
+            snprintf(lineBuf, sizeof(lineBuf), "Alb: %s", alStr.c_str());
+            Display::drawScrollingText(u8g2, lineBuf, 2, 37, 124, playerTrackStartTime, true);
+
+            String yr = meta.year.length() > 0 ? meta.year : "----";
+            String gn = meta.genre.length() > 0 ? meta.genre : "----";
+            snprintf(lineBuf, sizeof(lineBuf), "Yr: %s  Gen: %s", yr.c_str(), gn.c_str());
+            u8g2.drawStr(2, 46, lineBuf);
+
+            String trk = meta.trackNumber.length() > 0 ? meta.trackNumber : "--";
+            snprintf(lineBuf, sizeof(lineBuf), "Trk: %s  Fmt: %s", trk.c_str(), audioPlayer.getFormatName());
+            u8g2.drawStr(2, 55, lineBuf);
+
+            snprintf(lineBuf, sizeof(lineBuf), "Rate: %ukbps %uHz", audioPlayer.getBitrateKbps(), audioPlayer.getSampleRate());
+            u8g2.drawStr(2, 63, lineBuf);
+        } else {
+            u8g2.setFont(u8g2_font_6x10_tr);
+            u8g2.drawStr(2, 24, "No Embedded Tags");
+            u8g2.setFont(u8g2_font_5x7_tr);
+            String fName = audioPlayer.getCurrentTrackName();
+            char lineBuf[64];
+            snprintf(lineBuf, sizeof(lineBuf), "File: %s", fName.c_str());
+            Display::drawScrollingText(u8g2, lineBuf, 2, 36, 124, playerTrackStartTime, true);
+            snprintf(lineBuf, sizeof(lineBuf), "Format: %s (%d-bit)", audioPlayer.getFormatName(), audioPlayer.getBitsPerSample());
+            u8g2.drawStr(2, 47, lineBuf);
+            snprintf(lineBuf, sizeof(lineBuf), "Bitrate: %u kbps", audioPlayer.getBitrateKbps());
+            u8g2.drawStr(2, 58, lineBuf);
+        }
+    } else {
+        String tStr = (meta.hasTags && meta.title.length() > 0) ? meta.title : audioPlayer.getCurrentTrackName();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        Display::drawScrollingText(u8g2, tStr.c_str(), 2, 10, 124, playerTrackStartTime, true);
+        u8g2.drawHLine(0, 13, 128);
+
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char lineBuf[64];
+        if (meta.hasTags) {
+            String aStr = meta.artist.length() > 0 ? meta.artist : "Unknown Artist";
+            snprintf(lineBuf, sizeof(lineBuf), "Artist: %s", aStr.c_str());
+            Display::drawScrollingText(u8g2, lineBuf, 2, 23, 124, playerTrackStartTime, true);
+
+            String alStr = meta.album.length() > 0 ? meta.album : "Unknown Album";
+            snprintf(lineBuf, sizeof(lineBuf), "Album:  %s", alStr.c_str());
+            Display::drawScrollingText(u8g2, lineBuf, 2, 33, 124, playerTrackStartTime, true);
+
+            String yr = meta.year.length() > 0 ? meta.year : "----";
+            String gn = meta.genre.length() > 0 ? meta.genre : "----";
+            snprintf(lineBuf, sizeof(lineBuf), "Year: %s   Genre: %s", yr.c_str(), gn.c_str());
+            u8g2.drawStr(2, 43, lineBuf);
+
+            String trk = meta.trackNumber.length() > 0 ? meta.trackNumber : "--";
+            snprintf(lineBuf, sizeof(lineBuf), "Track: %s  Format: %s", trk.c_str(), audioPlayer.getFormatName());
+            u8g2.drawStr(2, 53, lineBuf);
+
+            if (meta.comment.length() > 0) {
+                snprintf(lineBuf, sizeof(lineBuf), "Cmt: %s", meta.comment.c_str());
+                Display::drawScrollingText(u8g2, lineBuf, 2, 63, 124, playerTrackStartTime, true);
+            } else {
+                snprintf(lineBuf, sizeof(lineBuf), "%u kbps | %u.%ukHz", audioPlayer.getBitrateKbps(), audioPlayer.getSampleRate() / 1000, (audioPlayer.getSampleRate() % 1000) / 100);
+                u8g2.drawStr(2, 63, lineBuf);
+            }
+        } else {
+            u8g2.drawStr(2, 26, "Embedded ID3 / Tags:");
+            u8g2.drawStr(2, 37, "[Not Found in File]");
+            snprintf(lineBuf, sizeof(lineBuf), "Format: %s", audioPlayer.getFormatName());
+            u8g2.drawStr(2, 49, lineBuf);
+            snprintf(lineBuf, sizeof(lineBuf), "Size: %u KB", audioPlayer.getTotalBytes() / 1024);
+            u8g2.drawStr(2, 60, lineBuf);
+        }
+    }
+
+    display.sendBuffer();
+}
+
+// ============================================================================
+// Page 4: Track & Audio Technical Details (Song Info)
+// ============================================================================
+void UIPlayer::renderPlayerPage4() {
     display.clear();
     U8G2 &u8g2 = display.getU8g2();
     bool showBar = isTopBarVisible();
@@ -1380,7 +1517,7 @@ void UIPlayer::renderPlayerPage2() {
     if (showBar) {
         u8g2.setFont(u8g2_font_5x7_tr);
         char headerBuf[32];
-        snprintf(headerBuf, sizeof(headerBuf), "INFO [2/3] B:%d%%", battery.getPercentage());
+        snprintf(headerBuf, sizeof(headerBuf), "INFO [4/4] B:%d%%", battery.getPercentage());
         u8g2.drawStr(0, 8, headerBuf);
         u8g2.drawHLine(0, 10, 128);
 
@@ -1599,7 +1736,7 @@ void UIPlayer::renderPlayerPage3() {
         char headerBuf[32];
         const char* modeTag = lyricsParser.isSynchronized() ? "[SYNC]"
                             : (lyricsParser.hasLyrics()     ? "[MANUAL]" : "[NONE]");
-        snprintf(headerBuf, sizeof(headerBuf), "LYRICS %s B:%d%%", modeTag, battery.getPercentage());
+        snprintf(headerBuf, sizeof(headerBuf), "LRC %s [3/4] B:%d%%", modeTag, battery.getPercentage());
         u8g2.drawStr(0, 8, headerBuf);
         u8g2.drawHLine(0, 10, 128);
     }

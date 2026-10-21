@@ -1,4 +1,6 @@
 #include <unordered_set>
+#include <unordered_map>
+#include <algorithm>
 #include "sd_manager.h"
 #include "audio_player.h"
 
@@ -303,6 +305,7 @@ bool SDManager::unmount() {
     SD.end();
     mounted = false;
     safeToRemove = true;
+    inMemoryMetadataCache.clear();
 
     // Force SD_CS HIGH (deselected/idle state) to protect card flash during standby
     pinMode(SD_CS, OUTPUT);
@@ -339,6 +342,7 @@ void SDManager::notifyCardRemoved() {
     SD.end();
     mounted = false;
     safeToRemove = true;
+    inMemoryMetadataCache.clear();
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
     if (spiBusMutex != NULL) {
@@ -698,10 +702,231 @@ bool SDManager::lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSy
     return found;
 }
 
+static std::vector<MetadataIndexEntry> inMemoryMetadataCache;
+
+static uint32_t getFileSizeHelper(const String &path) {
+    if (!SD.exists(path)) return 0;
+    File current = SD.open(path, FILE_READ);
+    if (!current) return 0;
+    uint32_t size = current.size();
+    current.close();
+    return size;
+}
+
+bool SDManager::hasMetadataIndex() {
+    if (!mounted) {
+        if (!begin()) return false;
+    }
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    bool valid = false;
+    if (SD.exists("/music/metadata_index.bin")) {
+        File f = SD.open("/music/metadata_index.bin", FILE_READ);
+        if (f) {
+            uint32_t magic = 0;
+            uint16_t ver = 0;
+            uint32_t count = 0;
+            if (f.read((uint8_t*)&magic, 4) == 4 && f.read((uint8_t*)&ver, 2) == 2 && f.read((uint8_t*)&count, 4) == 4) {
+                if (magic == METADATA_INDEX_MAGIC && ver == METADATA_INDEX_VERSION) {
+                    if (count <= (0xFFFFFFFF - 10) / sizeof(MetadataIndexEntry)) {
+                        size_t expectedSize = 10 + (count * sizeof(MetadataIndexEntry));
+                        if (f.size() == expectedSize) {
+                            valid = true;
+                        }
+                    }
+                }
+            }
+            f.close();
+        }
+    }
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return valid;
+}
+
+std::vector<MetadataIndexEntry> SDManager::getMetadataEntries() {
+    if (!inMemoryMetadataCache.empty()) {
+        return inMemoryMetadataCache;
+    }
+    if (!mounted) {
+        if (!begin()) return inMemoryMetadataCache;
+    }
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    if (SD.exists("/music/metadata_index.bin")) {
+        File f = SD.open("/music/metadata_index.bin", FILE_READ);
+        if (f) {
+            uint32_t magic = 0;
+            uint16_t ver = 0;
+            uint32_t count = 0;
+            if (f.read((uint8_t*)&magic, 4) == 4 && f.read((uint8_t*)&ver, 2) == 2 && f.read((uint8_t*)&count, 4) == 4) {
+                if (magic == METADATA_INDEX_MAGIC && ver == METADATA_INDEX_VERSION) {
+                    for (uint32_t i = 0; i < count && f.available() >= (int)sizeof(MetadataIndexEntry); i++) {
+                        MetadataIndexEntry entry;
+                        if (f.read((uint8_t*)&entry, sizeof(entry)) == sizeof(entry)) {
+                            entry.audioPath[sizeof(entry.audioPath) - 1] = '\0';
+                            entry.title[sizeof(entry.title) - 1] = '\0';
+                            entry.artist[sizeof(entry.artist) - 1] = '\0';
+                            entry.album[sizeof(entry.album) - 1] = '\0';
+                            entry.genre[sizeof(entry.genre) - 1] = '\0';
+                            entry.year[sizeof(entry.year) - 1] = '\0';
+                            entry.trackNumber[sizeof(entry.trackNumber) - 1] = '\0';
+                            inMemoryMetadataCache.push_back(entry);
+                        }
+                    }
+                }
+            }
+            f.close();
+        }
+    }
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return inMemoryMetadataCache;
+}
+
+bool SDManager::buildMetadataIndex(void (*progressCallback)(int count)) {
+    if (!mounted) {
+        if (!begin()) return false;
+    }
+
+    std::vector<String> musicFiles = listMusicFiles();
+    if (musicFiles.empty()) return false;
+
+    // Load existing index for incremental update
+    std::unordered_map<std::string, MetadataIndexEntry> existingCache;
+    if (hasMetadataIndex()) {
+        std::vector<MetadataIndexEntry> current = getMetadataEntries();
+        for (const auto &e : current) {
+            existingCache[std::string(e.audioPath)] = e;
+        }
+    }
+
+    inMemoryMetadataCache.clear();
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+
+    if (SD.exists("/music/metadata_index.tmp")) {
+        SD.remove("/music/metadata_index.tmp");
+    }
+
+    File idxFile = SD.open("/music/metadata_index.tmp", FILE_WRITE);
+    if (!idxFile) {
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        return false;
+    }
+
+    uint32_t magic = METADATA_INDEX_MAGIC;
+    uint16_t version = METADATA_INDEX_VERSION;
+    uint32_t count = 0;
+
+    idxFile.write((const uint8_t*)&magic, 4);
+    idxFile.write((const uint8_t*)&version, 2);
+    idxFile.write((const uint8_t*)&count, 4);
+
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+    uint32_t writtenEntries = 0;
+
+    for (size_t i = 0; i < musicFiles.size(); i++) {
+        String path = musicFiles[i];
+        if (path.length() >= 128) continue;
+
+        MetadataIndexEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        strncpy(entry.audioPath, path.c_str(), sizeof(entry.audioPath) - 1);
+
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        uint32_t curSz = getFileSizeHelper(path);
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        entry.audioFileSize = curSz;
+
+        auto it = existingCache.find(std::string(path.c_str()));
+        if (it != existingCache.end() && it->second.audioFileSize == curSz && curSz > 0) {
+            entry = it->second;
+        } else {
+            if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+            File audioFile = SD.open(path, FILE_READ);
+            if (audioFile) {
+                TrackMetadata meta;
+                String lower = path;
+                lower.toLowerCase();
+                if (lower.endsWith(".mp3")) {
+                    entry.format = 3;
+                    MetadataParser::parseMP3(audioFile, meta);
+                } else if (lower.endsWith(".flac")) {
+                    entry.format = 2;
+                    MetadataParser::parseFLAC(audioFile, meta);
+                } else if (lower.endsWith(".m4a") || lower.endsWith(".aac")) {
+                    entry.format = 4;
+                    MetadataParser::parseM4A(audioFile, meta);
+                } else if (lower.endsWith(".wav")) {
+                    entry.format = 1;
+                    MetadataParser::parseWAV(audioFile, meta);
+                }
+                audioFile.close();
+
+                strncpy(entry.title, meta.title.c_str(), sizeof(entry.title) - 1);
+                strncpy(entry.artist, meta.artist.c_str(), sizeof(entry.artist) - 1);
+                strncpy(entry.album, meta.album.c_str(), sizeof(entry.album) - 1);
+                strncpy(entry.genre, meta.genre.c_str(), sizeof(entry.genre) - 1);
+                strncpy(entry.year, meta.year.c_str(), sizeof(entry.year) - 1);
+                strncpy(entry.trackNumber, meta.trackNumber.c_str(), sizeof(entry.trackNumber) - 1);
+            }
+            if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+        }
+
+        if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+        idxFile.write((const uint8_t*)&entry, sizeof(entry));
+        writtenEntries++;
+        inMemoryMetadataCache.push_back(entry);
+        if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+
+        if (progressCallback != nullptr && (i % 5 == 0)) {
+            progressCallback((int)i + 1);
+        }
+    }
+
+    if (spiBusMutex != NULL) xSemaphoreTake(spiBusMutex, portMAX_DELAY);
+    idxFile.seek(6);
+    idxFile.write((const uint8_t*)&writtenEntries, 4);
+    idxFile.close();
+
+    if (writtenEntries > 0) {
+        if (SD.exists("/music/metadata_index.bak")) {
+            SD.remove("/music/metadata_index.bak");
+        }
+        if (SD.exists("/music/metadata_index.bin")) {
+            SD.rename("/music/metadata_index.bin", "/music/metadata_index.bak");
+        }
+        bool renamed = SD.rename("/music/metadata_index.tmp", "/music/metadata_index.bin");
+        if (renamed) {
+            if (SD.exists("/music/metadata_index.bak")) SD.remove("/music/metadata_index.bak");
+        } else {
+            if (SD.exists("/music/metadata_index.bak")) SD.rename("/music/metadata_index.bak", "/music/metadata_index.bin");
+            SD.remove("/music/metadata_index.tmp");
+        }
+    } else {
+        SD.remove("/music/metadata_index.tmp");
+    }
+
+    if (spiBusMutex != NULL) xSemaphoreGive(spiBusMutex);
+    return (writtenEntries > 0);
+}
+
+bool SDManager::lookupMetadataIndex(const String &audioPath, MetadataIndexEntry &outEntry) {
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (const auto &e : entries) {
+        if (strcmp(e.audioPath, audioPath.c_str()) == 0) {
+            outEntry = e;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SDManager::rescanLibrary(void (*progressCallback)(int count)) {
     bool ok = buildLibraryIndex(progressCallback);
     if (ok) {
         buildLyricsIndex(progressCallback);
+        buildMetadataIndex(progressCallback);
     }
     return ok;
 }
@@ -807,6 +1032,16 @@ bool SDManager::listFolder(const String &folderPath, std::vector<String> &subdir
 std::vector<String> SDManager::listArtists() {
     std::vector<String> artists;
     std::unordered_set<std::string> seen;
+
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (entries[i].artist[0] != '\0') {
+            if (seen.insert(entries[i].artist).second) {
+                artists.push_back(String(entries[i].artist));
+            }
+        }
+    }
+
     std::vector<String> allSongs = listMusicFiles();
     for (size_t i = 0; i < allSongs.size(); i++) {
         const String& path = allSongs[i];
@@ -826,6 +1061,17 @@ std::vector<String> SDManager::listArtists() {
 
 std::vector<String> SDManager::listAlbums() {
     std::vector<String> albums;
+    std::unordered_set<std::string> seen;
+
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (entries[i].album[0] != '\0') {
+            if (seen.insert(entries[i].album).second) {
+                albums.push_back(String(entries[i].album));
+            }
+        }
+    }
+
     std::vector<String> allSongs = listMusicFiles();
     for (size_t i = 0; i < allSongs.size(); i++) {
         String path = allSongs[i];
@@ -838,15 +1084,79 @@ std::vector<String> SDManager::listAlbums() {
                 String album = (secondSlash > 0) ? remainder.substring(0, secondSlash) : remainder;
                 int dotIdx = album.lastIndexOf('.');
                 if (dotIdx > 0 && secondSlash <= 0) continue; // It was a file, not album
-                bool found = false;
-                for (size_t j = 0; j < albums.size(); j++) {
-                    if (albums[j] == album) { found = true; break; }
+                if (seen.insert(album.c_str()).second) {
+                    albums.push_back(album);
                 }
-                if (!found) albums.push_back(album);
             }
         }
     }
     return albums;
+}
+
+std::vector<String> SDManager::listGenres() {
+    std::vector<String> genres;
+    std::unordered_set<std::string> seen;
+
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (entries[i].genre[0] != '\0') {
+            if (seen.insert(entries[i].genre).second) {
+                genres.push_back(String(entries[i].genre));
+            }
+        }
+    }
+    return genres;
+}
+
+std::vector<String> SDManager::listTracksByArtist(const String &artist) {
+    std::vector<String> tracks;
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (strcmp(entries[i].artist, artist.c_str()) == 0) {
+            tracks.push_back(String(entries[i].audioPath));
+        }
+    }
+    if (tracks.empty()) {
+        std::vector<String> allSongs = listMusicFiles();
+        String matchStr = "/" + artist + "/";
+        for (const auto &t : allSongs) {
+            if (t.indexOf(matchStr) >= 0 || t.indexOf(artist) >= 0) {
+                tracks.push_back(t);
+            }
+        }
+    }
+    return tracks;
+}
+
+std::vector<String> SDManager::listTracksByAlbum(const String &album) {
+    std::vector<String> tracks;
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (strcmp(entries[i].album, album.c_str()) == 0) {
+            tracks.push_back(String(entries[i].audioPath));
+        }
+    }
+    if (tracks.empty()) {
+        std::vector<String> allSongs = listMusicFiles();
+        String matchStr = "/" + album + "/";
+        for (const auto &t : allSongs) {
+            if (t.indexOf(matchStr) >= 0 || t.indexOf(album) >= 0) {
+                tracks.push_back(t);
+            }
+        }
+    }
+    return tracks;
+}
+
+std::vector<String> SDManager::listTracksByGenre(const String &genre) {
+    std::vector<String> tracks;
+    std::vector<MetadataIndexEntry> entries = getMetadataEntries();
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (strcmp(entries[i].genre, genre.c_str()) == 0) {
+            tracks.push_back(String(entries[i].audioPath));
+        }
+    }
+    return tracks;
 }
 
 std::vector<String> SDManager::listPlaylists() {

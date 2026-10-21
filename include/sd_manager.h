@@ -7,6 +7,7 @@
 #include <vector>
 #include "hw_config.h"
 #include "lyrics_parser.h"
+#include "metadata_parser.h"
 
 // Binary Persistent Lyrics Index Header (Version 2)
 constexpr uint32_t LYRICS_INDEX_MAGIC = 0x51544C59; // 'QTLY'
@@ -40,10 +41,20 @@ public:
     bool buildLyricsIndex(void (*progressCallback)(int count) = nullptr);
     bool lookupLyricsIndex(const String &audioPath, LyricsSyncType &outSync, LyricsSourcePriority &outPri);
 
+    // Persistent Metadata Index & Classification Subsystem
+    bool hasMetadataIndex();
+    bool buildMetadataIndex(void (*progressCallback)(int count) = nullptr);
+    bool lookupMetadataIndex(const String &audioPath, MetadataIndexEntry &outEntry);
+    std::vector<MetadataIndexEntry> getMetadataEntries();
+
     // Categorization & Navigation
     bool listFolder(const String &folderPath, std::vector<String> &subdirs, std::vector<String> &audioFiles);
     std::vector<String> listArtists();
     std::vector<String> listAlbums();
+    std::vector<String> listGenres();
+    std::vector<String> listTracksByArtist(const String &artist);
+    std::vector<String> listTracksByAlbum(const String &album);
+    std::vector<String> listTracksByGenre(const String &genre);
     std::vector<String> listPlaylists();
     std::vector<String> loadPlaylist(const String &m3uPath);
 

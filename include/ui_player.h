@@ -10,6 +10,7 @@
 #include "lyrics_parser.h"
 #include "album_art.h"
 #include "player_config.h"
+#include "metadata_parser.h"
 
 enum PlaybackMode {
     PLAY_MODE_ALL,        // Repeat All tracks sequentially
@@ -22,7 +23,7 @@ enum UIPlayerView {
     VIEW_CATEGORIES,       // Music Categories Menu (Now Playing, All Songs, Folders, etc.)
     VIEW_TRACK_LIST,       // List of tracks (All Songs, Artist tracks, Album tracks, etc.)
     VIEW_FOLDER_BROWSER,   // Hierarchical directory browser
-    VIEW_PLAYER,           // Player screens (Pages 1, 2, 3)
+    VIEW_PLAYER,           // Player screens (Pages 1, 2, 3, 4)
     VIEW_PLAYER_SETTINGS,  // Customization settings menu
     VIEW_EQ_SETTINGS,      // Audiophile 5-Band Equalizer & Crossfeed
     VIEW_ART_SETTINGS      // Album Art dithering + image adjustments
@@ -30,8 +31,9 @@ enum UIPlayerView {
 
 enum PlayerPage {
     PAGE_NOW_PLAYING = 0,  // Page 1: Progress, spectrum, elapsed/total, format / album art
-    PAGE_TRACK_INFO = 1,   // Page 2: Audio engine & track technical details
-    PAGE_LYRICS = 2        // Page 3: Synchronized LRC lyrics / Manual untimed lyrics
+    PAGE_METATAGS = 1,     // Page 2: Embedded metadata tags (Title, Artist, Album, Year, Genre, Track)
+    PAGE_LYRICS = 2,       // Page 3: Synchronized LRC lyrics / Manual untimed lyrics
+    PAGE_TRACK_INFO = 3    // Page 4: Audio engine & track technical details (Song Info)
 };
 
 class UIPlayer {
@@ -106,6 +108,7 @@ private:
     void renderPlayerPage1();
     void renderPlayerPage2();
     void renderPlayerPage3();
+    void renderPlayerPage4();
     void renderPlayerSplitArt();
     void renderPlayerCoverHero();
     void renderPlayerSettings();
