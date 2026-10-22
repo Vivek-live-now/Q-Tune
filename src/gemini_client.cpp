@@ -639,15 +639,15 @@ static String parseGeminiResponseCandidate(const String &body) {
     return response;
 }
 
-static void handleHttpsError(int httpCode, HTTPClient &https, GeminiClient* client) {
+void GeminiClient::handleHttpsError(int httpCode, HTTPClient &https) {
     if (httpCode < 0) {
         String errStr = HTTPClient::errorToString(httpCode);
-        client->setError(errStr.c_str());
+        setError(errStr.c_str());
         return;
     }
     String body = https.getString();
     if (httpCode == 429 || body.indexOf("quota") != -1 || body.indexOf("Quota") != -1) {
-        client->setError("QUOTA EXCEEDED (429)");
+        setError("QUOTA EXCEEDED (429)");
         return;
     }
     int msgIdx = body.indexOf("\"message\":");
@@ -661,13 +661,13 @@ static void handleHttpsError(int httpCode, HTTPClient &https, GeminiClient* clie
             }
             if (endIdx != -1) {
                 String errMsg = body.substring(quoteStart + 1, endIdx);
-                client->setError(errMsg.substring(0, 50).c_str());
+                setError(errMsg.substring(0, 50).c_str());
                 return;
             }
         }
     }
     String err = "HTTP " + String(httpCode);
-    client->setError(err.c_str());
+    setError(err.c_str());
 }
 
 String GeminiClient::sendHttpsRequest(const String &endpoint, const String &jsonPayload) {
@@ -678,7 +678,6 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
     WiFiClientSecure client;
     client.setInsecure(); // Save memory and skip CA cert validation on ESP32-S3
-    client.setBufferSizes(2048, 1024); // Constrain mbedTLS buffers (cuts heap use from ~35KB to ~9KB)
     client.setTimeout(18000); // 18-second timeout for cloud reasoning responses
 
     HTTPClient https;
@@ -703,7 +702,6 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
         WiFiClientSecure retryClient;
         retryClient.setInsecure();
-        retryClient.setBufferSizes(2048, 1024);
         retryClient.setTimeout(18000);
 
         if (https.begin(retryClient, endpoint)) {
@@ -716,7 +714,7 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
                 response = parseGeminiResponseCandidate(body);
                 setError("OK");
             } else {
-                handleHttpsError(httpCode, https, this);
+                handleHttpsError(httpCode, https);
             }
         }
         https.end();
@@ -727,7 +725,7 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
             response = parseGeminiResponseCandidate(body);
             setError("OK");
         } else {
-            handleHttpsError(httpCode, https, this);
+            handleHttpsError(httpCode, https);
         }
         https.end();
         client.stop();

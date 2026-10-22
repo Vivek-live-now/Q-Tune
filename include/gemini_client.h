@@ -160,6 +160,7 @@ private:
     TaskHandle_t async_task_handle;
     static void asyncWorkerTask(void* param);
     bool initWorkerTask();
+    void handleHttpsError(int httpCode, class HTTPClient &https);
 #endif
     void runAsyncWorker();
 

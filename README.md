@@ -141,7 +141,7 @@ Q-Tunes implements a clean, decoupled 4-tier layered architecture for AI interac
                                             ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ Layer 4: Network & Transport Engine Layer                                              │
-│   • Constrained mbedTLS Buffers: WiFiClientSecure setBufferSizes(2048, 1024) [~9KB]    │
+│   • Memory-Optimized TLS: WiFiClientSecure with skip CA cert validation & 18s timeout  │
 │   • Public DNS Fallback: Quad8 (8.8.8.8) + Cloudflare (1.1.1.1) alongside DHCP         │
 │   • Latency Optimization: thinkingLevel: MINIMAL cuts API delay to ~4.3s               │
 │   • Auto-Fallback & Quota Preservation: gemini-3.5-flash ──► gemini-3.5-flash-lite     │
