@@ -72,7 +72,11 @@ static const uint8_t OBFUSCATED_KEY[] = {
 static const size_t OBFUSCATED_KEY_LEN = sizeof(OBFUSCATED_KEY);
 
 GeminiClient::GeminiClient() :
-    is_busy(false)
+    is_busy(false),
+    is_async_running(false),
+    is_async_done(false),
+    is_async_success(false),
+    is_async_cancelled(false)
 {
     memset(api_key, 0, sizeof(api_key));
     for (size_t i = 0; i < OBFUSCATED_KEY_LEN && i < sizeof(api_key) - 1; i++) {
@@ -82,6 +86,10 @@ GeminiClient::GeminiClient() :
     strncpy(model_name, "gemini-3.5-flash", sizeof(model_name) - 1);
     memset(last_error, 0, sizeof(last_error));
     memset(last_transcription, 0, sizeof(last_transcription));
+    memset(async_query_buf, 0, sizeof(async_query_buf));
+#ifdef ARDUINO
+    async_task_handle = NULL;
+#endif
 }
 
 void GeminiClient::setError(const char* err) {
@@ -104,11 +112,6 @@ bool GeminiClient::begin() {
             trimCStr(api_key);
         }
         String mdl = prefs.getString("model", "gemini-3.5-flash");
-        // Auto-upgrade legacy deprecated models or models that do not support thinkingBudget:0
-        if (mdl.indexOf("1.5") != -1 || mdl.indexOf("2.0") != -1 || mdl.indexOf("2.5") != -1 || mdl.indexOf("lite") != -1) {
-            mdl = "gemini-3.5-flash";
-            prefs.putString("model", mdl);
-        }
         if (mdl.length() > 0) {
             strncpy(model_name, mdl.c_str(), sizeof(model_name) - 1);
             model_name[sizeof(model_name) - 1] = '\0';
@@ -261,11 +264,6 @@ bool GeminiClient::loadSDConfig() {
         setApiKey(foundKey.c_str());
     }
     if (foundModel.length() > 0) {
-        if (foundModel == "gemini-1.5-flash" || foundModel == "gemini-2.0-flash" ||
-            foundModel == "gemini-2.5-flash" || foundModel == "gemini-2.5-flash-lite" ||
-            foundModel == "gemini-3.5-flash-lite") {
-            foundModel = "gemini-3.5-flash";
-        }
         setModelName(foundModel.c_str());
     }
     return true;
@@ -597,7 +595,8 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     // Auto-retry once on transient TCP/SSL handshake failure
     if (httpCode < 0) {
         https.end();
-        delay(150);
+        client.stop(); // Stop previous broken client to clean underlying TLS socket
+        vTaskDelay(pdMS_TO_TICKS(150));
         if (https.begin(client, endpoint)) {
             https.addHeader("Content-Type", "application/json");
             https.setTimeout(9000);
@@ -708,9 +707,9 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    // Use thinkingBudget: 0 for gemini-3.5-flash / 3.6-flash, or standard payload for gemini-3.5-flash-lite
+    // Use thinkingBudget: 0 for models that support it, or standard payload for lite / 1.5
     String json;
-    if (strcmp(model_name, "gemini-3.5-flash-lite") == 0) {
+    if (strstr(model_name, "lite") != NULL || strstr(model_name, "1.5") != NULL) {
         json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
     } else {
         json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
@@ -778,4 +777,196 @@ bool GeminiClient::askVoice(const int16_t* pcmSamples, size_t sampleCount, Strin
     executeAction(outAction);
     return true;
 #endif
+}
+
+bool GeminiClient::askAsync(const char* query) {
+    if (is_busy || is_async_running) return false;
+
+    if (!hasApiKey()) {
+        loadSDConfig();
+    }
+    if (!hasApiKey()) {
+        setError("NO API KEY");
+        is_async_success = false;
+        async_out_msg = "API key missing in /gemini.txt";
+        async_out_emote = "surprised";
+        async_out_act = "NONE";
+        async_out_heard = "";
+        is_async_done = true;
+        return true;
+    }
+
+#ifdef ARDUINO
+    if (WiFi.status() != WL_CONNECTED) {
+        setError("NO WIFI");
+        is_async_success = false;
+        async_out_msg = "Wi-Fi disconnected";
+        async_out_emote = "crying";
+        async_out_act = "NONE";
+        async_out_heard = "";
+        is_async_done = true;
+        return true;
+    }
+
+    if (query && strlen(query) > 0) {
+        strncpy(async_query_buf, query, sizeof(async_query_buf) - 1);
+        async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+    } else {
+        strncpy(async_query_buf, "Hello!", sizeof(async_query_buf) - 1);
+        async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+    }
+
+    is_async_running = true;
+    is_async_done = false;
+    is_async_success = false;
+    is_async_cancelled = false;
+    is_busy = true;
+
+    BaseType_t res = xTaskCreatePinnedToCore(
+        asyncWorkerTask,
+        "gemini_async",
+        10240,
+        this,
+        1,
+        &async_task_handle,
+        0
+    );
+
+    if (res != pdPASS) {
+        is_async_running = false;
+        is_busy = false;
+        setError("TASK CREATE FAILED");
+        is_async_success = false;
+        async_out_msg = "Low memory for task";
+        async_out_emote = "mistake";
+        async_out_act = "NONE";
+        async_out_heard = "";
+        is_async_done = true;
+        return false;
+    }
+
+    return true;
+#else
+    // Host / simulated test execution
+    if (query && strlen(query) > 0) {
+        strncpy(async_query_buf, query, sizeof(async_query_buf) - 1);
+        async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+    } else {
+        strncpy(async_query_buf, "Hello!", sizeof(async_query_buf) - 1);
+        async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+    }
+    is_async_running = false;
+    is_async_success = ask(async_query_buf, async_out_msg, async_out_emote, async_out_act);
+    async_out_heard = String(last_transcription);
+    is_async_done = true;
+    return true;
+#endif
+}
+
+#ifdef ARDUINO
+void GeminiClient::asyncWorkerTask(void* param) {
+    GeminiClient* client = (GeminiClient*)param;
+    if (client) {
+        client->runAsyncWorker();
+    }
+    vTaskDelete(NULL);
+}
+#endif
+
+void GeminiClient::runAsyncWorker() {
+#ifdef ARDUINO
+    if (is_async_cancelled) {
+        is_async_running = false;
+        is_busy = false;
+        async_task_handle = NULL;
+        return;
+    }
+
+    String prompt = buildPrompt(async_query_buf);
+    String sanitized = escapeJson(prompt);
+
+    String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/";
+    endpoint += model_name;
+    endpoint += ":generateContent?key=";
+    endpoint += api_key;
+
+    String json;
+    if (strstr(model_name, "lite") != NULL || strstr(model_name, "1.5") != NULL) {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+    } else {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+    }
+
+    String raw = sendHttpsRequest(endpoint, json);
+
+    // Auto-fallback: retry with gemini-3.5-flash-lite (fast 1.4s, separate quota)
+    if (raw.length() == 0 && !is_async_cancelled) {
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
+        endpoint += api_key;
+        String liteJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+        raw = sendHttpsRequest(endpoint, liteJson);
+        if (raw.length() > 0) {
+            strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
+        }
+    }
+
+    if (is_async_cancelled) {
+        is_async_running = false;
+        is_busy = false;
+        async_task_handle = NULL;
+        return;
+    }
+
+    if (raw.length() == 0) {
+        async_out_emote = "mistake";
+        async_out_act = "NONE";
+        String err = String(last_error);
+        if (err.indexOf("connection refused") != -1 || err.indexOf("not connected") != -1 || err.indexOf("connection lost") != -1) {
+            async_out_msg = "Net Err: Check Wi-Fi";
+        } else if (err.indexOf("read Timeout") != -1 || err.indexOf("Timeout") != -1) {
+            async_out_msg = "Net Err: Request timeout";
+        } else if (err.indexOf("429") != -1 || err.indexOf("quota") != -1 || err.indexOf("Quota") != -1) {
+            async_out_msg = "Quota exceeded. Try in a bit";
+        } else if (err.indexOf("too less ram") != -1) {
+            async_out_msg = "Err: Low memory";
+        } else if (err.length() > 0) {
+            async_out_msg = "Err: " + err;
+        } else {
+            async_out_msg = "Gemini request failed";
+        }
+        async_out_heard = "";
+        is_async_success = false;
+    } else {
+        String msg, emote, act;
+        parseResponse(raw, emote, act, msg);
+        async_out_msg = msg;
+        async_out_emote = emote;
+        async_out_act = act;
+        async_out_heard = String(last_transcription);
+        is_async_success = true;
+    }
+
+    is_async_running = false;
+    is_busy = false;
+    is_async_done = true;
+    async_task_handle = NULL;
+#endif
+}
+
+bool GeminiClient::pollAsyncResult(bool &outSuccess, String &outMessage, String &outEmote, String &outAction, String &outHeard) {
+    if (!is_async_done) return false;
+
+    outSuccess = is_async_success;
+    outMessage = async_out_msg;
+    outEmote = async_out_emote;
+    outAction = async_out_act;
+    outHeard = async_out_heard;
+
+    is_async_done = false;
+    return true;
+}
+
+void GeminiClient::cancelAsync() {
+    is_async_cancelled = true;
+    is_async_done = false;
 }

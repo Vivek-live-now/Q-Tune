@@ -171,6 +171,15 @@ int main() {
     assert(geminiClient.askVoice(nullptr, 0, vMsg, vEmote, vAct) == true);
     assert(vAct == "SET_VOLUME:80");
 
+    // Non-blocking asynchronous query execution
+    assert(geminiClient.askAsync("What's the weather today?") == true);
+    assert(geminiClient.isAsyncDone() == true);
+    bool asyncSuccess = false;
+    String aMsg, aEmote, aAct, aHeard;
+    assert(geminiClient.pollAsyncResult(asyncSuccess, aMsg, aEmote, aAct, aHeard) == true);
+    assert(asyncSuccess == true);
+    assert(geminiClient.isAsyncDone() == false);
+
     std::cout << "  [PASS] GeminiClient prompt serialization, response parsing, and action execution verified.\n";
     std::cout << "\nAll AI Companion & AnimEngine Native Tests PASSED!\n";
     return 0;

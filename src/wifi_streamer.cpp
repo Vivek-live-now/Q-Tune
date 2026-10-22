@@ -1525,6 +1525,8 @@ void WiFiStreamer::streamTaskFunction(void *param) {
 }
 
 void WiFiStreamer::update() {
+    if (wifiState == WIFI_STATE_OFF) return;
+
     configServer.handleClient();
     upnpServer.handleClient();
     handleSSDP();

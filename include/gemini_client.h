@@ -123,6 +123,13 @@ public:
     bool ask(const char* query, String &outMessage, String &outEmote, String &outAction);
     bool askVoice(const int16_t* pcmSamples, size_t sampleCount, String &outMessage, String &outEmote, String &outAction);
 
+    // Non-blocking Asynchronous Query Interface
+    bool askAsync(const char* query);
+    bool isAsyncRunning() const { return is_async_running; }
+    bool isAsyncDone() const { return is_async_done; }
+    void cancelAsync();
+    bool pollAsyncResult(bool &outSuccess, String &outMessage, String &outEmote, String &outAction, String &outHeard);
+
     // Command Parsing & Execution
     bool parseResponse(const String &rawResponse, String &outEmote, String &outAction, String &outMessage);
     bool executeAction(const String &action);
@@ -130,7 +137,7 @@ public:
     // Status
     const char* getLastError() const { return last_error; }
     const char* getLastTranscription() const { return last_transcription; }
-    bool isBusy() const { return is_busy; }
+    bool isBusy() const { return is_busy || is_async_running; }
 
 private:
     char api_key[128];
@@ -138,6 +145,22 @@ private:
     char last_error[64];
     char last_transcription[96];
     bool is_busy;
+
+    // Async state machine & worker fields
+    volatile bool is_async_running;
+    volatile bool is_async_done;
+    volatile bool is_async_success;
+    volatile bool is_async_cancelled;
+    char async_query_buf[512];
+    String async_out_msg;
+    String async_out_emote;
+    String async_out_act;
+    String async_out_heard;
+#ifdef ARDUINO
+    TaskHandle_t async_task_handle;
+    static void asyncWorkerTask(void* param);
+#endif
+    void runAsyncWorker();
 
     void setError(const char* err);
     String sendHttpsRequest(const String &endpoint, const String &jsonPayload);
