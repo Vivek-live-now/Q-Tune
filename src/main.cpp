@@ -472,14 +472,14 @@ int aiActionSelection = 0;
 const int AI_ACTION_COUNT = 9;
 const char* aiActionLabels[AI_ACTION_COUNT] = {
     "Ask DJ / Mic",
+    "How's Weather?",
     "Cycle Face/Anim",
     "Anim Speed",
     "Visual Mode",
     "Song Recommend",
     "Analyze Audio",
     "Switch Pet",
-    "Bass Boost / EQ",
-    "Dance / Groove"
+    "Bass Boost / EQ"
 };
 String aiStatusBubble = "Ready to groove!";
 unsigned long lastAiButtonTime = 0;
@@ -495,9 +495,83 @@ void showToast(const String &msg, uint32_t duration_ms = 3000, bool isListening 
     toastListening = isListening;
 }
 
+static void renderSpeechBubbleCard(const String &msg) {
+    U8G2 &u8g2 = display.getU8g2();
+    int boxX = 2;
+    int boxY = 4;
+    int boxW = 124;
+    int boxH = 58;
+
+    // Solid background with rounded frame
+    u8g2.setDrawColor(0);
+    u8g2.drawRBox(boxX - 1, boxY - 1, boxW + 2, boxH + 2, 3);
+    u8g2.setDrawColor(1);
+    u8g2.drawRFrame(boxX, boxY, boxW, boxH, 3);
+
+    // Header banner with companion name
+    u8g2.drawBox(boxX, boxY, boxW, 10);
+    u8g2.setDrawColor(0);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    const char* cName = (aiCompanion.getCompanion() == COMPANION_CAT) ? "DJ NEKO [CAT]" : "MOCHI";
+    u8g2.drawStr(boxX + 4, boxY + 8, cName);
+    u8g2.setDrawColor(1);
+
+    // Multi-line word wrapping with 4x6 font (fits 24 chars per line)
+    u8g2.setFont(u8g2_font_4x6_tr);
+    const int maxChars = 24;
+    const int maxLines = 4;
+    int lineY = boxY + 19;
+    int lineCount = 0;
+
+    int p = 0;
+    int len = msg.length();
+    while (p < len && lineCount < maxLines) {
+        while (p < len && (msg[p] == ' ' || msg[p] == '\n' || msg[p] == '\r')) p++;
+        if (p >= len) break;
+
+        int lineEnd = p;
+        int nextSpace = p;
+        while (nextSpace < len && (nextSpace - p) <= maxChars) {
+            if (msg[nextSpace] == ' ' || msg[nextSpace] == '\n' || msg[nextSpace] == '\r') {
+                lineEnd = nextSpace;
+            }
+            nextSpace++;
+        }
+        if (nextSpace >= len && (nextSpace - p) <= maxChars) {
+            lineEnd = nextSpace;
+        } else if (lineEnd == p) {
+            lineEnd = p + maxChars;
+            if (lineEnd > len) lineEnd = len;
+        }
+
+        String line = msg.substring(p, lineEnd);
+        line.trim();
+        if (lineCount == maxLines - 1 && lineEnd < len) {
+            if (line.length() > maxChars - 2) line = line.substring(0, maxChars - 2) + "..";
+            else line += "..";
+        }
+        u8g2.drawStr(boxX + 4, lineY, line.c_str());
+        lineY += 9;
+        lineCount++;
+        p = lineEnd;
+    }
+
+    // Bottom dismiss hint
+    u8g2.drawHLine(boxX + 2, boxY + boxH - 9, boxW - 4);
+    u8g2.drawStr(boxX + 26, boxY + boxH - 2, "[OK/CANCEL] Close");
+}
+
 void renderActiveToast() {
     if (millis() < toastEndTime || toastListening) {
         if (toastMessage.length() == 0) return;
+
+        // Multi-line card for full AI responses (> 20 characters)
+        if (!toastListening && toastMessage.length() > 20) {
+            renderSpeechBubbleCard(toastMessage);
+            return;
+        }
+
+        // Compact pill overlay (for listening or short status like "Speed: 1.25x")
         U8G2 &u8g2 = display.getU8g2();
         u8g2.setFont(u8g2_font_5x7_tr);
         String msg = toastMessage;
@@ -560,6 +634,9 @@ void startMicListeningSession(const char* promptHint = nullptr) {
         return;
     }
 
+    // 0. Audio prompt beep/chirp to announce listening!
+    aiCompanion.playChirp();
+
     // 1. Immediately pop up live toast notification on screen!
     showToast("Listening (Mic)...", 8000, true);
     aiCompanion.setMood(MOOD_THINKING, 8000);
@@ -570,11 +647,13 @@ void startMicListeningSession(const char* promptHint = nullptr) {
     renderActiveToast();
     display.sendBuffer();
 
-    // 2. Pause audio task if playing so INMP441 can use I2S port
+    // 2. Pause audio task if playing so INMP441 can sample without I2S collision
     bool wasPlaying = audioPlayer.isPlaying();
     if (wasPlaying) {
         audioPlayer.pause();
     }
+
+    float maxRms = 0.0f;
 #ifdef ARDUINO
     spectrumAnalyzer.start();
 
@@ -583,6 +662,7 @@ void startMicListeningSession(const char* promptHint = nullptr) {
     while (millis() - listenStart < 2200) {
         spectrumAnalyzer.sampleMicrophone();
         toastAudioLevel = spectrumAnalyzer.getRMSLevel();
+        if (toastAudioLevel > maxRms) maxRms = toastAudioLevel;
 
         display.clear();
         aiCompanion.render(0, 0, 128, 64);
@@ -596,9 +676,6 @@ void startMicListeningSession(const char* promptHint = nullptr) {
     }
 
     spectrumAnalyzer.stop();
-    if (wasPlaying) {
-        audioPlayer.resume();
-    }
 #endif
 
     // 4. Update toast to Thinking...
@@ -609,17 +686,37 @@ void startMicListeningSession(const char* promptHint = nullptr) {
     renderActiveToast();
     display.sendBuffer();
 
-    // 5. Query Gemini
-    String query = (promptHint && strlen(promptHint) > 0) ? promptHint : "Voice query from mic: Recommend a track or audiophile setting!";
+    // 5. Query Gemini with user's voice / intent
+    String query;
+    if (promptHint && strlen(promptHint) > 0) {
+        query = promptHint;
+    } else if (maxRms > 0.02f) {
+        query = "User spoke into microphone: Answer their question, weather request, music control, or give friendly companion advice.";
+    } else {
+        query = "User activated microphone: Answer question, weather request, or music tip, and execute actions if requested.";
+    }
+
     String outMsg, outEmote, outAct;
     bool ok = geminiClient.ask(query.c_str(), outMsg, outEmote, outAct);
 
     if (ok) {
+        // Audio voice feedback on answer!
+        if (aiCompanion.getCompanion() == COMPANION_CAT) {
+            aiCompanion.playMeow();
+        } else {
+            aiCompanion.playChirp();
+        }
         aiStatusBubble = outMsg;
-        showToast(outMsg.length() > 0 ? outMsg : "Done!", 4500, false);
+        showToast(outMsg.length() > 0 ? outMsg : "Done!", 8000, false);
     } else {
         aiStatusBubble = outMsg.length() > 0 ? outMsg : "AI request failed";
-        showToast(aiStatusBubble, 3500, false);
+        showToast(aiStatusBubble, 4500, false);
+    }
+
+    if (wasPlaying && !audioPlayer.isPlaying()) {
+        if (!outAct.equalsIgnoreCase("PAUSE") && !outAct.equalsIgnoreCase("STOP")) {
+            audioPlayer.resume();
+        }
     }
 }
 
@@ -632,6 +729,12 @@ void updateAICompanionMode() {
     bool isInactive = (now - lastAiButtonTime >= 3000);
 
     if (evt != BTN_EVENT_NONE) {
+        // Dismiss active speech bubble card on any button press
+        if (!toastListening && toastMessage.length() > 20 && millis() < toastEndTime) {
+            toastEndTime = 0;
+            return;
+        }
+
         bool wasInactive = isInactive;
         lastAiButtonTime = now;
 
@@ -682,52 +785,50 @@ void updateAICompanionMode() {
             ledManager.triggerButtonPulse(CRGB::Green, 1, 50);
             switch (aiActionSelection) {
                 case 0: { // Ask DJ / Mic
-                    startMicListeningSession("Voice audio query: Recommend a track or audiophile setting!");
+                    startMicListeningSession();
                     break;
                 }
-                case 1: { // Cycle Face / Anim (Browses all 65 .anim + 15 procedural faces)
+                case 1: { // How's Weather?
+                    startMicListeningSession("What is the weather today? Give a friendly companion answer with current vibe.");
+                    break;
+                }
+                case 2: { // Cycle Face / Anim (Browses all 65 .anim + 15 procedural faces)
                     aiCompanion.cycleNextFace();
                     showToast("Face: " + String(aiCompanion.getCurrentFaceDisplayName()), 1800);
                     aiStatusBubble = "Face: " + String(aiCompanion.getCurrentFaceDisplayName());
                     break;
                 }
-                case 2: { // Anim Speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x)
+                case 3: { // Anim Speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x)
                     aiCompanion.cycleSpeed();
                     showToast("Speed: " + String(aiCompanion.getSpeedString()), 1800);
                     aiStatusBubble = "Speed: " + String(aiCompanion.getSpeedString());
                     break;
                 }
-                case 3: { // Visual Mode (Hybrid / Live Reactive / Anim Only)
+                case 4: { // Visual Mode (Hybrid / Live Reactive / Anim Only)
                     aiCompanion.cycleVisualMode();
                     showToast("Mode: " + String(aiCompanion.getVisualModeName()), 1800);
                     aiStatusBubble = "Mode: " + String(aiCompanion.getVisualModeName());
                     break;
                 }
-                case 4: { // Song Recommend
+                case 5: { // Song Recommend
                     startMicListeningSession("Recommend a track to play based on current vibe!");
                     break;
                 }
-                case 5: { // Analyze Audio
+                case 6: { // Analyze Audio
                     startMicListeningSession("Analyze current playback acoustics and tune the equalizer preset!");
                     break;
                 }
-                case 6: { // Switch Pet
+                case 7: { // Switch Pet
                     aiCompanion.toggleCompanion();
                     showToast((aiCompanion.getCompanion() == COMPANION_CAT) ? "DJ Neko!" : "Mochi!", 2000);
                     aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Switched to DJ Neko!" : "Switched to Mochi!";
                     break;
                 }
-                case 7: { // Bass Boost / EQ
+                case 8: { // Bass Boost / EQ
                     aiCompanion.setMood(MOOD_BASS_BOOSTED, 6000);
                     geminiClient.executeAction("SET_EQ:BASS_BOOST");
                     showToast("Bass Boost engaged!", 2000);
                     aiStatusBubble = "Bass Boost engaged!";
-                    break;
-                }
-                case 8: { // Dance / Groove
-                    aiCompanion.cycleNextAnim();
-                    showToast("Grooving!", 2000);
-                    aiStatusBubble = "Grooving!";
                     break;
                 }
             }

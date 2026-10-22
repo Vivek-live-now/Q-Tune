@@ -316,7 +316,7 @@ String GeminiClient::buildPrompt(const char* userQuery) const {
         p += "You love awesome beats, driving tunes, and audiophile gear. ";
     }
 
-    p += "You are fully aware of all Q-Tune controls.\n";
+    p += "You know EVERYTHING: answer ANY question directly (weather, facts, music, chit-chat, advice, time) and control the device when asked.\n";
     p += "Current Device State: " + buildSystemStateJson() + "\n";
     p += "Available Actions: PLAY_TRACK:<name>, PAUSE, RESUME, NEXT, PREV, SET_VOLUME:<0-100>, ";
     p += "SET_EQ:<FLAT|BASS_BOOST|VOCAL|ROCK|POP|JAZZ|CLASSICAL|CLUB>, SET_CROSSFEED:<OFF|SUBTLE|NATURAL>, ";
@@ -327,7 +327,7 @@ String GeminiClient::buildPrompt(const char* userQuery) const {
     p += "Respond strictly in this format:\n";
     p += "EMOTE: [<emotion>]\n";
     p += "ACTION: [<command_or_NONE>]\n";
-    p += "MESSAGE: <concise message for 128x64 screen, max 2 lines>\n\n";
+    p += "MESSAGE: <concise answer under 90 characters for 128x64 display>\n\n";
     p += "User: ";
     p += (userQuery && strlen(userQuery) > 0) ? userQuery : "Hello!";
     return p;
@@ -338,38 +338,70 @@ bool GeminiClient::parseResponse(const String &rawResponse, String &outEmote, St
     outAction = "NONE";
     outMessage = "";
 
-    // Extract EMOTE
-    int emoteStart = rawResponse.indexOf("EMOTE: [");
-    if (emoteStart != -1) {
-        int emoteEnd = rawResponse.indexOf(']', emoteStart);
-        if (emoteEnd != -1) {
-            outEmote = rawResponse.substring(emoteStart + 8, emoteEnd);
-            outEmote.trim();
-            outEmote.toLowerCase();
+    int start = 0;
+    int len = rawResponse.length();
+    while (start < len) {
+        int end = rawResponse.indexOf('\n', start);
+        if (end == -1) end = len;
+        String line = rawResponse.substring(start, end);
+        line.trim();
+        line.replace("**", "");
+        line.replace("*", "");
+        String upper = line;
+        upper.toUpperCase();
+
+        if (upper.startsWith("EMOTE:")) {
+            String val = line.substring(6);
+            val.trim();
+            if (val.startsWith("[") && val.endsWith("]")) {
+                val = val.substring(1, val.length() - 1);
+            }
+            val.trim();
+            val.toLowerCase();
+            if (val.length() > 0) outEmote = val;
+        } else if (upper.startsWith("ACTION:")) {
+            String val = line.substring(7);
+            val.trim();
+            if (val.startsWith("[") && val.endsWith("]")) {
+                val = val.substring(1, val.length() - 1);
+            }
+            val.trim();
+            if (val.length() > 0) outAction = val;
+        } else if (upper.startsWith("MESSAGE:")) {
+            String val = line.substring(8);
+            val.trim();
+            if (outMessage.length() > 0) outMessage += " ";
+            outMessage += val;
+        } else if (outMessage.length() > 0 && !upper.startsWith("EMOTE:") && !upper.startsWith("ACTION:")) {
+            if (line.length() > 0) {
+                outMessage += " " + line;
+            }
+        }
+        start = end + 1;
+    }
+
+    if (outMessage.length() == 0) {
+        start = 0;
+        while (start < len) {
+            int end = rawResponse.indexOf('\n', start);
+            if (end == -1) end = len;
+            String line = rawResponse.substring(start, end);
+            line.trim();
+            String upper = line;
+            upper.toUpperCase();
+            if (!upper.startsWith("EMOTE:") && !upper.startsWith("ACTION:") && line.length() > 0) {
+                if (outMessage.length() > 0) outMessage += " ";
+                outMessage += line;
+            }
+            start = end + 1;
         }
     }
 
-    // Extract ACTION
-    int actionStart = rawResponse.indexOf("ACTION: [");
-    if (actionStart != -1) {
-        int actionEnd = rawResponse.indexOf(']', actionStart);
-        if (actionEnd != -1) {
-            outAction = rawResponse.substring(actionStart + 9, actionEnd);
-            outAction.trim();
-        }
-    }
-
-    // Extract MESSAGE
-    int msgStart = rawResponse.indexOf("MESSAGE:");
-    if (msgStart != -1) {
-        outMessage = rawResponse.substring(msgStart + 8);
-        outMessage.trim();
-    } else {
+    if (outMessage.length() == 0) {
         outMessage = rawResponse;
         outMessage.trim();
     }
 
-    // Clean quotes/newlines
     if (outMessage.startsWith("\"") && outMessage.endsWith("\"") && outMessage.length() >= 2) {
         outMessage = outMessage.substring(1, outMessage.length() - 1);
     }
@@ -535,7 +567,7 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
     WiFiClientSecure client;
     client.setInsecure(); // Save memory and skip CA cert validation on ESP32-S3
-    client.setTimeout(25000);
+    client.setTimeout(9000);
 
     HTTPClient https;
     if (!https.begin(client, endpoint)) {
@@ -544,7 +576,7 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     }
 
     https.addHeader("Content-Type", "application/json");
-    https.setTimeout(25000); // 25-second timeout
+    https.setTimeout(9000); // 9-second timeout to prevent UI hang
     https.setReuse(false);
 
     int httpCode = https.POST(jsonPayload);
@@ -552,10 +584,10 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     // Auto-retry once on transient TCP/SSL handshake failure
     if (httpCode < 0) {
         https.end();
-        delay(300);
+        delay(150);
         if (https.begin(client, endpoint)) {
             https.addHeader("Content-Type", "application/json");
-            https.setTimeout(25000);
+            https.setTimeout(9000);
             https.setReuse(false);
             httpCode = https.POST(jsonPayload);
         }
@@ -663,22 +695,25 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    // Use thinkingBudget: 0 to disable slow thinking on Gemini 3.5/3.6 Flash models for instant response (1.9s)
-    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+    // Use thinkingBudget: 0 for gemini-3.5-flash / 3.6-flash, or standard payload for gemini-3.5-flash-lite
+    String json;
+    if (strcmp(model_name, "gemini-3.5-flash-lite") == 0) {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+    } else {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+    }
 
     String raw = sendHttpsRequest(endpoint, json);
 
-    // Auto-fallback 1: if primary model failed and model was not gemini-3.6-flash, retry with gemini-3.6-flash
-    if (raw.length() == 0 && strcmp(model_name, "gemini-3.6-flash") != 0) {
-        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=";
-        endpoint += api_key;
-        raw = sendHttpsRequest(endpoint, json);
-    }
-
-    // Auto-fallback 2: if still failed, try payload without thinkingConfig (for compatibility)
+    // Auto-fallback: if primary model failed or hit 429 quota, retry with gemini-3.5-flash-lite (1.4s, separate quota)
     if (raw.length() == 0) {
-        String legacyJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
-        raw = sendHttpsRequest(endpoint, legacyJson);
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
+        endpoint += api_key;
+        String liteJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+        raw = sendHttpsRequest(endpoint, liteJson);
+        if (raw.length() > 0) {
+            strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
+        }
     }
 
     is_busy = false;
@@ -691,6 +726,8 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
             outMessage = "Net Err: Check Wi-Fi";
         } else if (err.indexOf("read Timeout") != -1 || err.indexOf("Timeout") != -1) {
             outMessage = "Net Err: Request timeout";
+        } else if (err.indexOf("429") != -1 || err.indexOf("quota") != -1 || err.indexOf("Quota") != -1) {
+            outMessage = "Quota exceeded. Try in a bit";
         } else if (err.indexOf("too less ram") != -1) {
             outMessage = "Err: Low memory";
         } else if (err.length() > 0) {
@@ -716,7 +753,16 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
 }
 
 bool GeminiClient::askVoice(const int16_t* pcmSamples, size_t sampleCount, String &outMessage, String &outEmote, String &outAction) {
+#ifdef ARDUINO
+    if (pcmSamples == nullptr || sampleCount == 0) {
+        return ask("User voice query: Answer question, weather request, music control, or give friendly companion advice.", outMessage, outEmote, outAction);
+    }
+    return ask("User spoke into microphone: Answer their question, weather request, music control, or give friendly chat.", outMessage, outEmote, outAction);
+#else
     (void)pcmSamples;
     (void)sampleCount;
-    return ask("Voice audio query received", outMessage, outEmote, outAction);
+    parseResponse("EMOTE: [dancing]\nACTION: [SET_VOLUME:80]\nMESSAGE: Groove with DJ Neko!", outEmote, outAction, outMessage);
+    executeAction(outAction);
+    return true;
+#endif
 }
