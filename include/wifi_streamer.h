@@ -59,6 +59,8 @@ public:
     void startAPMode();
     void reconnect();
     bool loadSDConfig();
+    bool isWiFiEnabled() const { return wifiState != WIFI_STATE_OFF; }
+    void toggleWiFi();
 
 private:
     WiFiStreamState wifiState;

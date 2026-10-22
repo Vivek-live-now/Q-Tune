@@ -16,6 +16,7 @@
 #include "sd_manager.h"
 #include "player_config.h"
 #include "audio_dsp.h"
+#include "ui_player.h"
 #else
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,15 +103,25 @@ bool GeminiClient::loadSDConfig() {
 
     bool fileFound = false;
     File f;
-    if (SD.exists("/gemini.txt")) {
-        f = SD.open("/gemini.txt", FILE_READ);
-        fileFound = true;
-    } else if (SD.exists("/ai_config.txt")) {
-        f = SD.open("/ai_config.txt", FILE_READ);
-        fileFound = true;
-    } else if (SD.exists("/GEMINI.TXT")) {
-        f = SD.open("/GEMINI.TXT", FILE_READ);
-        fileFound = true;
+    const char* configPaths[] = {
+        "/gemini.txt",
+        "/GEMINI.TXT",
+        "/gemini_key.txt",
+        "/gemini_api_key.txt",
+        "/gemini.key",
+        "/gemini.env",
+        "/ai_config.txt",
+        "/AI_CONFIG.TXT"
+    };
+
+    for (size_t i = 0; i < sizeof(configPaths) / sizeof(configPaths[0]); i++) {
+        if (SD.exists(configPaths[i])) {
+            f = SD.open(configPaths[i], FILE_READ);
+            if (f) {
+                fileFound = true;
+                break;
+            }
+        }
     }
 
     if (!fileFound || !f) {
@@ -124,6 +135,13 @@ bool GeminiClient::loadSDConfig() {
     while (f.available()) {
         String line = f.readStringUntil('\n');
         line.trim();
+
+        // Strip UTF-8 BOM if present at start (\xEF\xBB\xBF)
+        if (line.length() >= 3 && (uint8_t)line[0] == 0xEF && (uint8_t)line[1] == 0xBB && (uint8_t)line[2] == 0xBF) {
+            line = line.substring(3);
+            line.trim();
+        }
+
         if (line.startsWith("#") || line.startsWith("//") || line.length() == 0) continue;
 
         int eqIdx = line.indexOf('=');
@@ -138,10 +156,13 @@ bool GeminiClient::loadSDConfig() {
                 (val.startsWith("'") && val.endsWith("'"))) {
                 if (val.length() >= 2) {
                     val = val.substring(1, val.length() - 1);
+                    val.trim();
                 }
             }
 
-            if (key == "gemini_key" || key == "api_key" || key == "gemini_api_key") {
+            if (key == "gemini_key" || key == "api_key" || key == "gemini_api_key" ||
+                key == "key" || key == "gemini" || key == "apikey" || key == "geminiapikey" ||
+                key == "token" || key == "gemini_token") {
                 foundKey = val;
             } else if (key == "model" || key == "gemini_model") {
                 foundModel = val;
@@ -152,6 +173,19 @@ bool GeminiClient::loadSDConfig() {
                 } else if (val.indexOf("MOCHI") != -1) {
                     aiCompanion.setCompanion(COMPANION_MOCHI);
                 }
+            }
+        } else {
+            // Raw pasted line without '=' or ':' (e.g. AIzaSy...)
+            String val = line;
+            if ((val.startsWith("\"") && val.endsWith("\"")) ||
+                (val.startsWith("'") && val.endsWith("'"))) {
+                if (val.length() >= 2) {
+                    val = val.substring(1, val.length() - 1);
+                    val.trim();
+                }
+            }
+            if (val.startsWith("AIza") || (val.length() >= 15 && foundKey.length() == 0)) {
+                foundKey = val;
             }
         }
     }
@@ -183,6 +217,19 @@ String GeminiClient::buildSystemStateJson() const {
     json += "\"led_mode\":\"" + String(ledManager.getShortModeName()) + "\",";
     json += "\"battery\":" + String(battery.getPercentage()) + ",";
     json += "\"companion\":\"" + String(aiCompanion.getCompanion() == COMPANION_CAT ? "DJ_NEKO_CAT" : "MOCHI") + "\"";
+    if (audioPlayer.isPlaying() || audioPlayer.isPaused()) {
+        const char* cur = audioPlayer.getCurrentTrack();
+        if (cur && strlen(cur) > 0) {
+            String cTrack(cur);
+            cTrack.replace("\"", "\\\"");
+            json += ",\"track\":\"" + cTrack + "\"";
+            json += ",\"sample_rate\":" + String(audioPlayer.getSampleRate());
+            json += ",\"format\":\"" + String(audioPlayer.getFormatBadge()) + "\"";
+        }
+    }
+    if (sdManager.isMounted()) {
+        json += ",\"sd_tracks\":" + String(sdManager.getTotalTracks());
+    }
     json += "}";
     return json;
 #else
@@ -193,17 +240,20 @@ String GeminiClient::buildSystemStateJson() const {
 String GeminiClient::buildPrompt(const char* userQuery) const {
     String p = "";
     if (aiCompanion.getCompanion() == COMPANION_CAT) {
-        p += "You are DJ Neko, a cute, music-loving audiophile cat inside Q-Tune (an ESP32-S3 music player). ";
-        p += "You speak with playful cat charm (purrs, meows, cat puns). ";
+        p += "You are DJ Neko, an intelligent, music-loving audiophile cat companion inside Q-Tune (an ESP32-S3 music player). ";
+        p += "You have expert knowledge of acoustics, audio formats, EQ tuning, and music genres. ";
+        p += "You speak with playful cat charm (purrs, meows, cheerful cat puns). ";
     } else {
         p += "You are Mochi, the loyal, energetic Dasai companion inside Q-Tune (an ESP32-S3 music player). ";
+        p += "You love awesome beats, driving tunes, and audiophile gear. ";
     }
 
     p += "You are fully aware of all Q-Tune controls.\n";
     p += "Current Device State: " + buildSystemStateJson() + "\n";
     p += "Available Actions: PLAY_TRACK:<name>, PAUSE, RESUME, NEXT, PREV, SET_VOLUME:<0-100>, ";
-    p += "SET_EQ:<FLAT|BASS_BOOST|VOCAL|ACOUSTIC|CLUB>, SET_CROSSFEED:<OFF|SUBTLE|NATURAL>, ";
-    p += "SWITCH_OUTPUT:<SPEAKER|KA11>, SWITCH_COMPANION:<CAT|MOCHI>, SET_VISUALIZER:<preset>, NONE.\n";
+    p += "SET_EQ:<FLAT|BASS_BOOST|VOCAL|ROCK|POP|JAZZ|CLASSICAL|CLUB>, SET_CROSSFEED:<OFF|SUBTLE|NATURAL>, ";
+    p += "SWITCH_OUTPUT:<SPEAKER|KA11>, SWITCH_COMPANION:<CAT|MOCHI>, SET_VISUALIZER:<preset>, ";
+    p += "SET_LED:<OFF|VOCAL|BASS|DISCO|SPECTRUM|RAINBOW>, PLAY_SOUND:<MEOW|PURR|CHIRP>, NONE.\n";
     p += "Available Emotions (.anim): happy, dancing, love, giggle, wink, angry, surprised, sleepy, relaxed, energetic, furious, sparkle, speed, dizzy, yawn, hello, serene, shy, brave, adore, smirk, sick.\n\n";
     p += "Respond strictly in this format:\n";
     p += "EMOTE: [<emotion>]\n";
@@ -272,6 +322,19 @@ bool GeminiClient::executeAction(const String &action) {
         return true;
     }
 
+    if (action.startsWith("SET_MOOD:")) {
+        String m = action.substring(9);
+        m.toUpperCase();
+        if (m.indexOf("HAPPY") != -1) aiCompanion.setMood(MOOD_HAPPY, 5000);
+        else if (m.indexOf("JAM") != -1) aiCompanion.setMood(MOOD_JAMMING, 8000);
+        else if (m.indexOf("LOVE") != -1) aiCompanion.setMood(MOOD_LOVE, 5000);
+        else if (m.indexOf("SLEEP") != -1) aiCompanion.setMood(MOOD_SLEEPY, 6000);
+        else if (m.indexOf("ANGRY") != -1) aiCompanion.setMood(MOOD_ANGRY, 4000);
+        else if (m.indexOf("THINK") != -1) aiCompanion.setMood(MOOD_THINKING, 6000);
+        else aiCompanion.setMood(MOOD_IDLE);
+        return true;
+    }
+
 #ifdef ARDUINO
 
     if (action.startsWith("SET_VOLUME:")) {
@@ -294,6 +357,33 @@ bool GeminiClient::executeAction(const String &action) {
 
     if (action.equalsIgnoreCase("NEXT")) {
         audioPlayer.stop();
+        uiPlayer.playNextTrack();
+        return true;
+    }
+
+    if (action.equalsIgnoreCase("PREV") || action.equalsIgnoreCase("PREVIOUS")) {
+        audioPlayer.stop();
+        uiPlayer.playPreviousTrack();
+        return true;
+    }
+
+    if (action.startsWith("SET_VISUALIZER:")) {
+        String vis = action.substring(15);
+        vis.toUpperCase();
+        if (vis.indexOf("VINTAGE") != -1 || vis.indexOf("NEEDLE") != -1) spectrumAnalyzer.setPreset(0);
+        else if (vis.indexOf("HORNET") != -1 || vis.indexOf("BAR") != -1) spectrumAnalyzer.setPreset(1);
+        else if (vis.indexOf("TURNTABLE") != -1 || vis.indexOf("VINYL") != -1) spectrumAnalyzer.setPreset(2);
+        else if (vis.indexOf("HYBRID") != -1 || vis.indexOf("SPEC") != -1) spectrumAnalyzer.setPreset(3);
+        else spectrumAnalyzer.cyclePreset();
+        return true;
+    }
+
+    if (action.startsWith("PLAY_SOUND:")) {
+        String s = action.substring(11);
+        s.toUpperCase();
+        if (s.indexOf("MEOW") != -1) aiCompanion.playMeow();
+        else if (s.indexOf("PURR") != -1) aiCompanion.playPurr();
+        else if (s.indexOf("CHIRP") != -1) aiCompanion.playChirp();
         return true;
     }
 
@@ -389,8 +479,21 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
         if (response.length() == 0) response = body;
         setError("OK");
     } else {
-        String err = "HTTP " + String(httpCode);
-        setError(err.c_str());
+        String body = https.getString();
+        int msgIdx = body.indexOf("\"message\": \"");
+        if (msgIdx != -1) {
+            int endIdx = body.indexOf("\"", msgIdx + 12);
+            if (endIdx != -1) {
+                String errMsg = body.substring(msgIdx + 12, endIdx);
+                setError(errMsg.substring(0, 50).c_str());
+            } else {
+                String err = "HTTP " + String(httpCode);
+                setError(err.c_str());
+            }
+        } else {
+            String err = "HTTP " + String(httpCode);
+            setError(err.c_str());
+        }
     }
 
     https.end();
@@ -399,6 +502,9 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 #endif
 
 bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, String &outAction) {
+    if (!hasApiKey()) {
+        loadSDConfig();
+    }
     if (!hasApiKey()) {
         outEmote = "surprised";
         outAction = "NONE";

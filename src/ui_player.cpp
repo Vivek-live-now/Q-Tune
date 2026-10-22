@@ -2,6 +2,7 @@
 #include "led_manager.h"
 #include "battery.h"
 #include "spectrum_analyzer.h"
+#include "wifi_streamer.h"
 
 UIPlayer::UIPlayer() :
     currentTrackIndex(0),
@@ -358,7 +359,7 @@ bool UIPlayer::update() {
 
     } else if (currentView == VIEW_PLAYER_SETTINGS) {
         // --- Customization Settings Menu ---
-        const int SETTINGS_COUNT = 8;
+        const int SETTINGS_COUNT = 9;
         if (evt == BTN_EVENT_UP_PRESS) {
             Display::navigateMenu(settingsSelection, settingsScrollOffset, SETTINGS_COUNT, -1);
             ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
@@ -383,7 +384,11 @@ bool UIPlayer::update() {
                     eqBandSelection = 0;
                     break;
                 }
-                case 7: currentView = VIEW_CATEGORIES; break;
+                case 7: {
+                    wifiStreamer.toggleWiFi();
+                    break;
+                }
+                case 8: currentView = VIEW_CATEGORIES; break;
             }
         } else if (evt == BTN_EVENT_CANCEL_PRESS) {
             currentView = VIEW_CATEGORIES;
@@ -748,7 +753,7 @@ void UIPlayer::renderPlayerSettings() {
     char batBuf[16];
     snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
 
-    const int SETTINGS_COUNT = 8;
+    const int SETTINGS_COUNT = 9;
     const char* labels[SETTINGS_COUNT] = {
         "Layout",
         "Art Src",
@@ -757,6 +762,7 @@ void UIPlayer::renderPlayerSettings() {
         "LRC Font",
         "LRC Size",
         "Equalizer (DSP)",
+        "Wi-Fi",
         "Back"
     };
 
@@ -768,7 +774,8 @@ void UIPlayer::renderPlayerSettings() {
     vals[4] = String("[") + playerConfig.getLyricsFontName() + "]";
     vals[5] = String("[") + playerConfig.getLyricsSizeName() + "]";
     vals[6] = String("[") + playerConfig.getEqPresetName() + "]";
-    vals[7] = "[EXIT]";
+    vals[7] = wifiStreamer.isWiFiEnabled() ? "[ON]" : "[OFF]";
+    vals[8] = "[EXIT]";
 
     display.drawStandardMenu("SETTINGS", labels, SETTINGS_COUNT, settingsSelection, settingsScrollOffset, vals, batBuf);
     display.sendBuffer();

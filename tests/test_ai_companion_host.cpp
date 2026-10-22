@@ -114,6 +114,10 @@ int main() {
     assert(aiCompanion.getCompanion() == COMPANION_MOCHI);
     assert(geminiClient.executeAction("SWITCH_COMPANION:CAT") == true);
     assert(aiCompanion.getCompanion() == COMPANION_CAT);
+    assert(geminiClient.executeAction("SET_MOOD:JAMMING") == true);
+    assert(aiCompanion.getMood() == MOOD_JAMMING);
+    assert(geminiClient.executeAction("SET_MOOD:HAPPY") == true);
+    assert(aiCompanion.getMood() == MOOD_HAPPY);
 
     std::cout << "  [PASS] GeminiClient prompt serialization, response parsing, and action execution verified.\n";
     std::cout << "\nAll AI Companion & AnimEngine Native Tests PASSED!\n";

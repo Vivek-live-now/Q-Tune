@@ -105,6 +105,11 @@ void updateMainMenu() {
                 break;
             case 4:
                 currentMode = MODE_AI_COMPANION;
+                extern unsigned long lastAiButtonTime;
+                lastAiButtonTime = millis();
+                if (!geminiClient.hasApiKey()) {
+                    geminiClient.loadSDConfig();
+                }
                 break;
             case 5:
                 currentMode = MODE_DIAGNOSTICS;
@@ -450,106 +455,170 @@ void updateVisualizerMode() {
 }
 
 int aiActionSelection = 0;
-const int AI_ACTION_COUNT = 5;
+const int AI_ACTION_COUNT = 6;
 const char* aiActionLabels[] = {
-    "Ask Gemini / Vibe",
+    "Ask DJ / Vibe",
+    "Song Recommend",
+    "Analyze Audio",
     "Switch Pet",
-    "Visual Mode",
     "Bass Boost / EQ",
     "Dance With Me!"
 };
 String aiStatusBubble = "Ready to groove!";
+unsigned long lastAiButtonTime = 0;
 
 void updateAICompanionMode() {
     static unsigned long lastAiRender = 0;
     ButtonEvent evt = buttonManager.update();
     unsigned long now = millis();
 
-    if (evt == BTN_EVENT_UP_PRESS) {
-        aiActionSelection = (aiActionSelection == 0) ? (AI_ACTION_COUNT - 1) : (aiActionSelection - 1);
-        ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
-    } else if (evt == BTN_EVENT_DN_PRESS) {
-        aiActionSelection = (aiActionSelection + 1) % AI_ACTION_COUNT;
-        ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
-    } else if (evt == BTN_EVENT_UP_HOLD) {
-        aiCompanion.toggleCompanion();
-        aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Meow! DJ Neko here!" : "Mochi activated!";
-        ledManager.triggerButtonPulse(CRGB::Purple, 2, 80);
-    } else if (evt == BTN_EVENT_SEL_PRESS) {
-        ledManager.triggerButtonPulse(CRGB::Green, 1, 50);
-        switch (aiActionSelection) {
-            case 0: {
-                if (!geminiClient.hasApiKey()) {
-                    aiStatusBubble = "Set key in /gemini.txt";
-                    aiCompanion.playAnim("surprised", 3000);
-                } else if (wifiStreamer.getWiFiState() != WIFI_STATE_CONNECTED) {
-                    aiStatusBubble = "Connect Wi-Fi first!";
-                    aiCompanion.playAnim("crying", 3000);
-                } else {
-                    aiStatusBubble = "Listening / Thinking...";
-                    String outMsg, outEmote, outAct;
-                    bool ok = geminiClient.ask("Give me an audiophile music tip or suggest a track from SD card!", outMsg, outEmote, outAct);
-                    if (ok) {
-                        aiStatusBubble = outMsg;
-                    } else {
-                        aiStatusBubble = outMsg.length() > 0 ? outMsg : "AI request failed";
-                    }
-                }
-                break;
-            }
-            case 1: {
-                aiCompanion.toggleCompanion();
-                aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Switched to DJ Neko!" : "Switched to Mochi!";
-                break;
-            }
-            case 2: {
-                aiCompanion.cycleVisualMode();
-                aiStatusBubble = String("Visual: ") + aiCompanion.getVisualModeName();
-                break;
-            }
-            case 3: {
-                aiCompanion.playAnim("furious", 3000);
-                geminiClient.executeAction("SET_EQ:BASS_BOOST");
-                aiStatusBubble = "Bass Boost engaged!";
-                break;
-            }
-            case 4: {
-                aiCompanion.playAnim("dancing", 5000);
-                aiStatusBubble = "Let's dance to the beat!";
-                break;
-            }
+    // Check 3-second button inactivity for full-screen mode (Mochi & DJ Neko)
+    bool isInactive = (now - lastAiButtonTime >= 3000);
+
+    if (evt != BTN_EVENT_NONE) {
+        bool wasInactive = isInactive;
+        lastAiButtonTime = now;
+
+        // If waking up from full-screen inactivity, the first press brings back the menu
+        if (wasInactive) {
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+            return;
         }
-    } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
-        currentMode = MODE_MAIN_MENU;
+
+        if (evt == BTN_EVENT_UP_PRESS) {
+            aiActionSelection = (aiActionSelection == 0) ? (AI_ACTION_COUNT - 1) : (aiActionSelection - 1);
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+        } else if (evt == BTN_EVENT_DN_PRESS) {
+            aiActionSelection = (aiActionSelection + 1) % AI_ACTION_COUNT;
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+        } else if (evt == BTN_EVENT_UP_HOLD) {
+            aiCompanion.toggleCompanion();
+            aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Meow! DJ Neko here!" : "Mochi activated!";
+            ledManager.triggerButtonPulse(CRGB::Purple, 2, 80);
+        } else if (evt == BTN_EVENT_SEL_PRESS) {
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 50);
+            switch (aiActionSelection) {
+                case 0: { // Ask DJ / Vibe
+                    if (!geminiClient.hasApiKey()) {
+                        geminiClient.loadSDConfig();
+                    }
+                    if (!geminiClient.hasApiKey()) {
+                        aiStatusBubble = "Set key in /gemini.txt";
+                        aiCompanion.playAnim("surprised", 3000);
+                    } else if (wifiStreamer.getWiFiState() != WIFI_STATE_CONNECTED) {
+                        aiStatusBubble = "Connect Wi-Fi first!";
+                        aiCompanion.playAnim("crying", 3000);
+                    } else {
+                        aiStatusBubble = "Listening / Thinking...";
+                        String outMsg, outEmote, outAct;
+                        bool ok = geminiClient.ask("Give me an audiophile music tip or suggest a track from SD card!", outMsg, outEmote, outAct);
+                        if (ok) {
+                            aiStatusBubble = outMsg;
+                        } else {
+                            aiStatusBubble = outMsg.length() > 0 ? outMsg : "AI request failed";
+                        }
+                    }
+                    break;
+                }
+                case 1: { // Song Recommend
+                    if (!geminiClient.hasApiKey()) {
+                        geminiClient.loadSDConfig();
+                    }
+                    if (!geminiClient.hasApiKey()) {
+                        aiStatusBubble = "Set key in /gemini.txt";
+                        aiCompanion.playAnim("surprised", 3000);
+                    } else if (wifiStreamer.getWiFiState() != WIFI_STATE_CONNECTED) {
+                        aiStatusBubble = "Connect Wi-Fi first!";
+                        aiCompanion.playAnim("crying", 3000);
+                    } else {
+                        aiStatusBubble = "Curating tracks...";
+                        String outMsg, outEmote, outAct;
+                        bool ok = geminiClient.ask("Recommend a track to play based on current music vibe and execute PLAY_TRACK or NEXT!", outMsg, outEmote, outAct);
+                        if (ok) {
+                            aiStatusBubble = outMsg;
+                        } else {
+                            aiStatusBubble = outMsg.length() > 0 ? outMsg : "Recommendation failed";
+                        }
+                    }
+                    break;
+                }
+                case 2: { // Analyze Audio
+                    if (!geminiClient.hasApiKey()) {
+                        geminiClient.loadSDConfig();
+                    }
+                    if (!geminiClient.hasApiKey()) {
+                        aiStatusBubble = "Set key in /gemini.txt";
+                        aiCompanion.playAnim("surprised", 3000);
+                    } else if (wifiStreamer.getWiFiState() != WIFI_STATE_CONNECTED) {
+                        aiStatusBubble = "Connect Wi-Fi first!";
+                        aiCompanion.playAnim("crying", 3000);
+                    } else {
+                        aiStatusBubble = "Analyzing acoustics...";
+                        String outMsg, outEmote, outAct;
+                        bool ok = geminiClient.ask("Analyze current playback audio characteristics and tune the equalizer preset (SET_EQ) for maximum audiophile fidelity!", outMsg, outEmote, outAct);
+                        if (ok) {
+                            aiStatusBubble = outMsg;
+                        } else {
+                            aiStatusBubble = outMsg.length() > 0 ? outMsg : "Analysis failed";
+                        }
+                    }
+                    break;
+                }
+                case 3: { // Switch Pet
+                    aiCompanion.toggleCompanion();
+                    aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Switched to DJ Neko!" : "Switched to Mochi!";
+                    break;
+                }
+                case 4: { // Bass Boost / EQ
+                    aiCompanion.playAnim("furious", 3000);
+                    geminiClient.executeAction("SET_EQ:BASS_BOOST");
+                    aiStatusBubble = "Bass Boost engaged!";
+                    break;
+                }
+                case 5: { // Dance With Me!
+                    aiCompanion.playAnim("dancing", 5000);
+                    aiStatusBubble = "Let's dance to the beat!";
+                    break;
+                }
+            }
+        } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+            currentMode = MODE_MAIN_MENU;
+        }
     }
 
     if (now - lastAiRender >= 25) {
         lastAiRender = now;
         display.clear();
 
-        display.drawTopStatusBar(aiCompanion.getCompanionName(), battery.getPercentage());
-        aiCompanion.render(0, 10, 60, 54);
+        if (isInactive) {
+            // Full-screen mode (128x64 centered, zero clutter) after 3s button inactivity
+            aiCompanion.render(0, 0, 128, 64);
+        } else {
+            // Interactive UI mode with menu and status
+            display.drawTopStatusBar(aiCompanion.getCompanionName(), battery.getPercentage());
+            aiCompanion.render(0, 10, 60, 54);
 
-        U8G2 &u8g2 = display.getU8g2();
-        u8g2.setFont(u8g2_font_5x7_tr);
-        u8g2.drawFrame(61, 10, 66, 38);
-        u8g2.setDrawColor(1);
+            U8G2 &u8g2 = display.getU8g2();
+            u8g2.setFont(u8g2_font_5x7_tr);
+            u8g2.drawFrame(61, 10, 66, 38);
+            u8g2.setDrawColor(1);
 
-        for (int i = 0; i < 3; i++) {
-            int idx = (aiActionSelection + i) % AI_ACTION_COUNT;
-            int yPos = 21 + i * 11;
-            if (i == 0) {
-                u8g2.drawBox(63, yPos - 8, 62, 10);
-                u8g2.setDrawColor(0);
-                u8g2.drawStr(64, yPos, aiActionLabels[idx]);
-                u8g2.setDrawColor(1);
-            } else {
-                u8g2.drawStr(64, yPos, aiActionLabels[idx]);
+            for (int i = 0; i < 3; i++) {
+                int idx = (aiActionSelection + i) % AI_ACTION_COUNT;
+                int yPos = 21 + i * 11;
+                if (i == 0) {
+                    u8g2.drawBox(63, yPos - 8, 62, 10);
+                    u8g2.setDrawColor(0);
+                    u8g2.drawStr(64, yPos, aiActionLabels[idx]);
+                    u8g2.setDrawColor(1);
+                } else {
+                    u8g2.drawStr(64, yPos, aiActionLabels[idx]);
+                }
             }
-        }
 
-        u8g2.setFont(u8g2_font_4x6_tr);
-        u8g2.drawStr(2, 62, aiStatusBubble.substring(0, 28).c_str());
+            u8g2.setFont(u8g2_font_4x6_tr);
+            u8g2.drawStr(2, 62, aiStatusBubble.substring(0, 28).c_str());
+        }
 
         display.sendBuffer();
     }

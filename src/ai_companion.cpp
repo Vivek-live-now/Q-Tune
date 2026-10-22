@@ -182,6 +182,7 @@ void AICompanion::stopAnim() {
 void AICompanion::playMeow() {
 #ifdef ARDUINO
     if (!sound_enabled) return;
+    if (audioPlayer.isPlaying()) return; // Avoid audio stutter during music playback
     // Pleasant rising/falling frequency sweep simulating a cute meow
     audioPlayer.playTestTone(880, 70);
     audioPlayer.playTestTone(1250, 90);
@@ -192,10 +193,10 @@ void AICompanion::playMeow() {
 void AICompanion::playPurr() {
 #ifdef ARDUINO
     if (!sound_enabled) return;
+    if (audioPlayer.isPlaying()) return; // Avoid audio stutter during music playback
     // Low frequency gentle rhythmic pulses
     for (int i = 0; i < 3; i++) {
-        audioPlayer.playTestTone(130, 45);
-        delay(30);
+        audioPlayer.playTestTone(130, 40);
     }
 #endif
 }
@@ -203,6 +204,7 @@ void AICompanion::playPurr() {
 void AICompanion::playChirp() {
 #ifdef ARDUINO
     if (!sound_enabled) return;
+    if (audioPlayer.isPlaying()) return; // Avoid audio stutter during music playback
     // Cheerful arpeggio chirp
     audioPlayer.playTestTone(1046, 50); // C6
     audioPlayer.playTestTone(1318, 50); // E6
@@ -336,29 +338,37 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
     u8g2.drawRFrame(cx - 24, hy - 14, 48, 28, 7);
 
     // 3. Studio DJ Headphones
-    // Over-ear Headband
-    u8g2.drawRFrame(cx - 26, hy - 19, 52, 12, 5);
+    // Over-ear Headband Curved Arch (connects top of ear cups over head smoothly)
+    u8g2.drawCircle(cx, hy - 10, 26, U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_UPPER_LEFT);
+    u8g2.drawCircle(cx, hy - 11, 26, U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_UPPER_LEFT);
 
     // Left Cushioned Ear Cup
     u8g2.drawRBox(cx - 28, hy - 10, 5, 20, 2);
     // Right Cushioned Ear Cup
     u8g2.drawRBox(cx + 23, hy - 10, 5, 20, 2);
 
-    // Mini Live Spectrum Equalizer on Left & Right Ear Cups!
+    // Mini Live Spectrum Equalizer on Left & Right Ear Cups
     float bass = spectrumAnalyzer.getBassLevel();
     float rms = spectrumAnalyzer.getRMSLevel();
-    int bHeight1 = (int)(bass * 10.0f);
-    int bHeight2 = (int)(rms * 12.0f);
-    if (bHeight1 > 12) bHeight1 = 12;
-    if (bHeight2 > 12) bHeight2 = 12;
+    int bHeight1 = (int)(bass * 12.0f);
+    int bHeight2 = (int)(rms * 14.0f);
+    if (bHeight1 > 14) bHeight1 = 14;
+    if (bHeight2 > 14) bHeight2 = 14;
 
     u8g2.setDrawColor(0); // Cutout inside ear cups
-    u8g2.drawVLine(cx - 26, hy + 6 - bHeight1, bHeight1);
-    u8g2.drawVLine(cx + 25, hy + 6 - bHeight2, bHeight2);
+    if (bHeight1 > 0) u8g2.drawVLine(cx - 26, hy + 7 - bHeight1, bHeight1);
+    if (bHeight2 > 0) u8g2.drawVLine(cx + 25, hy + 7 - bHeight2, bHeight2);
     u8g2.setDrawColor(1);
 
-    // 4. Kawaii Anime Eyes
+    // 4. Kawaii Anime Eyes with Lively Gaze Tracking
     int16_t ey = hy - 3;
+    int16_t pdx = (int16_t)pupil_dx;
+    int16_t pdy = (int16_t)pupil_dy;
+    if (pdx > 2) pdx = 2;
+    if (pdx < -2) pdx = -2;
+    if (pdy > 1) pdy = 1;
+    if (pdy < -1) pdy = -1;
+
     if (is_blinking) {
         // Closed slit blink
         u8g2.drawHLine(cx - 13, ey + 2, 7);
@@ -370,25 +380,27 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
         u8g2.drawLine(cx + 6, ey + 3, cx + 10, ey - 2);
         u8g2.drawLine(cx + 10, ey - 2, cx + 14, ey + 3);
     } else {
-        // Big round shiny anime eyes with white reflection sparkles
-        u8g2.drawDisc(cx - 10, ey, 4);
-        u8g2.drawDisc(cx + 10, ey, 4);
+        // Big round shiny anime eyes with lively gaze tracking & sparkle
+        u8g2.drawDisc(cx - 10 + pdx, ey + pdy, 4);
+        u8g2.drawDisc(cx + 10 + pdx, ey + pdy, 4);
         u8g2.setDrawColor(0); // White pupil sparkle
-        u8g2.drawPixel(cx - 11, ey - 1);
-        u8g2.drawPixel(cx + 9, ey - 1);
+        u8g2.drawPixel(cx - 11 + pdx, ey - 1 + pdy);
+        u8g2.drawPixel(cx + 9 + pdx, ey - 1 + pdy);
         u8g2.setDrawColor(1);
     }
 
-    // 5. Bass-Reactive Whiskers
+    // 5. Bass-Reactive Cheek Whiskers (neatly nestled under cheeks, clear of headphones)
     int16_t wVibe = (int16_t)whisker_vibe;
+    if (wVibe > 3) wVibe = 3;
+    if (wVibe < -3) wVibe = -3;
     // Left Whiskers
-    u8g2.drawLine(cx - 22, hy - 1, cx - 34, hy - 4 + wVibe);
-    u8g2.drawLine(cx - 23, hy + 2, cx - 36, hy + 2);
-    u8g2.drawLine(cx - 22, hy + 5, cx - 34, hy + 7 - wVibe);
+    u8g2.drawLine(cx - 15, hy + 3, cx - 22, hy + 2 + wVibe);
+    u8g2.drawLine(cx - 16, hy + 6, cx - 23, hy + 6);
+    u8g2.drawLine(cx - 15, hy + 9, cx - 22, hy + 10 - wVibe);
     // Right Whiskers
-    u8g2.drawLine(cx + 22, hy - 1, cx + 34, hy - 4 + wVibe);
-    u8g2.drawLine(cx + 23, hy + 2, cx + 36, hy + 2);
-    u8g2.drawLine(cx + 22, hy + 5, cx + 34, hy + 7 - wVibe);
+    u8g2.drawLine(cx + 15, hy + 3, cx + 22, hy + 2 + wVibe);
+    u8g2.drawLine(cx + 16, hy + 6, cx + 23, hy + 6);
+    u8g2.drawLine(cx + 15, hy + 9, cx + 22, hy + 10 - wVibe);
 
     // 6. Cute :3 Cat Mouth
     u8g2.drawPixel(cx, hy + 3); // tiny nose
@@ -405,10 +417,12 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
         u8g2.drawPixel(cx + 3, hy + 5);
     }
 
-    // 7. Swishing Tail
+    // 7. Swishing Tail (bounds-safe)
     int16_t tSwish = (int16_t)tail_swish;
-    u8g2.drawLine(cx + 18, hy + 14, cx + 24 + tSwish, hy + 20);
-    u8g2.drawCircle(cx + 24 + tSwish, hy + 20, 2);
+    if (tSwish > 5) tSwish = 5;
+    if (tSwish < -5) tSwish = -5;
+    u8g2.drawLine(cx + 18, hy + 12, cx + 22 + tSwish, hy + 18);
+    u8g2.drawCircle(cx + 22 + tSwish, hy + 18, 2);
 #else
     (void)cx; (void)cy;
 #endif
@@ -428,8 +442,12 @@ void AICompanion::renderLiveMochi(int16_t cx, int16_t cy) {
     u8g2.drawHLine(cx - 20, hy - 11, 4);
     u8g2.drawHLine(cx + 16, hy - 11, 4);
 
-    // 3. Iconic Mochi Curved Eyes
+    // 3. Iconic Mochi Curved Eyes with Gaze Tracking
     int16_t ey = hy - 2;
+    int16_t pdx = (int16_t)pupil_dx;
+    if (pdx > 1) pdx = 1;
+    if (pdx < -1) pdx = -1;
+
     if (is_blinking) {
         u8g2.drawHLine(cx - 12, ey + 2, 8);
         u8g2.drawHLine(cx + 4, ey + 2, 8);
@@ -438,12 +456,12 @@ void AICompanion::renderLiveMochi(int16_t cx, int16_t cy) {
         u8g2.drawCircle(cx - 8, ey, 4, U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_UPPER_LEFT);
         u8g2.drawCircle(cx + 8, ey, 4, U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_UPPER_LEFT);
     } else {
-        // Standard friendly eyes
-        u8g2.drawRBox(cx - 12, ey - 3, 7, 6, 2);
-        u8g2.drawRBox(cx + 5, ey - 3, 7, 6, 2);
+        // Standard friendly eyes with gaze tracking
+        u8g2.drawRBox(cx - 12 + pdx, ey - 3, 7, 6, 2);
+        u8g2.drawRBox(cx + 5 + pdx, ey - 3, 7, 6, 2);
         u8g2.setDrawColor(0);
-        u8g2.drawPixel(cx - 10, ey - 2);
-        u8g2.drawPixel(cx + 7, ey - 2);
+        u8g2.drawPixel(cx - 10 + pdx, ey - 2);
+        u8g2.drawPixel(cx + 7 + pdx, ey - 2);
         u8g2.setDrawColor(1);
     }
 
@@ -459,13 +477,25 @@ void AICompanion::renderNekoAccessories(int16_t cx, int16_t cy) {
     U8G2 &u8g2 = display.getU8g2();
     u8g2.setDrawColor(1);
 
-    // Cat ears atop .anim frame
-    u8g2.drawTriangle(cx - 28, cy - 24, cx - 20, cy - 31, cx - 12, cy - 24);
-    u8g2.drawTriangle(cx + 12, cy - 24, cx + 20, cy - 31, cx + 28, cy - 24);
+    if (cx >= 50) {
+        // Full screen 128x64 mode (cx ~ 64, cy ~ 32)
+        // Cat ears atop .anim frame
+        u8g2.drawTriangle(cx - 28, cy - 24, cx - 20, cy - 31, cx - 12, cy - 24);
+        u8g2.drawTriangle(cx + 12, cy - 24, cx + 20, cy - 31, cx + 28, cy - 24);
 
-    // Headphone side cups
-    u8g2.drawRBox(cx - 40, cy - 10, 4, 18, 2);
-    u8g2.drawRBox(cx + 36, cy - 10, 4, 18, 2);
+        // Headphone side cups
+        u8g2.drawRBox(cx - 40, cy - 10, 4, 18, 2);
+        u8g2.drawRBox(cx + 36, cy - 10, 4, 18, 2);
+    } else {
+        // Split-screen companion preview mode (cx ~ 30, cy ~ 37)
+        // Scaled accessories fitting within 60px preview
+        u8g2.drawTriangle(cx - 18, cy - 22, cx - 13, cy - 28, cx - 8, cy - 22);
+        u8g2.drawTriangle(cx + 8, cy - 22, cx + 13, cy - 28, cx + 18, cy - 22);
+
+        // Compact headphone side cups within bounds
+        u8g2.drawRBox(cx - 27, cy - 9, 3, 16, 1);
+        u8g2.drawRBox(cx + 24, cy - 9, 3, 16, 1);
+    }
 #else
     (void)cx; (void)cy;
 #endif

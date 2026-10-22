@@ -500,6 +500,14 @@ void WiFiStreamer::stop() {
     wifiState = WIFI_STATE_OFF;
 }
 
+void WiFiStreamer::toggleWiFi() {
+    if (wifiState != WIFI_STATE_OFF) {
+        stop();
+    } else {
+        start();
+    }
+}
+
 void WiFiStreamer::startAPMode() {
     wifiState = WIFI_STATE_AP_MODE;
     WiFi.mode(WIFI_AP);
