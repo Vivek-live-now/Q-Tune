@@ -218,17 +218,16 @@ String GeminiClient::buildSystemStateJson() const {
     json += "\"battery\":" + String(battery.getPercentage()) + ",";
     json += "\"companion\":\"" + String(aiCompanion.getCompanion() == COMPANION_CAT ? "DJ_NEKO_CAT" : "MOCHI") + "\"";
     if (audioPlayer.isPlaying() || audioPlayer.isPaused()) {
-        const char* cur = audioPlayer.getCurrentTrack();
-        if (cur && strlen(cur) > 0) {
-            String cTrack(cur);
-            cTrack.replace("\"", "\\\"");
-            json += ",\"track\":\"" + cTrack + "\"";
+        String cur = audioPlayer.getCurrentTrackPath();
+        if (cur.length() > 0) {
+            cur.replace("\"", "\\\"");
+            json += ",\"track\":\"" + cur + "\"";
             json += ",\"sample_rate\":" + String(audioPlayer.getSampleRate());
-            json += ",\"format\":\"" + String(audioPlayer.getFormatBadge()) + "\"";
+            json += ",\"format\":\"" + String(audioPlayer.getFormatName()) + "\"";
         }
     }
     if (sdManager.isMounted()) {
-        json += ",\"sd_tracks\":" + String(sdManager.getTotalTracks());
+        json += ",\"sd_mb\":" + String(sdManager.getCardCapacityMB());
     }
     json += "}";
     return json;
