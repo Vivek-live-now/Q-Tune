@@ -1610,7 +1610,7 @@ String WiFiStreamer::getMACAddress() const {
 }
 
 uint8_t WiFiStreamer::getChannel() const {
-    return (wifiState == WIFI_STATE_CONNECTED) ? WiFi.channel() : 1;
+    return (wifiState == WIFI_STATE_CONNECTED) ? (uint8_t)WiFi.channel() : 1;
 }
 
 int8_t WiFiStreamer::getSignalQualityPercent() const {

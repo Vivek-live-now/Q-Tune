@@ -46,6 +46,11 @@ const char* menuLabels[] = {
     "System Info"
 };
 
+int settingsMenuSelection = 0;
+int settingsMenuScrollOffset = 0;
+bool inWifiStatsView = false;
+uint8_t wifiStatsPage = 0;
+
 void renderMainMenu() {
     display.clear();
     char batBuf[16];
@@ -115,9 +120,6 @@ void updateMainMenu() {
                 }
                 break;
             case 5:
-                extern int settingsMenuSelection;
-                extern int settingsMenuScrollOffset;
-                extern bool inWifiStatsView;
                 currentMode = MODE_SETTINGS;
                 settingsMenuSelection = 0;
                 settingsMenuScrollOffset = 0;
@@ -674,11 +676,6 @@ void updateAICompanionMode() {
 // ==============================================================================
 // Outside Settings Menu & Wi-Fi Stats Mode
 // ==============================================================================
-int settingsMenuSelection = 0;
-int settingsMenuScrollOffset = 0;
-bool inWifiStatsView = false;
-uint8_t wifiStatsPage = 0;
-
 const int SETTINGS_MENU_COUNT = 7;
 const char* settingsMenuLabels[] = {
     "Wi-Fi Power",
@@ -878,7 +875,7 @@ void updateSettingsMode() {
                 break;
             case 3: { // Audio Output
                 AudioOutputMode cur = audioPlayer.getOutputMode();
-                audioPlayer.setOutputMode(cur == OUTPUT_SPEAKER ? OUTPUT_KA11_DAC : OUTPUT_SPEAKER);
+                audioPlayer.setOutputMode(cur == OUTPUT_MODE_SPEAKER_I2S ? OUTPUT_MODE_FIIO_USB_DAC : OUTPUT_MODE_SPEAKER_I2S);
                 break;
             }
             case 4: // RGB Backlight
