@@ -585,9 +585,9 @@ void Diagnostics::testAIGeminiCheck() {
     U8G2 &u8g2 = display.getU8g2();
 
     bool wasPlaying = audioPlayer.isPlaying();
-    if (wasPlaying) {
-        audioPlayer.pause();
-    }
+    String savedTrack = audioPlayer.getCurrentTrackPath();
+    audioPlayer.stopAudioTask();
+    audioPlayer.stop();
 
     spectrumAnalyzer.start();
 
@@ -734,7 +734,8 @@ void Diagnostics::testAIGeminiCheck() {
     }
 
     spectrumAnalyzer.stop();
-    if (wasPlaying && !audioPlayer.isPlaying()) {
-        audioPlayer.resume();
+    audioPlayer.begin();
+    if (wasPlaying && savedTrack.length() > 0) {
+        audioPlayer.playFile(savedTrack);
     }
 }

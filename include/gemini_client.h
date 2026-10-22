@@ -146,7 +146,7 @@ private:
     char last_transcription[96];
     bool is_busy;
 
-    // Async state machine & worker fields
+    // Async state machine & worker fields (Layer 3: Zero-Churn Persistent Worker)
     volatile bool is_async_running;
     volatile bool is_async_done;
     volatile bool is_async_success;
@@ -159,6 +159,7 @@ private:
 #ifdef ARDUINO
     TaskHandle_t async_task_handle;
     static void asyncWorkerTask(void* param);
+    bool initWorkerTask();
 #endif
     void runAsyncWorker();
 

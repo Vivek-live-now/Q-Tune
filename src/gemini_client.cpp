@@ -121,9 +121,46 @@ bool GeminiClient::begin() {
     }
 
     loadSDConfig();
+    initWorkerTask();
 #endif
     return true;
 }
+
+#ifdef ARDUINO
+// Layer 3 Persistent Static Worker: 2560 words (10,240 bytes) allocated statically in BSS.
+// Eliminates dynamic FreeRTOS task churn and heap fragmentation failures on ESP32-S3.
+#define GEMINI_WORKER_STACK_WORDS 2560
+static StackType_t s_geminiWorkerStack[GEMINI_WORKER_STACK_WORDS];
+static StaticTask_t s_geminiWorkerTCB;
+
+bool GeminiClient::initWorkerTask() {
+    if (async_task_handle == NULL) {
+        async_task_handle = xTaskCreateStaticPinnedToCore(
+            asyncWorkerTask,
+            "gemini_worker",
+            GEMINI_WORKER_STACK_WORDS,
+            this,
+            1, // Priority 1 background worker
+            s_geminiWorkerStack,
+            &s_geminiWorkerTCB,
+            0 // Pin to Core 0 alongside network stack
+        );
+        if (async_task_handle == NULL) {
+            // Dynamic allocation fallback if static ever fails
+            xTaskCreatePinnedToCore(
+                asyncWorkerTask,
+                "gemini_worker",
+                GEMINI_WORKER_STACK_WORDS * sizeof(StackType_t),
+                this,
+                1,
+                &async_task_handle,
+                0
+            );
+        }
+    }
+    return (async_task_handle != NULL);
+}
+#endif
 
 bool GeminiClient::hasApiKey() const {
     return (strlen(api_key) > 5);
@@ -571,6 +608,68 @@ bool GeminiClient::executeAction(const String &action) {
 }
 
 #ifdef ARDUINO
+static String parseGeminiResponseCandidate(const String &body) {
+    String response = "";
+    int textKeyIdx = body.indexOf("\"text\"");
+    if (textKeyIdx != -1) {
+        int colonIdx = body.indexOf(':', textKeyIdx + 6);
+        if (colonIdx != -1) {
+            int quoteStart = body.indexOf('"', colonIdx);
+            if (quoteStart != -1) {
+                int p = quoteStart + 1;
+                while (p < (int)body.length()) {
+                    if (body.charAt(p) == '\\') {
+                        p += 2; // skip escaped sequence
+                    } else if (body.charAt(p) == '"') {
+                        break;
+                    } else {
+                        p++;
+                    }
+                }
+                if (p < (int)body.length()) {
+                    response = body.substring(quoteStart + 1, p);
+                    response.replace("\\n", "\n");
+                    response.replace("\\\"", "\"");
+                    response.replace("\\\\", "\\");
+                }
+            }
+        }
+    }
+    if (response.length() == 0) response = body;
+    return response;
+}
+
+static void handleHttpsError(int httpCode, HTTPClient &https, GeminiClient* client) {
+    if (httpCode < 0) {
+        String errStr = HTTPClient::errorToString(httpCode);
+        client->setError(errStr.c_str());
+        return;
+    }
+    String body = https.getString();
+    if (httpCode == 429 || body.indexOf("quota") != -1 || body.indexOf("Quota") != -1) {
+        client->setError("QUOTA EXCEEDED (429)");
+        return;
+    }
+    int msgIdx = body.indexOf("\"message\":");
+    if (msgIdx != -1) {
+        int colonIdx = body.indexOf(':', msgIdx);
+        int quoteStart = body.indexOf('"', colonIdx);
+        if (quoteStart != -1) {
+            int endIdx = body.indexOf('"', quoteStart + 1);
+            while (endIdx != -1 && body.charAt(endIdx - 1) == '\\') {
+                endIdx = body.indexOf('"', endIdx + 1);
+            }
+            if (endIdx != -1) {
+                String errMsg = body.substring(quoteStart + 1, endIdx);
+                client->setError(errMsg.substring(0, 50).c_str());
+                return;
+            }
+        }
+    }
+    String err = "HTTP " + String(httpCode);
+    client->setError(err.c_str());
+}
+
 String GeminiClient::sendHttpsRequest(const String &endpoint, const String &jsonPayload) {
     if (WiFi.status() != WL_CONNECTED) {
         setError("WIFI DISCONNECTED");
@@ -579,11 +678,13 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
     WiFiClientSecure client;
     client.setInsecure(); // Save memory and skip CA cert validation on ESP32-S3
+    client.setBufferSizes(2048, 1024); // Constrain mbedTLS buffers (cuts heap use from ~35KB to ~9KB)
     client.setTimeout(18000); // 18-second timeout for cloud reasoning responses
 
     HTTPClient https;
     if (!https.begin(client, endpoint)) {
         setError("HTTPS INIT FAILED");
+        client.stop();
         return "";
     }
 
@@ -592,104 +693,44 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     https.setReuse(false);
 
     int httpCode = https.POST(jsonPayload);
+    String response = "";
 
     // Auto-retry once on transient TCP/SSL handshake failure using a clean TLS client
     if (httpCode < 0) {
         https.end();
         client.stop();
         vTaskDelay(pdMS_TO_TICKS(200));
+
         WiFiClientSecure retryClient;
         retryClient.setInsecure();
+        retryClient.setBufferSizes(2048, 1024);
         retryClient.setTimeout(18000);
+
         if (https.begin(retryClient, endpoint)) {
             https.addHeader("Content-Type", "application/json");
             https.setTimeout(18000);
             https.setReuse(false);
             httpCode = https.POST(jsonPayload);
+            if (httpCode == HTTP_CODE_OK) {
+                String body = https.getString();
+                response = parseGeminiResponseCandidate(body);
+                setError("OK");
+            } else {
+                handleHttpsError(httpCode, https, this);
+            }
         }
         https.end();
         retryClient.stop();
     } else {
-        https.end();
-    }
-
-    String response = "";
-
-    if (httpCode == HTTP_CODE_OK) {
-        String body = https.getString();
-        // Parse Gemini JSON response candidate text with whitespace-resilient scanning
-        int textKeyIdx = body.indexOf("\"text\"");
-        if (textKeyIdx != -1) {
-            int colonIdx = body.indexOf(':', textKeyIdx + 6);
-            if (colonIdx != -1) {
-                int quoteStart = body.indexOf('"', colonIdx);
-                if (quoteStart != -1) {
-                    int p = quoteStart + 1;
-                    while (p < (int)body.length()) {
-                        if (body.charAt(p) == '\\') {
-                            p += 2; // skip escaped sequence
-                        } else if (body.charAt(p) == '"') {
-                            break;
-                        } else {
-                            p++;
-                        }
-                    }
-                    if (p < (int)body.length()) {
-                        response = body.substring(quoteStart + 1, p);
-                        response.replace("\\n", "\n");
-                        response.replace("\\\"", "\"");
-                        response.replace("\\\\", "\\");
-                    }
-                }
-            }
-        }
-        if (response.length() == 0) response = body;
-        setError("OK");
-    } else {
-        if (httpCode < 0) {
-            String errStr = HTTPClient::errorToString(httpCode);
-            setError(errStr.c_str());
-        } else {
+        if (httpCode == HTTP_CODE_OK) {
             String body = https.getString();
-            int msgIdx = body.indexOf("\"message\":");
-            if (msgIdx != -1) {
-                int colonIdx = body.indexOf(':', msgIdx);
-                int quoteStart = body.indexOf('"', colonIdx);
-                if (quoteStart != -1) {
-                    int endIdx = body.indexOf('"', quoteStart + 1);
-                    while (endIdx != -1 && body.charAt(endIdx - 1) == '\\') {
-                        endIdx = body.indexOf('"', endIdx + 1);
-                    }
-                    if (endIdx != -1) {
-                        String errMsg = body.substring(quoteStart + 1, endIdx);
-                        if (errMsg.indexOf("quota") != -1 || errMsg.indexOf("Quota") != -1 || httpCode == 429) {
-                            setError("QUOTA EXCEEDED (429)");
-                        } else {
-                            setError(errMsg.substring(0, 50).c_str());
-                        }
-                    } else {
-                        if (httpCode == 429) setError("QUOTA EXCEEDED (429)");
-                        else {
-                            String err = "HTTP " + String(httpCode);
-                            setError(err.c_str());
-                        }
-                    }
-                } else {
-                    if (httpCode == 429) setError("QUOTA EXCEEDED (429)");
-                    else {
-                        String err = "HTTP " + String(httpCode);
-                        setError(err.c_str());
-                    }
-                }
-            } else {
-                if (httpCode == 429) {
-                    setError("QUOTA EXCEEDED (429)");
-                } else {
-                    String err = "HTTP " + String(httpCode);
-                    setError(err.c_str());
-                }
-            }
+            response = parseGeminiResponseCandidate(body);
+            setError("OK");
+        } else {
+            handleHttpsError(httpCode, https, this);
         }
+        https.end();
+        client.stop();
     }
 
     return response;
@@ -848,17 +889,7 @@ bool GeminiClient::askAsync(const char* query) {
     is_async_cancelled = false;
     is_busy = true;
 
-    BaseType_t res = xTaskCreatePinnedToCore(
-        asyncWorkerTask,
-        "gemini_async",
-        10240,
-        this,
-        1,
-        &async_task_handle,
-        0
-    );
-
-    if (res != pdPASS) {
+    if (!initWorkerTask()) {
         is_async_running = false;
         is_busy = false;
         setError("TASK CREATE FAILED");
@@ -871,6 +902,8 @@ bool GeminiClient::askAsync(const char* query) {
         return false;
     }
 
+    // Wake up persistent static worker via direct FreeRTOS task notification (zero allocation)
+    xTaskNotifyGive(async_task_handle);
     return true;
 #else
     // Host / simulated test execution
@@ -892,10 +925,13 @@ bool GeminiClient::askAsync(const char* query) {
 #ifdef ARDUINO
 void GeminiClient::asyncWorkerTask(void* param) {
     GeminiClient* client = (GeminiClient*)param;
-    if (client) {
-        client->runAsyncWorker();
+    while (true) {
+        // Sleep until notified by askAsync() (zero-churn FreeRTOS direct-to-task notification)
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (client && client->is_async_running) {
+            client->runAsyncWorker();
+        }
     }
-    vTaskDelete(NULL);
 }
 #endif
 
@@ -904,7 +940,6 @@ void GeminiClient::runAsyncWorker() {
     if (is_async_cancelled) {
         is_async_running = false;
         is_busy = false;
-        async_task_handle = NULL;
         return;
     }
 
@@ -941,7 +976,6 @@ void GeminiClient::runAsyncWorker() {
     if (is_async_cancelled) {
         is_async_running = false;
         is_busy = false;
-        async_task_handle = NULL;
         return;
     }
 
@@ -981,7 +1015,6 @@ void GeminiClient::runAsyncWorker() {
     is_async_running = false;
     is_busy = false;
     is_async_done = true;
-    async_task_handle = NULL;
 #endif
 }
 
