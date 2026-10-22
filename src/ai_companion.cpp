@@ -24,6 +24,16 @@ static inline uint32_t millis() {
 
 AICompanion aiCompanion;
 
+const char* const AICompanion::ANIM_CATALOG[AICompanion::ANIM_CATALOG_COUNT] = {
+    "adore", "angry", "blank", "blinding", "brave", "buzzing", "contempt", "crying", "dancing", "devil",
+    "distracted", "dizzy", "down", "drowsy", "encouragement", "energetic", "enraged", "evil", "fast", "fierce",
+    "furious", "giggle", "glowing", "growing", "gundam", "handsome", "happy", "hello", "intro", "irritated",
+    "laughing", "left", "love", "menacing", "mistake", "playful", "police", "rain", "relaxed", "right",
+    "rush", "scared", "serene", "shrink", "shy", "sick", "sleepy", "smile", "smirk", "smoke",
+    "sneeze", "sobbing", "sparkle", "speed", "splash", "spraying", "squint", "surprised", "sushi", "swinging",
+    "teasing", "tough", "weeping", "wink", "yawn"
+};
+
 AICompanion::AICompanion() :
     current_type(COMPANION_CAT),
     visual_mode(VISUAL_HYBRID),
@@ -43,9 +53,15 @@ AICompanion::AICompanion() :
     blink_timer(0.0f),
     blink_phase(0.0f),
     pupil_dx(0.0f),
-    pupil_dy(0.0f)
+    pupil_dy(0.0f),
+    current_anim_index(0),
+    autonomous_enabled(true),
+    autonomous_timer(0.0f),
+    next_autonomous_interval(12.0f),
+    face_toast_end_time(0)
 {
     memset(current_anim_name, 0, sizeof(current_anim_name));
+    memset(last_face_name, 0, sizeof(last_face_name));
 }
 
 bool AICompanion::begin() {
@@ -144,8 +160,78 @@ const char* AICompanion::getMoodName() const {
         case MOOD_SURPRISED: return "SURPRISED";
         case MOOD_ANGRY: return "ANGRY";
         case MOOD_THINKING: return "THINKING";
+        case MOOD_WINK: return "WINK";
+        case MOOD_DIZZY: return "DIZZY";
+        case MOOD_SMIRK: return "SMIRK";
+        case MOOD_SAD: return "SAD";
+        case MOOD_ENERGETIC: return "ENERGETIC";
         default: return "NORMAL";
     }
+}
+
+void AICompanion::cycleNextAnim() {
+    current_anim_index = (current_anim_index + 1) % ANIM_CATALOG_COUNT;
+    const char* animName = ANIM_CATALOG[current_anim_index];
+    playAnim(animName, 8000);
+    strncpy(last_face_name, animName, sizeof(last_face_name) - 1);
+    last_face_name[sizeof(last_face_name) - 1] = '\0';
+    face_toast_end_time = millis() + 2000;
+}
+
+void AICompanion::cyclePrevAnim() {
+    current_anim_index = (current_anim_index == 0) ? (ANIM_CATALOG_COUNT - 1) : (current_anim_index - 1);
+    const char* animName = ANIM_CATALOG[current_anim_index];
+    playAnim(animName, 8000);
+    strncpy(last_face_name, animName, sizeof(last_face_name) - 1);
+    last_face_name[sizeof(last_face_name) - 1] = '\0';
+    face_toast_end_time = millis() + 2000;
+}
+
+void AICompanion::cycleNextFace() {
+    static int global_face_idx = 0;
+    global_face_idx = (global_face_idx + 1) % (MOOD_COUNT + ANIM_CATALOG_COUNT);
+    if (global_face_idx < MOOD_COUNT) {
+        stopAnim();
+        setMood((CompanionMood)global_face_idx, 8000);
+        strncpy(last_face_name, getMoodName(), sizeof(last_face_name) - 1);
+    } else {
+        size_t a_idx = global_face_idx - MOOD_COUNT;
+        current_anim_index = a_idx;
+        const char* animName = ANIM_CATALOG[a_idx];
+        playAnim(animName, 8000);
+        strncpy(last_face_name, animName, sizeof(last_face_name) - 1);
+    }
+    last_face_name[sizeof(last_face_name) - 1] = '\0';
+    face_toast_end_time = millis() + 2000;
+}
+
+void AICompanion::cyclePrevFace() {
+    static int global_face_idx = 0;
+    global_face_idx = (global_face_idx == 0) ? (MOOD_COUNT + ANIM_CATALOG_COUNT - 1) : (global_face_idx - 1);
+    if (global_face_idx < MOOD_COUNT) {
+        stopAnim();
+        setMood((CompanionMood)global_face_idx, 8000);
+        strncpy(last_face_name, getMoodName(), sizeof(last_face_name) - 1);
+    } else {
+        size_t a_idx = global_face_idx - MOOD_COUNT;
+        current_anim_index = a_idx;
+        const char* animName = ANIM_CATALOG[a_idx];
+        playAnim(animName, 8000);
+        strncpy(last_face_name, animName, sizeof(last_face_name) - 1);
+    }
+    last_face_name[sizeof(last_face_name) - 1] = '\0';
+    face_toast_end_time = millis() + 2000;
+}
+
+const char* AICompanion::getCurrentFaceDisplayName() const {
+    if (isPlayingAnim() && strlen(current_anim_name) > 0) {
+        return current_anim_name;
+    }
+    return getMoodName();
+}
+
+bool AICompanion::isToastActive() const {
+    return (face_toast_end_time > 0 && millis() < face_toast_end_time);
 }
 
 bool AICompanion::playAnim(const char* name, uint32_t duration_ms) {
@@ -284,6 +370,77 @@ void AICompanion::update(float dt) {
         current_mood = MOOD_IDLE;
         if (visual_mode == VISUAL_HYBRID && isPlayingAnim()) {
             stopAnim();
+        } else if (visual_mode == VISUAL_ANIM_ONLY) {
+            cycleNextAnim();
+        }
+    }
+
+    // In VISUAL_ANIM_ONLY mode, ensure continuous playback through all 65 anims
+    if (visual_mode == VISUAL_ANIM_ONLY && !isPlayingAnim()) {
+        cycleNextAnim();
+    }
+
+    // Autonomous organic emotion & anim rotation (living companion)
+    if (autonomous_enabled) {
+        autonomous_timer += dt;
+        if (autonomous_timer >= next_autonomous_interval) {
+            autonomous_timer = 0.0f;
+            next_autonomous_interval = 11.0f + (float)(rand() % 8); // 11-18 seconds
+
+            if (visual_mode == VISUAL_ANIM_ONLY) {
+                cycleNextAnim();
+            } else if (visual_mode == VISUAL_HYBRID && !isPlayingAnim()) {
+#ifdef ARDUINO
+                bool isPlaying = audioPlayer.isPlaying();
+                float bass = spectrumAnalyzer.getBassLevel();
+#else
+                bool isPlaying = false;
+                float bass = 0.0f;
+#endif
+                int choice = rand() % 100;
+                if (isPlaying) {
+                    if (bass > 0.35f || choice < 45) {
+                        // High energy beat dropped!
+                        const char* energeticAnims[] = {
+                            "dancing", "energetic", "sparkle", "fast", "speed",
+                            "buzzing", "furious", "gundam", "glowing", "rush", "swinging"
+                        };
+                        int n = sizeof(energeticAnims) / sizeof(energeticAnims[0]);
+                        if (choice % 3 == 0) {
+                            setMood(MOOD_BASS_BOOSTED, 5000);
+                        } else if (choice % 3 == 1) {
+                            setMood(MOOD_JAMMING, 5000);
+                        } else {
+                            playAnim(energeticAnims[rand() % n], 4500);
+                        }
+                    } else {
+                        // Chill melodic groove
+                        const char* chillAnims[] = {
+                            "relaxed", "serene", "happy", "smile", "giggle", "wink", "adore", "love", "handsome"
+                        };
+                        int n = sizeof(chillAnims) / sizeof(chillAnims[0]);
+                        if (choice % 2 == 0) {
+                            setMood((choice % 4 == 0) ? MOOD_LOVE : MOOD_HAPPY, 5000);
+                        } else {
+                            playAnim(chillAnims[rand() % n], 4500);
+                        }
+                    }
+                } else {
+                    // Resting idle companion
+                    const char* idleAnims[] = {
+                        "yawn", "sleepy", "drowsy", "distracted", "left", "right",
+                        "hello", "shy", "smirk", "sneeze", "teasing", "shrink", "growing"
+                    };
+                    int n = sizeof(idleAnims) / sizeof(idleAnims[0]);
+                    int rMood = choice % 6;
+                    if (rMood == 0) setMood(MOOD_SLEEPY, 6000);
+                    else if (rMood == 1) setMood(MOOD_THINKING, 5000);
+                    else if (rMood == 2) setMood(MOOD_WINK, 4000);
+                    else if (rMood == 3) setMood(MOOD_SMIRK, 4000);
+                    else if (rMood == 4) setMood(MOOD_HAPPY, 4000);
+                    else playAnim(idleAnims[rand() % n], 4000);
+                }
+            }
         }
     }
 
@@ -300,6 +457,10 @@ void AICompanion::render(int16_t x, int16_t y, int16_t w, int16_t h) {
     bool showAnim = false;
     if (visual_mode == VISUAL_ANIM_ONLY) {
         showAnim = isPlayingAnim();
+        if (!showAnim) {
+            cycleNextAnim();
+            showAnim = isPlayingAnim();
+        }
     } else if (visual_mode == VISUAL_HYBRID) {
         showAnim = isPlayingAnim();
     }
@@ -316,6 +477,27 @@ void AICompanion::render(int16_t x, int16_t y, int16_t w, int16_t h) {
             renderLiveMochi(cx, cy);
         }
     }
+
+#ifdef ARDUINO
+    // Toast badge overlay if active (e.g. during button cycling in full screen mode)
+    if (isToastActive()) {
+        U8G2 &u8g2 = display.getU8g2();
+        u8g2.setFont(u8g2_font_4x6_tr);
+        const char* tName = getToastName();
+        int strW = u8g2.getStrWidth(tName);
+        int boxW = strW + 8;
+        int boxX = cx - (boxW / 2);
+        int boxY = y + h - 9;
+        if (boxX < 0) boxX = 0;
+        if (boxX + boxW > 127) boxX = 127 - boxW;
+        if (boxY > 55) boxY = 55;
+        u8g2.setDrawColor(0);
+        u8g2.drawRBox(boxX - 1, boxY - 1, boxW + 2, 9, 2);
+        u8g2.setDrawColor(1);
+        u8g2.drawRFrame(boxX, boxY, boxW, 8, 2);
+        u8g2.drawStr(boxX + 4, boxY + 6, tName);
+    }
+#endif
 }
 
 void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
@@ -325,14 +507,27 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
 
     int16_t hy = cy + (int16_t)head_bob_y;
 
-    // 1. Pointed Cat Ears with Inner Notch Detail
+    // 1. Pointed Cat Ears with Mood-Specific Ear Physics
     int16_t eTwitch = (int16_t)ear_twitch;
-    // Left Ear
-    u8g2.drawTriangle(cx - 20, hy - 14, cx - 14 + eTwitch, hy - 26, cx - 6, hy - 14);
-    u8g2.drawTriangle(cx - 18, hy - 14, cx - 14 + eTwitch, hy - 22, cx - 9, hy - 14); // inner
-    // Right Ear
-    u8g2.drawTriangle(cx + 6, hy - 14, cx + 14 - eTwitch, hy - 26, cx + 20, hy - 14);
-    u8g2.drawTriangle(cx + 9, hy - 14, cx + 14 - eTwitch, hy - 22, cx + 18, hy - 14); // inner
+    int16_t earH = 26;
+    if (current_mood == MOOD_SLEEPY) {
+        earH = 20; // Drooping relaxed ears
+    } else if (current_mood == MOOD_SURPRISED) {
+        earH = 28; // Alert perked ears
+    }
+
+    if (current_mood == MOOD_ANGRY) {
+        // Flattened airplane ears
+        u8g2.drawTriangle(cx - 24, hy - 10, cx - 18, hy - 18, cx - 10, hy - 14);
+        u8g2.drawTriangle(cx + 10, hy - 14, cx + 18, hy - 18, cx + 24, hy - 10);
+    } else {
+        // Left Ear
+        u8g2.drawTriangle(cx - 20, hy - 14, cx - 14 + eTwitch, hy - earH, cx - 6, hy - 14);
+        u8g2.drawTriangle(cx - 18, hy - 14, cx - 14 + eTwitch, hy - (earH - 4), cx - 9, hy - 14); // inner
+        // Right Ear
+        u8g2.drawTriangle(cx + 6, hy - 14, cx + 14 - eTwitch, hy - earH, cx + 20, hy - 14);
+        u8g2.drawTriangle(cx + 9, hy - 14, cx + 14 - eTwitch, hy - (earH - 4), cx + 18, hy - 14); // inner
+    }
 
     // 2. Soft Rounded Cat Face
     u8g2.drawRFrame(cx - 24, hy - 14, 48, 28, 7);
@@ -360,7 +555,7 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
     if (bHeight2 > 0) u8g2.drawVLine(cx + 25, hy + 7 - bHeight2, bHeight2);
     u8g2.setDrawColor(1);
 
-    // 4. Kawaii Anime Eyes with Lively Gaze Tracking
+    // 4. Kawaii Anime Eyes with Rich Facial Mood Expressions
     int16_t ey = hy - 3;
     int16_t pdx = (int16_t)pupil_dx;
     int16_t pdy = (int16_t)pupil_dy;
@@ -373,19 +568,138 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
         // Closed slit blink
         u8g2.drawHLine(cx - 13, ey + 2, 7);
         u8g2.drawHLine(cx + 7, ey + 2, 7);
-    } else if (current_mood == MOOD_JAMMING || current_mood == MOOD_HAPPY) {
-        // Happy curved smile eyes ^ ^
+    } else if (current_mood == MOOD_HAPPY) {
+        // Happy curved smile eyes ^ ^ with blushing cheeks ///
         u8g2.drawLine(cx - 14, ey + 3, cx - 10, ey - 2);
         u8g2.drawLine(cx - 10, ey - 2, cx - 6, ey + 3);
+        u8g2.drawLine(cx - 14, ey + 4, cx - 10, ey - 1);
+        u8g2.drawLine(cx - 10, ey - 1, cx - 6, ey + 4);
         u8g2.drawLine(cx + 6, ey + 3, cx + 10, ey - 2);
         u8g2.drawLine(cx + 10, ey - 2, cx + 14, ey + 3);
+        u8g2.drawLine(cx + 6, ey + 4, cx + 10, ey - 1);
+        u8g2.drawLine(cx + 10, ey - 1, cx + 14, ey + 4);
+        // Blushing cheeks ///
+        u8g2.drawPixel(cx - 17, ey + 6); u8g2.drawPixel(cx - 15, ey + 6);
+        u8g2.drawPixel(cx + 15, ey + 6); u8g2.drawPixel(cx + 17, ey + 6);
+    } else if (current_mood == MOOD_JAMMING) {
+        // Intense groove rhythm squint eyes > <
+        u8g2.drawLine(cx - 14, ey - 2, cx - 7, ey + 1);
+        u8g2.drawLine(cx - 7, ey + 1, cx - 14, ey + 4);
+        u8g2.drawLine(cx + 14, ey - 2, cx + 7, ey + 1);
+        u8g2.drawLine(cx + 7, ey + 1, cx + 14, ey + 4);
+    } else if (current_mood == MOOD_BASS_BOOSTED) {
+        // Ultra-cool DJ shades with white diagonal reflection slashes
+        u8g2.drawRBox(cx - 15, ey - 4, 11, 8, 2);
+        u8g2.drawRBox(cx + 4, ey - 4, 11, 8, 2);
+        u8g2.drawHLine(cx - 4, ey - 2, 8);
+        u8g2.drawHLine(cx - 4, ey - 1, 8);
+        u8g2.setDrawColor(0);
+        u8g2.drawLine(cx - 13, ey - 2, cx - 11, ey + 2);
+        u8g2.drawLine(cx - 10, ey - 2, cx - 8, ey + 2);
+        u8g2.drawLine(cx + 6, ey - 2, cx + 8, ey + 2);
+        u8g2.drawLine(cx + 9, ey - 2, cx + 11, ey + 2);
+        u8g2.setDrawColor(1);
+    } else if (current_mood == MOOD_LOVE) {
+        // Sparkling heart-shaped eyes ♥ ♥ with soft blush
+        u8g2.drawDisc(cx - 12, ey - 1, 2);
+        u8g2.drawDisc(cx - 8, ey - 1, 2);
+        u8g2.drawTriangle(cx - 14, ey, cx - 6, ey, cx - 10, ey + 4);
+        u8g2.drawDisc(cx + 8, ey - 1, 2);
+        u8g2.drawDisc(cx + 12, ey - 1, 2);
+        u8g2.drawTriangle(cx + 6, ey, cx + 14, ey, cx + 10, ey + 4);
+        u8g2.drawPixel(cx - 16, ey + 6); u8g2.drawPixel(cx - 14, ey + 6);
+        u8g2.drawPixel(cx + 14, ey + 6); u8g2.drawPixel(cx + 16, ey + 6);
+    } else if (current_mood == MOOD_SLEEPY) {
+        // Sleepy downward curved eyelids u u and floating zZ
+        u8g2.drawCircle(cx - 10, ey, 4, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        u8g2.drawCircle(cx + 10, ey, 4, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        int16_t zOff = ((int16_t)(anim_timer * 2.5f)) % 4;
+        u8g2.drawPixel(cx + 15, hy - 16 - zOff);
+        u8g2.drawPixel(cx + 16, hy - 16 - zOff);
+        u8g2.drawPixel(cx + 17, hy - 15 - zOff);
+        u8g2.drawPixel(cx + 15, hy - 14 - zOff);
+        u8g2.drawPixel(cx + 16, hy - 14 - zOff);
+    } else if (current_mood == MOOD_SURPRISED) {
+        // Wide anime shocked frames with tiny pinpoint pupils (O O)
+        u8g2.drawCircle(cx - 10, ey, 5);
+        u8g2.drawCircle(cx + 10, ey, 5);
+        u8g2.drawPixel(cx - 10, ey);
+        u8g2.drawPixel(cx + 10, ey);
+    } else if (current_mood == MOOD_ANGRY) {
+        // Slanted furrowed intense eyes \ / with angry vein mark 💢
+        u8g2.drawLine(cx - 15, ey - 3, cx - 6, ey + 2);
+        u8g2.drawLine(cx - 15, ey - 2, cx - 6, ey + 3);
+        u8g2.drawLine(cx - 15, ey + 3, cx - 6, ey + 3);
+        u8g2.drawLine(cx + 6, ey + 2, cx + 15, ey - 3);
+        u8g2.drawLine(cx + 6, ey + 3, cx + 15, ey - 2);
+        u8g2.drawLine(cx + 6, ey + 3, cx + 15, ey + 3);
+        // Angry vein mark 💢
+        u8g2.drawPixel(cx + 16, hy - 10);
+        u8g2.drawPixel(cx + 17, hy - 11);
+        u8g2.drawPixel(cx + 18, hy - 10);
+        u8g2.drawPixel(cx + 17, hy - 9);
+    } else if (current_mood == MOOD_THINKING) {
+        // Curious asymmetrical eyes: wide up-gazing left eye, squinted right eye, floating ?
+        u8g2.drawCircle(cx - 10, ey, 4);
+        u8g2.drawPixel(cx - 12, ey - 2);
+        u8g2.drawHLine(cx + 6, ey + 1, 7);
+        u8g2.drawLine(cx + 6, ey - 2, cx + 13, ey);
+        // Question mark ?
+        u8g2.drawPixel(cx + 17, hy - 13);
+        u8g2.drawPixel(cx + 18, hy - 14);
+        u8g2.drawPixel(cx + 17, hy - 11);
+        u8g2.drawPixel(cx + 17, hy - 9);
+    } else if (current_mood == MOOD_WINK) {
+        // Playful wink: winking left arc ^, sparkling wide right anime eye
+        u8g2.drawLine(cx - 14, ey + 2, cx - 10, ey - 1);
+        u8g2.drawLine(cx - 10, ey - 1, cx - 6, ey + 2);
+        u8g2.drawLine(cx - 14, ey + 3, cx - 10, ey);
+        u8g2.drawLine(cx - 10, ey, cx - 6, ey + 3);
+        u8g2.drawDisc(cx + 10, ey, 4);
+        u8g2.setDrawColor(0);
+        u8g2.drawPixel(cx + 9, ey - 1);
+        u8g2.setDrawColor(1);
+    } else if (current_mood == MOOD_DIZZY) {
+        // Dizzy spinning cross eyes X X
+        u8g2.drawLine(cx - 13, ey - 3, cx - 7, ey + 3);
+        u8g2.drawLine(cx - 13, ey + 3, cx - 7, ey - 3);
+        u8g2.drawLine(cx + 7, ey - 3, cx + 13, ey + 3);
+        u8g2.drawLine(cx + 7, ey + 3, cx + 13, ey - 3);
+    } else if (current_mood == MOOD_SMIRK) {
+        // Sassy half-closed lids ¬ ¬
+        u8g2.drawHLine(cx - 14, ey - 1, 8);
+        u8g2.drawCircle(cx - 10, ey + 1, 3, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        u8g2.drawHLine(cx + 6, ey - 1, 8);
+        u8g2.drawCircle(cx + 10, ey + 1, 3, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+    } else if (current_mood == MOOD_SAD) {
+        // Teary drooping eyes with streaming tears
+        u8g2.drawLine(cx - 14, ey + 1, cx - 6, ey - 2);
+        u8g2.drawLine(cx + 6, ey - 2, cx + 14, ey + 1);
+        u8g2.drawCircle(cx - 10, ey + 1, 3, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        u8g2.drawCircle(cx + 10, ey + 1, 3, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        u8g2.drawVLine(cx - 10, ey + 5, 4);
+        u8g2.drawVLine(cx + 10, ey + 5, 4);
+    } else if (current_mood == MOOD_ENERGETIC) {
+        // Star diamond anime sparkle pupils * *
+        u8g2.drawVLine(cx - 10, ey - 4, 9);
+        u8g2.drawHLine(cx - 14, ey, 9);
+        u8g2.drawPixel(cx - 12, ey - 2); u8g2.drawPixel(cx - 8, ey - 2);
+        u8g2.drawPixel(cx - 12, ey + 2); u8g2.drawPixel(cx - 8, ey + 2);
+        u8g2.drawVLine(cx + 10, ey - 4, 9);
+        u8g2.drawHLine(cx + 6, ey, 9);
+        u8g2.drawPixel(cx + 8, ey - 2); u8g2.drawPixel(cx + 12, ey - 2);
+        u8g2.drawPixel(cx + 8, ey + 2); u8g2.drawPixel(cx + 12, ey + 2);
     } else {
-        // Big round shiny anime eyes with lively gaze tracking & sparkle
+        // Big round shiny anime eyes with lively gaze tracking & dual sparkle highlights
         u8g2.drawDisc(cx - 10 + pdx, ey + pdy, 4);
         u8g2.drawDisc(cx + 10 + pdx, ey + pdy, 4);
         u8g2.setDrawColor(0); // White pupil sparkle
         u8g2.drawPixel(cx - 11 + pdx, ey - 1 + pdy);
         u8g2.drawPixel(cx + 9 + pdx, ey - 1 + pdy);
+        if (current_mood == MOOD_LISTENING) {
+            u8g2.drawPixel(cx - 9 + pdx, ey + 1 + pdy);
+            u8g2.drawPixel(cx + 11 + pdx, ey + 1 + pdy);
+        }
         u8g2.setDrawColor(1);
     }
 
@@ -402,13 +716,45 @@ void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {
     u8g2.drawLine(cx + 16, hy + 6, cx + 23, hy + 6);
     u8g2.drawLine(cx + 15, hy + 9, cx + 22, hy + 10 - wVibe);
 
-    // 6. Cute :3 Cat Mouth
+    // 6. Cute :3 Cat Mouth with Mood Expressions
     u8g2.drawPixel(cx, hy + 3); // tiny nose
-    if (audioPlayer.isPlaying() && (rms > 0.4f)) {
-        // Singing open mouth :o
-        u8g2.drawCircle(cx, hy + 7, 2);
+    if (current_mood == MOOD_ANGRY) {
+        // Cute vampire kitty fangs ^w^
+        u8g2.drawLine(cx - 4, hy + 5, cx - 2, hy + 7);
+        u8g2.drawLine(cx - 2, hy + 7, cx, hy + 5);
+        u8g2.drawLine(cx, hy + 5, cx + 2, hy + 7);
+        u8g2.drawLine(cx + 2, hy + 7, cx + 4, hy + 5);
+        u8g2.drawPixel(cx - 2, hy + 8);
+        u8g2.drawPixel(cx + 2, hy + 8);
+    } else if (current_mood == MOOD_BASS_BOOSTED) {
+        // Cool smirk with side fang :>
+        u8g2.drawLine(cx - 3, hy + 6, cx + 3, hy + 5);
+        u8g2.drawPixel(cx + 2, hy + 7);
+    } else if (current_mood == MOOD_SURPRISED) {
+        // Shocked circle mouth o
+        u8g2.drawCircle(cx, hy + 6, 2);
+    } else if (current_mood == MOOD_DIZZY) {
+        // Dizzy wavy squiggly mouth ~
+        u8g2.drawPixel(cx - 3, hy + 6);
+        u8g2.drawPixel(cx - 2, hy + 5);
+        u8g2.drawPixel(cx - 1, hy + 6);
+        u8g2.drawPixel(cx, hy + 7);
+        u8g2.drawPixel(cx + 1, hy + 6);
+        u8g2.drawPixel(cx + 2, hy + 5);
+        u8g2.drawPixel(cx + 3, hy + 6);
+    } else if (current_mood == MOOD_SMIRK) {
+        // Sly raised corner smirk :>
+        u8g2.drawLine(cx - 2, hy + 6, cx + 1, hy + 6);
+        u8g2.drawLine(cx + 1, hy + 6, cx + 4, hy + 4);
+    } else if (current_mood == MOOD_SAD) {
+        // Sad downturned mouth :(
+        u8g2.drawCircle(cx, hy + 8, 3, U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
+    } else if (current_mood == MOOD_HAPPY || current_mood == MOOD_ENERGETIC || (audioPlayer.isPlaying() && (rms > 0.4f))) {
+        // Singing open happy mouth :3 or :D
+        u8g2.drawCircle(cx, hy + 6, 2, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        u8g2.drawHLine(cx - 2, hy + 5, 5);
     } else {
-        // Kawaii :3 w-mouth
+        // Kawaii :3 classic w-mouth
         u8g2.drawPixel(cx - 3, hy + 5);
         u8g2.drawPixel(cx - 2, hy + 6);
         u8g2.drawPixel(cx - 1, hy + 5);
@@ -442,7 +788,7 @@ void AICompanion::renderLiveMochi(int16_t cx, int16_t cy) {
     u8g2.drawHLine(cx - 20, hy - 11, 4);
     u8g2.drawHLine(cx + 16, hy - 11, 4);
 
-    // 3. Iconic Mochi Curved Eyes with Gaze Tracking
+    // 3. Iconic Mochi Curved Eyes with Rich Expressions
     int16_t ey = hy - 2;
     int16_t pdx = (int16_t)pupil_dx;
     if (pdx > 1) pdx = 1;
@@ -451,10 +797,63 @@ void AICompanion::renderLiveMochi(int16_t cx, int16_t cy) {
     if (is_blinking) {
         u8g2.drawHLine(cx - 12, ey + 2, 8);
         u8g2.drawHLine(cx + 4, ey + 2, 8);
-    } else if (current_mood == MOOD_JAMMING || current_mood == MOOD_HAPPY) {
-        // Enthusiastic curved eyes
+    } else if (current_mood == MOOD_HAPPY) {
+        // Enthusiastic curved eyes ^ ^
         u8g2.drawCircle(cx - 8, ey, 4, U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_UPPER_LEFT);
         u8g2.drawCircle(cx + 8, ey, 4, U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_UPPER_LEFT);
+    } else if (current_mood == MOOD_JAMMING) {
+        // Grooving rhythm squint > <
+        u8g2.drawLine(cx - 12, ey - 2, cx - 6, ey + 1);
+        u8g2.drawLine(cx - 6, ey + 1, cx - 12, ey + 4);
+        u8g2.drawLine(cx + 12, ey - 2, cx + 6, ey + 1);
+        u8g2.drawLine(cx + 6, ey + 1, cx + 12, ey + 4);
+    } else if (current_mood == MOOD_BASS_BOOSTED) {
+        // Cool visor sunglasses
+        u8g2.drawBox(cx - 14, ey - 3, 28, 6);
+        u8g2.setDrawColor(0);
+        u8g2.drawLine(cx - 12, ey - 2, cx - 9, ey + 2);
+        u8g2.drawLine(cx + 7, ey - 2, cx + 10, ey + 2);
+        u8g2.setDrawColor(1);
+    } else if (current_mood == MOOD_LOVE) {
+        // Visor heart eyes ♥ ♥
+        u8g2.drawDisc(cx - 10, ey - 1, 2);
+        u8g2.drawDisc(cx - 6, ey - 1, 2);
+        u8g2.drawTriangle(cx - 12, ey, cx - 4, ey, cx - 8, ey + 4);
+        u8g2.drawDisc(cx + 6, ey - 1, 2);
+        u8g2.drawDisc(cx + 10, ey - 1, 2);
+        u8g2.drawTriangle(cx + 4, ey, cx + 12, ey, cx + 8, ey + 4);
+    } else if (current_mood == MOOD_SLEEPY) {
+        // Sleepy visor lines u u
+        u8g2.drawHLine(cx - 11, ey + 1, 7);
+        u8g2.drawHLine(cx + 5, ey + 1, 7);
+        u8g2.drawPixel(cx + 16, hy - 16);
+        u8g2.drawPixel(cx + 17, hy - 16);
+    } else if (current_mood == MOOD_SURPRISED) {
+        // Visor wide shock eyes O O
+        u8g2.drawCircle(cx - 8, ey, 4);
+        u8g2.drawCircle(cx + 8, ey, 4);
+        u8g2.drawPixel(cx - 8, ey);
+        u8g2.drawPixel(cx + 8, ey);
+    } else if (current_mood == MOOD_ANGRY) {
+        // Angled visor lines \ /
+        u8g2.drawLine(cx - 13, ey - 2, cx - 5, ey + 2);
+        u8g2.drawLine(cx + 5, ey + 2, cx + 13, ey - 2);
+    } else if (current_mood == MOOD_THINKING) {
+        // Asymmetric visor
+        u8g2.drawCircle(cx - 8, ey, 4);
+        u8g2.drawPixel(cx - 9, ey - 1);
+        u8g2.drawHLine(cx + 5, ey + 1, 7);
+    } else if (current_mood == MOOD_WINK) {
+        // Wink ^ -
+        u8g2.drawLine(cx - 11, ey + 1, cx - 8, ey - 1);
+        u8g2.drawLine(cx - 8, ey - 1, cx - 5, ey + 1);
+        u8g2.drawRBox(cx + 5, ey - 3, 7, 6, 2);
+    } else if (current_mood == MOOD_DIZZY) {
+        // Cross eyes X X
+        u8g2.drawLine(cx - 11, ey - 2, cx - 5, ey + 2);
+        u8g2.drawLine(cx - 11, ey + 2, cx - 5, ey - 2);
+        u8g2.drawLine(cx + 5, ey - 2, cx + 11, ey + 2);
+        u8g2.drawLine(cx + 5, ey + 2, cx + 11, ey - 2);
     } else {
         // Standard friendly eyes with gaze tracking
         u8g2.drawRBox(cx - 12 + pdx, ey - 3, 7, 6, 2);
@@ -465,8 +864,14 @@ void AICompanion::renderLiveMochi(int16_t cx, int16_t cy) {
         u8g2.setDrawColor(1);
     }
 
-    // 4. Subtle Smile
-    u8g2.drawHLine(cx - 3, hy + 6, 6);
+    // 4. Mood-Adaptive Mouth
+    if (current_mood == MOOD_HAPPY || current_mood == MOOD_JAMMING || current_mood == MOOD_ENERGETIC) {
+        u8g2.drawCircle(cx, hy + 5, 2, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+    } else if (current_mood == MOOD_SURPRISED) {
+        u8g2.drawCircle(cx, hy + 5, 2);
+    } else {
+        u8g2.drawHLine(cx - 3, hy + 6, 6);
+    }
 #else
     (void)cx; (void)cy;
 #endif

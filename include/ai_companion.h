@@ -44,7 +44,13 @@ enum CompanionMood : uint8_t {
     MOOD_LOVE,
     MOOD_SURPRISED,
     MOOD_ANGRY,
-    MOOD_THINKING
+    MOOD_THINKING,
+    MOOD_WINK,
+    MOOD_DIZZY,
+    MOOD_SMIRK,
+    MOOD_SAD,
+    MOOD_ENERGETIC,
+    MOOD_COUNT
 };
 
 class AICompanion {
@@ -52,6 +58,27 @@ public:
     AICompanion();
     bool begin();
     void update(float dt = 0.033f);
+
+    // Catalog of all 65 SD card .anim faces
+    static const size_t ANIM_CATALOG_COUNT = 65;
+    static const char* const ANIM_CATALOG[ANIM_CATALOG_COUNT];
+
+    // Face / Animation Browsing & Cycling (Supports all 65 .anim + 15 procedural faces)
+    void cycleNextAnim();
+    void cyclePrevAnim();
+    void cycleNextFace();
+    void cyclePrevFace();
+    const char* getCurrentFaceDisplayName() const;
+    const char* getCurrentAnimName() const { return current_anim_name; }
+    size_t getCurrentAnimIndex() const { return current_anim_index; }
+
+    // Toast overlay (for showing face name during quick full-screen cycling)
+    bool isToastActive() const;
+    const char* getToastName() const { return last_face_name; }
+
+    // Autonomous mood and animation rotation
+    bool isAutonomous() const { return autonomous_enabled; }
+    void setAutonomous(bool enable) { autonomous_enabled = enable; }
 
     // Companion Selection & Switcher
     CompanionType getCompanion() const { return current_type; }
@@ -129,6 +156,14 @@ private:
     // Gaze tracking
     float pupil_dx;
     float pupil_dy;
+
+    // Face / Anim Catalog State & Autonomous Engine
+    size_t current_anim_index;
+    bool autonomous_enabled;
+    float autonomous_timer;
+    float next_autonomous_interval;
+    uint32_t face_toast_end_time;
+    char last_face_name[32];
 
     void updateReactivity(float dt);
 };

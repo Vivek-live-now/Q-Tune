@@ -72,6 +72,29 @@ int main() {
     assert(aiCompanion.getMood() == MOOD_JAMMING);
     assert(strcmp(aiCompanion.getMoodName(), "JAMMING") == 0);
 
+    aiCompanion.setMood(MOOD_BASS_BOOSTED);
+    assert(strcmp(aiCompanion.getMoodName(), "BASS BOOST") == 0);
+    aiCompanion.setMood(MOOD_LOVE);
+    assert(strcmp(aiCompanion.getMoodName(), "LOVE") == 0);
+    aiCompanion.setMood(MOOD_WINK);
+    assert(strcmp(aiCompanion.getMoodName(), "WINK") == 0);
+    aiCompanion.setMood(MOOD_DIZZY);
+    assert(strcmp(aiCompanion.getMoodName(), "DIZZY") == 0);
+    aiCompanion.setMood(MOOD_SMIRK);
+    assert(strcmp(aiCompanion.getMoodName(), "SMIRK") == 0);
+    aiCompanion.setMood(MOOD_SAD);
+    assert(strcmp(aiCompanion.getMoodName(), "SAD") == 0);
+    aiCompanion.setMood(MOOD_ENERGETIC);
+    assert(strcmp(aiCompanion.getMoodName(), "ENERGETIC") == 0);
+
+    // 65 anims catalog verification
+    assert(AICompanion::ANIM_CATALOG_COUNT == 65);
+    assert(strcmp(AICompanion::ANIM_CATALOG[0], "adore") == 0);
+    assert(strcmp(AICompanion::ANIM_CATALOG[64], "yawn") == 0);
+
+    aiCompanion.cycleNextFace();
+    assert(strlen(aiCompanion.getCurrentFaceDisplayName()) > 0);
+
     aiCompanion.setVisualMode(VISUAL_HYBRID);
     assert(aiCompanion.getVisualMode() == VISUAL_HYBRID);
     aiCompanion.cycleVisualMode();
@@ -99,6 +122,8 @@ int main() {
     assert(prompt.indexOf("PLAY_TRACK") != -1);
     assert(prompt.indexOf("SET_EQ") != -1);
     assert(prompt.indexOf("Play some jazz!") != -1);
+    assert(prompt.indexOf("gundam") != -1);
+    assert(prompt.indexOf("PLAY_ANIM") != -1);
 
     // Response parsing
     String emote, action, message;
@@ -118,6 +143,11 @@ int main() {
     assert(aiCompanion.getMood() == MOOD_JAMMING);
     assert(geminiClient.executeAction("SET_MOOD:HAPPY") == true);
     assert(aiCompanion.getMood() == MOOD_HAPPY);
+    assert(geminiClient.executeAction("SET_MOOD:LOVE") == true);
+    assert(aiCompanion.getMood() == MOOD_LOVE);
+    assert(geminiClient.executeAction("SET_MOOD:BASS_BOOSTED") == true);
+    assert(aiCompanion.getMood() == MOOD_BASS_BOOSTED);
+    assert(geminiClient.executeAction("PLAY_ANIM:gundam") == true);
 
     std::cout << "  [PASS] GeminiClient prompt serialization, response parsing, and action execution verified.\n";
     std::cout << "\nAll AI Companion & AnimEngine Native Tests PASSED!\n";

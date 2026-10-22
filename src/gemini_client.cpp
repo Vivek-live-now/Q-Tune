@@ -261,8 +261,8 @@ String GeminiClient::buildPrompt(const char* userQuery) const {
     p += "Available Actions: PLAY_TRACK:<name>, PAUSE, RESUME, NEXT, PREV, SET_VOLUME:<0-100>, ";
     p += "SET_EQ:<FLAT|BASS_BOOST|VOCAL|ROCK|POP|JAZZ|CLASSICAL|CLUB>, SET_CROSSFEED:<OFF|SUBTLE|NATURAL>, ";
     p += "SWITCH_OUTPUT:<SPEAKER|KA11>, SWITCH_COMPANION:<CAT|MOCHI>, SET_VISUALIZER:<preset>, ";
-    p += "SET_LED:<OFF|VOCAL|BASS|DISCO|SPECTRUM|RAINBOW>, PLAY_SOUND:<MEOW|PURR|CHIRP>, NONE.\n";
-    p += "Available Emotions (.anim): happy, dancing, love, giggle, wink, angry, surprised, sleepy, relaxed, energetic, furious, sparkle, speed, dizzy, yawn, hello, serene, shy, brave, adore, smirk, sick.\n\n";
+    p += "SET_LED:<OFF|VOCAL|BASS|DISCO|SPECTRUM|RAINBOW>, PLAY_SOUND:<MEOW|PURR|CHIRP>, PLAY_ANIM:<anim_name>, NONE.\n";
+    p += "Available Emotions (.anim): adore, angry, blank, blinding, brave, buzzing, contempt, crying, dancing, devil, distracted, dizzy, down, drowsy, encouragement, energetic, enraged, evil, fast, fierce, furious, giggle, glowing, growing, gundam, handsome, happy, hello, intro, irritated, laughing, left, love, menacing, mistake, playful, police, rain, relaxed, right, rush, scared, serene, shrink, shy, sick, sleepy, smile, smirk, smoke, sneeze, sobbing, sparkle, speed, splash, spraying, squint, surprised, sushi, swinging, teasing, tough, weeping, wink, yawn.\n\n";
     p += "Respond strictly in this format:\n";
     p += "EMOTE: [<emotion>]\n";
     p += "ACTION: [<command_or_NONE>]\n";
@@ -330,6 +330,14 @@ bool GeminiClient::executeAction(const String &action) {
         return true;
     }
 
+    if (action.startsWith("PLAY_ANIM:")) {
+        String anim = action.substring(10);
+        anim.trim();
+        anim.toLowerCase();
+        aiCompanion.playAnim(anim.c_str(), 5000);
+        return true;
+    }
+
     if (action.startsWith("SET_MOOD:")) {
         String m = action.substring(9);
         m.toUpperCase();
@@ -339,6 +347,13 @@ bool GeminiClient::executeAction(const String &action) {
         else if (m.indexOf("SLEEP") != -1) aiCompanion.setMood(MOOD_SLEEPY, 6000);
         else if (m.indexOf("ANGRY") != -1) aiCompanion.setMood(MOOD_ANGRY, 4000);
         else if (m.indexOf("THINK") != -1) aiCompanion.setMood(MOOD_THINKING, 6000);
+        else if (m.indexOf("BASS") != -1) aiCompanion.setMood(MOOD_BASS_BOOSTED, 6000);
+        else if (m.indexOf("WINK") != -1) aiCompanion.setMood(MOOD_WINK, 4000);
+        else if (m.indexOf("DIZZY") != -1) aiCompanion.setMood(MOOD_DIZZY, 4000);
+        else if (m.indexOf("SMIRK") != -1) aiCompanion.setMood(MOOD_SMIRK, 4000);
+        else if (m.indexOf("SAD") != -1) aiCompanion.setMood(MOOD_SAD, 4000);
+        else if (m.indexOf("ENERGETIC") != -1 || m.indexOf("HYPE") != -1) aiCompanion.setMood(MOOD_ENERGETIC, 6000);
+        else if (m.indexOf("LISTEN") != -1) aiCompanion.setMood(MOOD_LISTENING, 6000);
         else aiCompanion.setMood(MOOD_IDLE);
         return true;
     }
