@@ -522,7 +522,6 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
     WiFiClientSecure client;
     client.setInsecure(); // Save memory and skip CA cert validation on ESP32-S3
-    client.setBufferSizes(4096, 1024); // Reduce SSL buffer size from 32KB to 5KB to prevent out-of-memory
     client.setTimeout(25000);
 
     HTTPClient https;
