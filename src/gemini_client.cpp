@@ -25,6 +25,43 @@
 
 GeminiClient geminiClient;
 
+static void trimCStr(char* str) {
+    if (!str) return;
+    char* start = str;
+    while (*start && ((uint8_t)*start <= ' ' || *start == '\r' || *start == '\n' || *start == '\t')) {
+        start++;
+    }
+    if (start != str) {
+        memmove(str, start, strlen(start) + 1);
+    }
+    size_t len = strlen(str);
+    while (len > 0 && ((uint8_t)str[len - 1] <= ' ' || str[len - 1] == '\r' || str[len - 1] == '\n' || str[len - 1] == '\t')) {
+        str[len - 1] = '\0';
+        len--;
+    }
+}
+
+static String escapeJson(const String &str) {
+    String out = "";
+    for (size_t i = 0; i < str.length(); i++) {
+        char c = str.charAt(i);
+        if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '\"') {
+            out += "\\\"";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\r') {
+            // strip carriage return
+        } else if (c == '\t') {
+            out += " ";
+        } else if ((uint8_t)c >= 0x20) {
+            out += c;
+        }
+    }
+    return out;
+}
+
 GeminiClient::GeminiClient() :
     is_busy(false)
 {
@@ -50,16 +87,18 @@ bool GeminiClient::begin() {
         if (key.length() > 0) {
             strncpy(api_key, key.c_str(), sizeof(api_key) - 1);
             api_key[sizeof(api_key) - 1] = '\0';
+            trimCStr(api_key);
         }
         String mdl = prefs.getString("model", "gemini-3.5-flash-lite");
         // Auto-upgrade legacy deprecated models
-        if (mdl == "gemini-1.5-flash" || mdl == "gemini-2.0-flash" || mdl == "gemini-2.5-flash" || mdl == "gemini-2.5-flash-lite") {
+        if (mdl.indexOf("1.5") != -1 || mdl.indexOf("2.0") != -1 || mdl.indexOf("2.5") != -1) {
             mdl = "gemini-3.5-flash-lite";
             prefs.putString("model", mdl);
         }
         if (mdl.length() > 0) {
             strncpy(model_name, mdl.c_str(), sizeof(model_name) - 1);
             model_name[sizeof(model_name) - 1] = '\0';
+            trimCStr(model_name);
         }
         prefs.end();
     }
@@ -77,6 +116,7 @@ void GeminiClient::setApiKey(const char* key) {
     if (!key) return;
     strncpy(api_key, key, sizeof(api_key) - 1);
     api_key[sizeof(api_key) - 1] = '\0';
+    trimCStr(api_key);
 
 #ifdef ARDUINO
     Preferences prefs;
@@ -91,6 +131,11 @@ void GeminiClient::setModelName(const char* model) {
     if (!model) return;
     strncpy(model_name, model, sizeof(model_name) - 1);
     model_name[sizeof(model_name) - 1] = '\0';
+    trimCStr(model_name);
+    if (strstr(model_name, "1.5") || strstr(model_name, "2.0") || strstr(model_name, "2.5")) {
+        strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
+        model_name[sizeof(model_name) - 1] = '\0';
+    }
 
 #ifdef ARDUINO
     Preferences prefs;
@@ -229,7 +274,8 @@ String GeminiClient::buildSystemStateJson() const {
     if (audioPlayer.isPlaying() || audioPlayer.isPaused()) {
         String cur = audioPlayer.getCurrentTrackPath();
         if (cur.length() > 0) {
-            cur.replace("\"", "\\\"");
+            cur.replace("\"", "'");
+            cur.replace("\\", "/");
             json += ",\"track\":\"" + cur + "\"";
             json += ",\"sample_rate\":" + String(audioPlayer.getSampleRate());
             json += ",\"format\":\"" + String(audioPlayer.getFormatName()) + "\"";
@@ -474,6 +520,7 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
     WiFiClientSecure client;
     client.setInsecure(); // Save memory on ESP32-S3
+    client.setTimeout(15);
 
     HTTPClient https;
     if (!https.begin(client, endpoint)) {
@@ -482,7 +529,8 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     }
 
     https.addHeader("Content-Type", "application/json");
-    https.setTimeout(12000); // 12-second timeout
+    https.setTimeout(15000); // 15-second timeout
+    https.setReuse(false);
 
     int httpCode = https.POST(jsonPayload);
     String response = "";
@@ -505,19 +553,27 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
         if (response.length() == 0) response = body;
         setError("OK");
     } else {
-        String body = https.getString();
-        int msgIdx = body.indexOf("\"message\":");
-        if (msgIdx != -1) {
-            int colonIdx = body.indexOf(':', msgIdx);
-            int quoteStart = body.indexOf('"', colonIdx);
-            if (quoteStart != -1) {
-                int endIdx = body.indexOf('"', quoteStart + 1);
-                while (endIdx != -1 && body.charAt(endIdx - 1) == '\\') {
-                    endIdx = body.indexOf('"', endIdx + 1);
-                }
-                if (endIdx != -1) {
-                    String errMsg = body.substring(quoteStart + 1, endIdx);
-                    setError(errMsg.substring(0, 50).c_str());
+        if (httpCode < 0) {
+            String errStr = HTTPClient::errorToString(httpCode);
+            setError(errStr.c_str());
+        } else {
+            String body = https.getString();
+            int msgIdx = body.indexOf("\"message\":");
+            if (msgIdx != -1) {
+                int colonIdx = body.indexOf(':', msgIdx);
+                int quoteStart = body.indexOf('"', colonIdx);
+                if (quoteStart != -1) {
+                    int endIdx = body.indexOf('"', quoteStart + 1);
+                    while (endIdx != -1 && body.charAt(endIdx - 1) == '\\') {
+                        endIdx = body.indexOf('"', endIdx + 1);
+                    }
+                    if (endIdx != -1) {
+                        String errMsg = body.substring(quoteStart + 1, endIdx);
+                        setError(errMsg.substring(0, 50).c_str());
+                    } else {
+                        String err = "HTTP " + String(httpCode);
+                        setError(err.c_str());
+                    }
                 } else {
                     String err = "HTTP " + String(httpCode);
                     setError(err.c_str());
@@ -526,9 +582,6 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
                 String err = "HTTP " + String(httpCode);
                 setError(err.c_str());
             }
-        } else {
-            String err = "HTTP " + String(httpCode);
-            setError(err.c_str());
         }
     }
 
@@ -562,24 +615,28 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     aiCompanion.setMood(MOOD_THINKING, 8000);
 
     String prompt = buildPrompt(query);
-    // Sanitize prompt for JSON string
-    prompt.replace("\\", "\\\\");
-    prompt.replace("\"", "\\\"");
-    prompt.replace("\n", "\\n");
+    String sanitized = escapeJson(prompt);
 
     String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/";
     endpoint += model_name;
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":500}}";
+    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":500}}";
 
     String raw = sendHttpsRequest(endpoint, json);
 
-    // Auto-fallback: if request failed and model was not gemini-3.5-flash-lite, fallback and retry
+    // Auto-fallback 1: if request failed and model was not gemini-3.5-flash-lite, fallback and retry
     if (raw.length() == 0 && strcmp(model_name, "gemini-3.5-flash-lite") != 0) {
         setModelName("gemini-3.5-flash-lite");
         endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
+        endpoint += api_key;
+        raw = sendHttpsRequest(endpoint, json);
+    }
+
+    // Auto-fallback 2: if still failed, try gemini-flash-latest
+    if (raw.length() == 0 && strcmp(model_name, "gemini-flash-latest") != 0) {
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=";
         endpoint += api_key;
         raw = sendHttpsRequest(endpoint, json);
     }
@@ -605,4 +662,10 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     executeAction(outAction);
     return true;
 #endif
+}
+
+bool GeminiClient::askVoice(const int16_t* pcmSamples, size_t sampleCount, String &outMessage, String &outEmote, String &outAction) {
+    (void)pcmSamples;
+    (void)sampleCount;
+    return ask("Voice audio query received", outMessage, outEmote, outAction);
 }

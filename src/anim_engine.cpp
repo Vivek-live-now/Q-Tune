@@ -251,7 +251,6 @@ bool AnimEngine::open(const char* filepath) {
     is_playing = true;
     is_paused = false;
     current_frame_idx = 0;
-    speed_multiplier = 1.0f;
     last_frame_time = millis();
     setError("OK");
     return true;

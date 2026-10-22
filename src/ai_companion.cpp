@@ -34,12 +34,17 @@ const char* const AICompanion::ANIM_CATALOG[AICompanion::ANIM_CATALOG_COUNT] = {
     "teasing", "tough", "weeping", "wink", "yawn"
 };
 
+static const float SPEED_PRESETS[] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
+static const char* const SPEED_LABELS[] = { "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x" };
+static const size_t SPEED_PRESET_COUNT = sizeof(SPEED_PRESETS) / sizeof(SPEED_PRESETS[0]);
+
 AICompanion::AICompanion() :
     current_type(COMPANION_CAT),
     visual_mode(VISUAL_HYBRID),
     current_mood(MOOD_IDLE),
     sound_enabled(true),
     neko_overlay_on_anim(true),
+    speed_index(2),
     emote_end_time(0),
     anim_timer(0.0f),
     beat_pulse(0.0f),
@@ -66,6 +71,7 @@ AICompanion::AICompanion() :
 
 bool AICompanion::begin() {
     loadSettings();
+    animEngine.setSpeedMultiplier(getSpeedMultiplier());
     anim_timer = 0.0f;
     return true;
 }
@@ -78,6 +84,9 @@ void AICompanion::loadSettings() {
         visual_mode = (CompanionVisualMode)prefs.getUChar("vmode", (uint8_t)VISUAL_HYBRID);
         sound_enabled = prefs.getBool("snd", true);
         neko_overlay_on_anim = prefs.getBool("overlay", true);
+        speed_index = prefs.getUChar("spd", 2);
+        if (speed_index >= SPEED_PRESET_COUNT) speed_index = 2;
+        animEngine.setSpeedMultiplier(SPEED_PRESETS[speed_index]);
         prefs.end();
     }
 #endif
@@ -91,9 +100,34 @@ void AICompanion::saveSettings() {
         prefs.putUChar("vmode", (uint8_t)visual_mode);
         prefs.putBool("snd", sound_enabled);
         prefs.putBool("overlay", neko_overlay_on_anim);
+        prefs.putUChar("spd", speed_index);
         prefs.end();
     }
 #endif
+}
+
+void AICompanion::cycleSpeed() {
+    speed_index = (speed_index + 1) % SPEED_PRESET_COUNT;
+    animEngine.setSpeedMultiplier(SPEED_PRESETS[speed_index]);
+    saveSettings();
+}
+
+void AICompanion::setSpeedIndex(uint8_t idx) {
+    if (idx < SPEED_PRESET_COUNT) {
+        speed_index = idx;
+        animEngine.setSpeedMultiplier(SPEED_PRESETS[speed_index]);
+        saveSettings();
+    }
+}
+
+float AICompanion::getSpeedMultiplier() const {
+    if (speed_index >= SPEED_PRESET_COUNT) return 1.0f;
+    return SPEED_PRESETS[speed_index];
+}
+
+const char* AICompanion::getSpeedString() const {
+    if (speed_index >= SPEED_PRESET_COUNT) return "1.0x";
+    return SPEED_LABELS[speed_index];
 }
 
 void AICompanion::setCompanion(CompanionType type) {
@@ -241,6 +275,7 @@ bool AICompanion::playAnim(const char* name, uint32_t duration_ms) {
 
     bool ok = animEngine.open(name);
     if (ok) {
+        animEngine.setSpeedMultiplier(getSpeedMultiplier());
         animEngine.setLoop(true);
         animEngine.play();
         if (duration_ms > 0) {
@@ -477,27 +512,6 @@ void AICompanion::render(int16_t x, int16_t y, int16_t w, int16_t h) {
             renderLiveMochi(cx, cy);
         }
     }
-
-#ifdef ARDUINO
-    // Toast badge overlay if active (e.g. during button cycling in full screen mode)
-    if (isToastActive()) {
-        U8G2 &u8g2 = display.getU8g2();
-        u8g2.setFont(u8g2_font_4x6_tr);
-        const char* tName = getToastName();
-        int strW = u8g2.getStrWidth(tName);
-        int boxW = strW + 8;
-        int boxX = cx - (boxW / 2);
-        int boxY = y + h - 9;
-        if (boxX < 0) boxX = 0;
-        if (boxX + boxW > 127) boxX = 127 - boxW;
-        if (boxY > 55) boxY = 55;
-        u8g2.setDrawColor(0);
-        u8g2.drawRBox(boxX - 1, boxY - 1, boxW + 2, 9, 2);
-        u8g2.setDrawColor(1);
-        u8g2.drawRFrame(boxX, boxY, boxW, 8, 2);
-        u8g2.drawStr(boxX + 4, boxY + 6, tName);
-    }
-#endif
 }
 
 void AICompanion::renderLiveCat(int16_t cx, int16_t cy) {

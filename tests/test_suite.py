@@ -1713,8 +1713,9 @@ def test_ai_companion_gemini_and_anim_engine():
     assert "renderNekoAccessories" in aih_text
     assert "playMeow" in aih_text and "playPurr" in aih_text
     assert "toggleCompanion" in aih_text
+    assert "cycleSpeed" in aih_text and "getSpeedMultiplier" in aih_text
     assert "head_bob_y" in aih_text and "whisker_vibe" in aih_text and "ear_twitch" in aih_text
-    print("  [PASS] 3. Cute DJ Neko (Cat) & Mochi companion state machines, audio reactivity, and switching verified.")
+    print("  [PASS] 3. Cute DJ Neko (Cat) & Mochi companion state machines, speed options, audio reactivity, and switching verified.")
 
     # 4. Verify Gemini API Client & Q-Tune Awareness
     with open_utf8(gem_h) as f:
@@ -1739,6 +1740,7 @@ def test_ai_companion_gemini_and_anim_engine():
 
     assert "MODE_AI_COMPANION" in m_text, "MODE_AI_COMPANION missing in main.cpp"
     assert "AI Companion" in m_text, "AI Companion menu item missing in main.cpp"
+    assert "Anim Speed" in m_text, "Anim Speed menu item missing in main.cpp"
     assert "updateAICompanionMode" in m_text, "updateAICompanionMode missing in main.cpp"
     assert "/api/ai/chat" in w_text, "/api/ai/chat route missing in wifi_streamer.cpp"
     assert "/api/ai/companion" in w_text, "/api/ai/companion route missing in wifi_streamer.cpp"

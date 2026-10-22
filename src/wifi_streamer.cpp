@@ -998,10 +998,18 @@ void WiFiStreamer::setupConfigServer() {
             } else if (t.indexOf("MOCHI") != -1) {
                 aiCompanion.setCompanion(COMPANION_MOCHI);
             }
+        } else if (configServer.hasArg("speed")) {
+            String s = configServer.arg("speed");
+            if (s.indexOf("0.5") != -1) aiCompanion.setSpeedIndex(0);
+            else if (s.indexOf("0.75") != -1) aiCompanion.setSpeedIndex(1);
+            else if (s.indexOf("1.25") != -1) aiCompanion.setSpeedIndex(3);
+            else if (s.indexOf("1.5") != -1) aiCompanion.setSpeedIndex(4);
+            else if (s.indexOf("2.0") != -1) aiCompanion.setSpeedIndex(5);
+            else aiCompanion.setSpeedIndex(2); // 1.0x
         } else {
             aiCompanion.toggleCompanion();
         }
-        configServer.send(200, "application/json", "{\"companion\":\"" + String(aiCompanion.getCompanionName()) + "\"}");
+        configServer.send(200, "application/json", "{\"companion\":\"" + String(aiCompanion.getCompanionName()) + "\",\"speed\":\"" + String(aiCompanion.getSpeedString()) + "\"}");
     });
 
     configServer.on("/scan", HTTP_GET, [this]() {

@@ -76,6 +76,13 @@ public:
     bool isToastActive() const;
     const char* getToastName() const { return last_face_name; }
 
+    // Playback Speed Controls
+    void cycleSpeed();
+    void setSpeedIndex(uint8_t idx);
+    uint8_t getSpeedIndex() const { return speed_index; }
+    float getSpeedMultiplier() const;
+    const char* getSpeedString() const;
+
     // Autonomous mood and animation rotation
     bool isAutonomous() const { return autonomous_enabled; }
     void setAutonomous(bool enable) { autonomous_enabled = enable; }
@@ -133,6 +140,7 @@ private:
 
     bool sound_enabled;
     bool neko_overlay_on_anim;
+    uint8_t speed_index;
 
     // Animation / Emotion timer
     uint32_t emote_end_time;

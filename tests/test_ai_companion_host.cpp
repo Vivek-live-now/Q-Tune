@@ -100,12 +100,24 @@ int main() {
     aiCompanion.cycleVisualMode();
     assert(aiCompanion.getVisualMode() == VISUAL_REACTIVE);
 
+    // Playback Speed Controls
+    assert(aiCompanion.getSpeedMultiplier() == 1.0f);
+    assert(strcmp(aiCompanion.getSpeedString(), "1.0x") == 0);
+    aiCompanion.cycleSpeed();
+    assert(aiCompanion.getSpeedMultiplier() == 1.25f);
+    assert(strcmp(aiCompanion.getSpeedString(), "1.25x") == 0);
+    aiCompanion.setSpeedIndex(0);
+    assert(aiCompanion.getSpeedMultiplier() == 0.5f);
+    assert(strcmp(aiCompanion.getSpeedString(), "0.5x") == 0);
+    aiCompanion.setSpeedIndex(2); // restore 1.0x
+    assert(aiCompanion.getSpeedMultiplier() == 1.0f);
+
     // Live audio reactivity physics
     aiCompanion.update(0.033f);
     aiCompanion.update(0.033f);
     assert(aiCompanion.getBeatPulse() >= 0.0f);
 
-    std::cout << "  [PASS] AICompanion dual personality (DJ Neko ⇄ Mochi), reactivity, and visual modes verified.\n";
+    std::cout << "  [PASS] AICompanion dual personality (DJ Neko ⇄ Mochi), speed controls, reactivity, and visual modes verified.\n";
 
     // -------------------------------------------------------------------------
     // 3. GeminiClient Parsing & Action Execution Tests
@@ -148,6 +160,11 @@ int main() {
     assert(geminiClient.executeAction("SET_MOOD:BASS_BOOSTED") == true);
     assert(aiCompanion.getMood() == MOOD_BASS_BOOSTED);
     assert(geminiClient.executeAction("PLAY_ANIM:gundam") == true);
+
+    // Voice query execution
+    String vMsg, vEmote, vAct;
+    assert(geminiClient.askVoice(nullptr, 0, vMsg, vEmote, vAct) == true);
+    assert(vAct == "SET_VOLUME:80");
 
     std::cout << "  [PASS] GeminiClient prompt serialization, response parsing, and action execution verified.\n";
     std::cout << "\nAll AI Companion & AnimEngine Native Tests PASSED!\n";

@@ -455,10 +455,11 @@ void updateVisualizerMode() {
 }
 
 int aiActionSelection = 0;
-const int AI_ACTION_COUNT = 8;
-const char* aiActionLabels[] = {
+const int AI_ACTION_COUNT = 9;
+const char* aiActionLabels[AI_ACTION_COUNT] = {
     "Ask DJ / Vibe",
     "Cycle Face/Anim",
+    "Anim Speed",
     "Visual Mode",
     "Song Recommend",
     "Analyze Audio",
@@ -486,12 +487,12 @@ void updateAICompanionMode() {
         if (wasInactive) {
             if (evt == BTN_EVENT_UP_PRESS) {
                 aiCompanion.cyclePrevFace();
-                aiStatusBubble = "Face: " + String(aiCompanion.getCurrentFaceDisplayName());
+                aiStatusBubble = "";
                 ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
                 return;
             } else if (evt == BTN_EVENT_DN_PRESS) {
                 aiCompanion.cycleNextFace();
-                aiStatusBubble = "Face: " + String(aiCompanion.getCurrentFaceDisplayName());
+                aiStatusBubble = "";
                 ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
                 return;
             } else if (evt == BTN_EVENT_SEL_PRESS) {
@@ -541,15 +542,20 @@ void updateAICompanionMode() {
                 }
                 case 1: { // Cycle Face / Anim (Browses all 65 .anim + 15 procedural faces)
                     aiCompanion.cycleNextFace();
-                    aiStatusBubble = "Face: " + String(aiCompanion.getCurrentFaceDisplayName());
+                    aiStatusBubble = "Next Face";
                     break;
                 }
-                case 2: { // Visual Mode (Hybrid / Live Reactive / Anim Only)
+                case 2: { // Anim Speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x)
+                    aiCompanion.cycleSpeed();
+                    aiStatusBubble = "Speed: " + String(aiCompanion.getSpeedString());
+                    break;
+                }
+                case 3: { // Visual Mode (Hybrid / Live Reactive / Anim Only)
                     aiCompanion.cycleVisualMode();
                     aiStatusBubble = "Mode: " + String(aiCompanion.getVisualModeName());
                     break;
                 }
-                case 3: { // Song Recommend
+                case 4: { // Song Recommend
                     if (!geminiClient.hasApiKey()) {
                         geminiClient.loadSDConfig();
                     }
@@ -571,7 +577,7 @@ void updateAICompanionMode() {
                     }
                     break;
                 }
-                case 4: { // Analyze Audio
+                case 5: { // Analyze Audio
                     if (!geminiClient.hasApiKey()) {
                         geminiClient.loadSDConfig();
                     }
@@ -593,20 +599,20 @@ void updateAICompanionMode() {
                     }
                     break;
                 }
-                case 5: { // Switch Pet
+                case 6: { // Switch Pet
                     aiCompanion.toggleCompanion();
                     aiStatusBubble = (aiCompanion.getCompanion() == COMPANION_CAT) ? "Switched to DJ Neko!" : "Switched to Mochi!";
                     break;
                 }
-                case 6: { // Bass Boost / EQ
+                case 7: { // Bass Boost / EQ
                     aiCompanion.setMood(MOOD_BASS_BOOSTED, 6000);
                     geminiClient.executeAction("SET_EQ:BASS_BOOST");
                     aiStatusBubble = "Bass Boost engaged!";
                     break;
                 }
-                case 7: { // Dance / Groove
+                case 8: { // Dance / Groove
                     aiCompanion.cycleNextAnim();
-                    aiStatusBubble = "Grooving: " + String(aiCompanion.getCurrentFaceDisplayName());
+                    aiStatusBubble = "Grooving!";
                     break;
                 }
             }
