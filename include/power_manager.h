@@ -5,9 +5,10 @@
 #include "hw_config.h"
 
 enum class PowerProfile : uint8_t {
-    PERFORMANCE = 0, // 240 MHz - Highest compute / fast UI
-    BALANCED = 1,    // 160 MHz - Optimal audio playback & energy efficiency
-    ENDURANCE = 2    // 80 MHz - Maximum battery longevity
+    PERFORMANCE = 0, // 240 MHz - Highest compute / fast UI / 96kHz+ FLAC
+    BALANCED = 1,    // 160 MHz - Standard audio playback & energy efficiency
+    ENDURANCE = 2,   // 80 MHz - Maximum battery longevity
+    AUTO = 3         // Dynamic Auto-Scaling (240MHz for >=88.2kHz / Hi-Res, 160MHz for 44.1kHz)
 };
 
 class PowerManager {
@@ -20,7 +21,9 @@ public:
 
     PowerProfile getProfile() const { return currentProfile; }
     void setProfile(PowerProfile profile);
+    void cycleProfile();
     const char* getProfileName(PowerProfile profile) const;
+    const char* getProfileShortName(PowerProfile profile) const;
 
     uint32_t getTargetCpuFreqMhz() const;
     void applyCpuFrequency();

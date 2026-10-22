@@ -5,6 +5,7 @@
 #include "simd_accel.h"
 #include "audio_dsp.h"
 #include "player_config.h"
+#include "power_manager.h"
 
 AudioPlayer::AudioPlayer() :
     initialized(false), playing(false), paused(false), trackFinished(false),
@@ -22,7 +23,7 @@ bool AudioPlayer::begin() {
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 12,
+        .dma_buf_count = 16,
         .dma_buf_len = 512,
         .use_apll = false,
         .tx_desc_auto_clear = true,
@@ -58,6 +59,9 @@ bool AudioPlayer::begin() {
 void AudioPlayer::setupI2S(uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample) {
     i2s_set_sample_rates(I2S_NUM, sampleRate);
     audioDSP.setSampleRate(sampleRate);
+    if (powerManager.getProfile() == PowerProfile::AUTO) {
+        powerManager.applyCpuFrequency();
+    }
 }
 
 bool AudioPlayer::parseWAVHeader(File &file, WAVHeader &header) {
@@ -321,8 +325,8 @@ void AudioPlayer::update() {
                 }
             }
         } else {
-            alignas(16) uint8_t buffer[2048];
-            int bytesToRead = sizeof(buffer);
+            alignas(16) uint8_t buffer[4096];
+            int bytesToRead = (currentSampleRate >= 88200) ? 4096 : 2048;
 
             int bytesRead = 0;
             if (currentAudioType == 2) {
@@ -524,6 +528,9 @@ void AudioPlayer::stop() {
     consecutiveReadErrors = 0;
     i2s_zero_dma_buffer(I2S_NUM);
     spectrumAnalyzer.clearSamples();
+    if (powerManager.getProfile() == PowerProfile::AUTO) {
+        powerManager.applyCpuFrequency();
+    }
 }
 
 bool AudioPlayer::isPlaying() const {

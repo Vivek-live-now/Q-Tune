@@ -10,6 +10,7 @@
 #include <esp_pm.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
+#include <Preferences.h>
 #endif
 
 PowerManager powerManager;
@@ -24,6 +25,15 @@ void PowerManager::begin() {
     // Release any deep-sleep GPIO pad holds so SD_CS and all pins can be toggled
     gpio_hold_dis((gpio_num_t)SD_CS);
     gpio_deep_sleep_hold_dis();
+
+    Preferences prefs;
+    if (prefs.begin("power_cfg", true)) {
+        uint8_t prof = prefs.getUChar("profile", (uint8_t)PowerProfile::BALANCED);
+        if (prof <= (uint8_t)PowerProfile::AUTO) {
+            currentProfile = (PowerProfile)prof;
+        }
+        prefs.end();
+    }
 #endif
     applyCpuFrequency();
 }
@@ -31,6 +41,18 @@ void PowerManager::begin() {
 void PowerManager::setProfile(PowerProfile profile) {
     currentProfile = profile;
     applyCpuFrequency();
+#if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+    Preferences prefs;
+    if (prefs.begin("power_cfg", false)) {
+        prefs.putUChar("profile", (uint8_t)currentProfile);
+        prefs.end();
+    }
+#endif
+}
+
+void PowerManager::cycleProfile() {
+    uint8_t next = ((uint8_t)currentProfile + 1) % 4;
+    setProfile((PowerProfile)next);
 }
 
 const char* PowerManager::getProfileName(PowerProfile profile) const {
@@ -38,8 +60,19 @@ const char* PowerManager::getProfileName(PowerProfile profile) const {
         case PowerProfile::PERFORMANCE: return "PERFORMANCE (240MHz)";
         case PowerProfile::BALANCED:    return "BALANCED (160MHz)";
         case PowerProfile::ENDURANCE:   return "ENDURANCE (80MHz)";
+        case PowerProfile::AUTO:        return "AUTO (DYNAMIC)";
     }
     return "UNKNOWN";
+}
+
+const char* PowerManager::getProfileShortName(PowerProfile profile) const {
+    switch (profile) {
+        case PowerProfile::PERFORMANCE: return "240M";
+        case PowerProfile::BALANCED:    return "160M";
+        case PowerProfile::ENDURANCE:   return "80M";
+        case PowerProfile::AUTO:        return "AUTO";
+    }
+    return "160M";
 }
 
 uint32_t PowerManager::getTargetCpuFreqMhz() const {
@@ -47,6 +80,12 @@ uint32_t PowerManager::getTargetCpuFreqMhz() const {
         case PowerProfile::PERFORMANCE: return 240;
         case PowerProfile::BALANCED:    return 160;
         case PowerProfile::ENDURANCE:   return 80;
+        case PowerProfile::AUTO: {
+            if (audioPlayer.isPlaying() && audioPlayer.getSampleRate() >= 88200) {
+                return 240;
+            }
+            return 160;
+        }
     }
     return 160;
 }
@@ -69,6 +108,7 @@ float PowerManager::calculateEstimatedRuntimeHours(float voltage, int percentage
         case PowerProfile::PERFORMANCE: current_ma = 75.0f; break;
         case PowerProfile::BALANCED:    current_ma = 45.0f; break;
         case PowerProfile::ENDURANCE:   current_ma = 28.0f; break;
+        case PowerProfile::AUTO:        current_ma = 50.0f; break;
     }
 
     float remaining_mah = (percentage / 100.0f) * capacity_mah;

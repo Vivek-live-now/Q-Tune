@@ -954,12 +954,13 @@ void updateAICompanionMode() {
 // ==============================================================================
 // Outside Settings Menu & Wi-Fi Stats Mode
 // ==============================================================================
-const int SETTINGS_MENU_COUNT = 7;
+const int SETTINGS_MENU_COUNT = 8;
 const char* settingsMenuLabels[] = {
     "Wi-Fi Power",
     "Wi-Fi Stats",
     "Wi-Fi SoftAP",
     "Audio Output",
+    "CPU Speed",
     "RGB Backlight",
     "AI Companion",
     "Back to Menu"
@@ -1079,9 +1080,10 @@ void renderSettingsMenu() {
     vals[1] = wifiStreamer.isWiFiEnabled() ? (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED ? "[CONN]" : "[INFO]") : "[OFF]";
     vals[2] = (wifiStreamer.getWiFiState() == WIFI_STATE_AP_MODE) ? "[ACTV]" : "[START]";
     vals[3] = String("[") + audioPlayer.getOutputModeShortName() + "]";
-    vals[4] = ledManager.isEnabled() ? "[ON]" : "[OFF]";
-    vals[5] = String("[") + (aiCompanion.getCompanion() == COMPANION_CAT ? "NEKO" : "MOCHI") + "]";
-    vals[6] = "[EXIT]";
+    vals[4] = String("[") + powerManager.getProfileShortName(powerManager.getProfile()) + "]";
+    vals[5] = ledManager.isEnabled() ? "[ON]" : "[OFF]";
+    vals[6] = String("[") + (aiCompanion.getCompanion() == COMPANION_CAT ? "NEKO" : "MOCHI") + "]";
+    vals[7] = "[EXIT]";
 
     display.drawStandardMenu("SETTINGS", settingsMenuLabels, SETTINGS_MENU_COUNT, settingsMenuSelection, settingsMenuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -1156,13 +1158,16 @@ void updateSettingsMode() {
                 audioPlayer.setOutputMode(cur == OUTPUT_MODE_SPEAKER_I2S ? OUTPUT_MODE_FIIO_USB_DAC : OUTPUT_MODE_SPEAKER_I2S);
                 break;
             }
-            case 4: // RGB Backlight
+            case 4: // CPU Speed
+                powerManager.cycleProfile();
+                break;
+            case 5: // RGB Backlight
                 ledManager.toggleEnabled();
                 break;
-            case 5: // AI Companion
+            case 6: // AI Companion
                 aiCompanion.toggleCompanion();
                 break;
-            case 6: // Back
+            case 7: // Back
                 currentMode = MODE_MAIN_MENU;
                 break;
         }
@@ -1186,7 +1191,7 @@ void updateSystemInfoMode() {
         snprintf(buf, sizeof(buf), "VBAT: %.2fV (%d%%)", battery.getVoltage(), battery.getPercentage());
         u8g2.drawStr(4, 23, buf);
 
-        snprintf(buf, sizeof(buf), "CPU:  %d MHz", (int)powerManager.getTargetCpuFreqMhz());
+        snprintf(buf, sizeof(buf), "CPU:  %d MHz (%s)", (int)powerManager.getTargetCpuFreqMhz(), powerManager.getProfileShortName(powerManager.getProfile()));
         u8g2.drawStr(4, 35, buf);
 
         snprintf(buf, sizeof(buf), "VOL:  %d%%", audioPlayer.getVolume());

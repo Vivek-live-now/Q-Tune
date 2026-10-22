@@ -246,8 +246,9 @@ Q-Tunes boots into a 4-item scroll window styled in the Q-Watch OS design langua
 4. **Equalizer (DSP):** 5-band vertical slider HUD, instant preset switcher (`FLAT`, `BASS BOOST`, `VOCAL`, `CLUB`), and Jan Meier headphone crossfeed.
 5. **AI Companion (DJ Neko & Mochi):** Live interactive pet with 65 authentic `.anim` expressions, audio reactivity, voice commands, and Gemini 3.5 cloud reasoning.
 6. **RGB Light Effects:** 7 music-reactive modes (including Vocal Lightning and Bass Pulse) with adjustable brightness and sensitivity.
-7. **Hardware Diagnostics:** Interactive 13-point diagnostic suite including AI & Gemini Check, Dual Speaker Channel Isolation, and FiiO KA11 DAC test.
-8. **System Info:** Battery voltage / PWL percentage curve, dynamic CPU scaling, microSD usage, and manual Safe Eject toggle.
+7. **Settings:** Wi-Fi control, Wi-Fi network stats, Audio Output selector, CPU Speed governor (`[240M]`, `[160M]`, `[80M]`, `[AUTO]`), RGB backlight, and AI companion switcher.
+8. **Hardware Diagnostics:** Interactive 13-point diagnostic suite including AI & Gemini Check, Dual Speaker Channel Isolation, and FiiO KA11 DAC test.
+9. **System Info:** Battery voltage / PWL percentage curve, live CPU frequency and power profile, microSD usage, and manual Safe Eject toggle.
 
 ---
 
