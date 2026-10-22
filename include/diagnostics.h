@@ -18,11 +18,12 @@ public:
 
 public:
     void testVocalReactiveCheck();
+    void testAIGeminiCheck();
 
 private:
     int selectedIndex;
     int scrollOffset;
-    static const int TOTAL_TESTS = 13;
+    static const int TOTAL_TESTS = 14;
     void renderMenu();
     void executeTest(int index);
 

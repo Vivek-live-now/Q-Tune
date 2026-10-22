@@ -1747,7 +1747,15 @@ def test_ai_companion_gemini_and_anim_engine():
     assert "updateAICompanionMode" in m_text, "updateAICompanionMode missing in main.cpp"
     assert "/api/ai/chat" in w_text, "/api/ai/chat route missing in wifi_streamer.cpp"
     assert "/api/ai/companion" in w_text, "/api/ai/companion route missing in wifi_streamer.cpp"
-    print("  [PASS] 4. Gemini API context serialization, action execution, and Web Remote routes verified.")
+
+    # AI & Gemini Diagnostics Check
+    diag_cpp = os.path.join(base_dir, "src", "diagnostics.cpp")
+    with open_utf8(diag_cpp) as f:
+        diag_text = f.read()
+    assert "AI & Gemini Check" in diag_text, "AI & Gemini Check menu entry missing in diagnostics.cpp"
+    assert "testAIGeminiCheck" in diag_text, "testAIGeminiCheck method missing in diagnostics.cpp"
+    assert "AI & GEMINI DIAGNOSTICS" in diag_text, "AI & GEMINI DIAGNOSTICS header missing in diagnostics.cpp"
+    print("  [PASS] 4. Gemini API context serialization, action execution, Web Remote routes, and dedicated diagnostics verified.")
 
     # 6. Execute Native Host Unit Binary
     bin_path = os.path.join(base_dir, "tests", "test_ai_companion_bin")

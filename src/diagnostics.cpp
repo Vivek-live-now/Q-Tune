@@ -1,5 +1,8 @@
 #include "diagnostics.h"
 #include "usb_manager.h"
+#include "ai_companion.h"
+#include "gemini_client.h"
+#include "wifi_streamer.h"
 
 static const char* testNames[] = {
     "1. OLED Test",
@@ -14,7 +17,8 @@ static const char* testNames[] = {
     "10. INMP441 Mic Test",
     "11. FiiO KA11 USB DAC",
     "12. Vocal Reactive Check",
-    "13. Return to Menu"
+    "13. AI & Gemini Check",
+    "14. Return to Menu"
 };
 
 Diagnostics::Diagnostics() : selectedIndex(0), scrollOffset(0) {}
@@ -44,7 +48,7 @@ bool Diagnostics::runMenu() {
         ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
         renderMenu();
     } else if (evt == BTN_EVENT_SEL_PRESS) {
-        if (selectedIndex == 12) {
+        if (selectedIndex == TOTAL_TESTS - 1) {
             return false; // Return to Menu
         }
         executeTest(selectedIndex);
@@ -69,6 +73,7 @@ void Diagnostics::executeTest(int index) {
         case 9: testINMP441Mic(); break;
         case 10: testFiiOKA11USB(); break;
         case 11: testVocalReactiveCheck(); break;
+        case 12: testAIGeminiCheck(); break;
     }
 }
 
@@ -573,4 +578,163 @@ void Diagnostics::testVocalReactiveCheck() {
     }
     ledManager.setUserMode(prevMode);
     ledManager.setEnabled(prevEnabled);
+}
+
+void Diagnostics::testAIGeminiCheck() {
+    display.clear();
+    U8G2 &u8g2 = display.getU8g2();
+
+    bool wasPlaying = audioPlayer.isPlaying();
+    if (wasPlaying) {
+        audioPlayer.pause();
+    }
+
+    spectrumAnalyzer.start();
+
+    enum PingState {
+        PING_IDLE = 0,
+        PING_TESTING,
+        PING_SUCCESS,
+        PING_FAILED
+    };
+    PingState pingState = PING_IDLE;
+    uint32_t pingStartTime = 0;
+    uint32_t pingDurationMs = 0;
+    String pingResultMsg = "";
+
+    while (true) {
+        // 1. Live microphone sampling
+        spectrumAnalyzer.sampleMicrophone();
+        float micRms = spectrumAnalyzer.getRMSLevel();
+
+        // 2. Poll async Gemini result if test in progress
+        if (pingState == PING_TESTING) {
+            bool ok = false;
+            String outMsg, outEmote, outAct, outHeard;
+            if (geminiClient.pollAsyncResult(ok, outMsg, outEmote, outAct, outHeard)) {
+                pingDurationMs = millis() - pingStartTime;
+                if (ok) {
+                    pingState = PING_SUCCESS;
+                    pingResultMsg = outMsg.length() > 0 ? outMsg : "OK: Responded";
+                    if (aiCompanion.getCompanion() == COMPANION_CAT) {
+                        aiCompanion.playMeow();
+                    } else {
+                        aiCompanion.playChirp();
+                    }
+                    ledManager.triggerButtonPulse(CRGB::Green, 2, 50);
+                } else {
+                    pingState = PING_FAILED;
+                    pingResultMsg = outMsg.length() > 0 ? outMsg : "Failed";
+                    ledManager.triggerButtonPulse(CRGB::Red, 2, 50);
+                }
+            }
+        }
+
+        // 3. Render Diagnostics Screen
+        display.clear();
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.drawStr(0, 10, "AI & GEMINI DIAGNOSTICS");
+        u8g2.drawHLine(0, 12, 128);
+
+        u8g2.setFont(u8g2_font_5x7_tr);
+        char buf[64];
+
+        // Line 1: API Key & Config status
+        bool hasKey = geminiClient.hasApiKey();
+        const char* keyRaw = geminiClient.getApiKey();
+        char keyMasked[20] = "None";
+        if (hasKey && strlen(keyRaw) >= 8) {
+            snprintf(keyMasked, sizeof(keyMasked), "%.4s...%.4s", keyRaw, keyRaw + strlen(keyRaw) - 4);
+        } else if (hasKey) {
+            snprintf(keyMasked, sizeof(keyMasked), "Configured");
+        }
+        snprintf(buf, sizeof(buf), "Key: %s [%s]", hasKey ? "OK" : "MISSING", keyMasked);
+        u8g2.drawStr(0, 21, buf);
+
+        // Line 2: Model Name & Active Pet
+        const char* petName = (aiCompanion.getCompanion() == COMPANION_CAT) ? "DJ Neko" : "Mochi";
+        snprintf(buf, sizeof(buf), "Mdl: %s [%s]", geminiClient.getModelName(), petName);
+        u8g2.drawStr(0, 30, buf);
+
+        // Line 3: Wi-Fi status & Signal dBm
+        if (WiFi.status() == WL_CONNECTED || wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED) {
+            snprintf(buf, sizeof(buf), "WiFi: %s (%ddBm)", wifiStreamer.getSSID().c_str(), (int)wifiStreamer.getRSSI());
+        } else {
+            snprintf(buf, sizeof(buf), "WiFi: NOT CONNECTED");
+        }
+        u8g2.drawStr(0, 39, buf);
+
+        // Line 4: Live INMP441 Mic Audio Level Bar
+        snprintf(buf, sizeof(buf), "Mic: RMS %0.2f", micRms);
+        u8g2.drawStr(0, 48, buf);
+        int barW = (int)(micRms * 80.0f);
+        if (barW > 54) barW = 54;
+        u8g2.drawFrame(72, 42, 55, 6);
+        if (barW > 0) u8g2.drawBox(73, 43, barW, 4);
+
+        // Line 5: API Test Result or Prompt
+        if (pingState == PING_IDLE) {
+            u8g2.drawStr(0, 56, "API: [SEL] Test Ping");
+        } else if (pingState == PING_TESTING) {
+            static const char* pDots[] = { "Testing", "Testing.", "Testing..", "Testing..." };
+            int dIdx = (millis() / 300) % 4;
+            uint32_t elapsed = (millis() - pingStartTime);
+            snprintf(buf, sizeof(buf), "API: %s (%ums)", pDots[dIdx], (unsigned int)elapsed);
+            u8g2.drawStr(0, 56, buf);
+        } else if (pingState == PING_SUCCESS) {
+            snprintf(buf, sizeof(buf), "API: OK (%ums)!", (unsigned int)pingDurationMs);
+            u8g2.drawStr(0, 56, buf);
+        } else {
+            String errTrim = pingResultMsg;
+            if (errTrim.length() > 18) errTrim = errTrim.substring(0, 16) + "..";
+            snprintf(buf, sizeof(buf), "API: %s", errTrim.c_str());
+            u8g2.drawStr(0, 56, buf);
+        }
+
+        // Line 6: Bottom Navigation Hint
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawHLine(0, 58, 128);
+        u8g2.drawStr(0, 64, "[SEL] Ping API   [UP] Pet   [CANCEL] Back");
+
+        display.sendBuffer();
+
+        // 4. Button handling
+        ButtonEvent evt = buttonManager.update();
+        if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+            if (geminiClient.isBusy()) {
+                geminiClient.cancelAsync();
+            }
+            break;
+        }
+
+        if (evt == BTN_EVENT_SEL_PRESS || evt == BTN_EVENT_OK_PRESS) {
+            if (pingState != PING_TESTING) {
+                if (!geminiClient.hasApiKey()) {
+                    pingState = PING_FAILED;
+                    pingResultMsg = "No API Key in SD";
+                    ledManager.triggerButtonPulse(CRGB::Red, 1, 50);
+                } else if (WiFi.status() != WL_CONNECTED && wifiStreamer.getWiFiState() != WIFI_STATE_CONNECTED) {
+                    pingState = PING_FAILED;
+                    pingResultMsg = "Connect Wi-Fi";
+                    ledManager.triggerButtonPulse(CRGB::Red, 1, 50);
+                } else {
+                    pingState = PING_TESTING;
+                    pingStartTime = millis();
+                    ledManager.triggerButtonPulse(CRGB::Cyan, 1, 50);
+                    geminiClient.askAsync("Ping test: reply with 'OK' and companion greeting!");
+                }
+            }
+        } else if (evt == BTN_EVENT_UP_PRESS || evt == BTN_EVENT_UP_HOLD) {
+            aiCompanion.toggleCompanion();
+            ledManager.triggerButtonPulse(CRGB::Purple, 1, 40);
+        }
+
+        unsigned long tPoll = millis();
+        while (millis() - tPoll < 25) { yield(); }
+    }
+
+    spectrumAnalyzer.stop();
+    if (wasPlaying && !audioPlayer.isPlaying()) {
+        audioPlayer.resume();
+    }
 }
