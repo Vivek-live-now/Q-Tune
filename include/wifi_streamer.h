@@ -41,8 +41,14 @@ public:
 
     // State & Status
     WiFiStreamState getWiFiState() const;
+    const char* getWiFiStateName() const;
     AudioStreamState getStreamState() const;
     String getIPAddress() const;
+    String getGatewayIP() const;
+    String getSubnetMask() const;
+    String getMACAddress() const;
+    uint8_t getChannel() const;
+    int8_t getSignalQualityPercent() const;
     String getMDNSHostname() const;
     String getSSID() const;
     int8_t getRSSI() const;

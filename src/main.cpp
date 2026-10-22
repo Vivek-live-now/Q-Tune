@@ -26,6 +26,7 @@ enum AppMode {
     MODE_WIFI_STREAMER,
     MODE_RGB_EFFECTS,
     MODE_AI_COMPANION,
+    MODE_SETTINGS,
     MODE_DIAGNOSTICS,
     MODE_SYSTEM_INFO
 };
@@ -33,13 +34,14 @@ enum AppMode {
 AppMode currentMode = MODE_MAIN_MENU;
 int menuSelection = 0;
 int menuScrollOffset = 0;
-const int MAIN_MENU_COUNT = 7;
+const int MAIN_MENU_COUNT = 8;
 const char* menuLabels[] = {
     "Music Player",
     "Spectrum Visualizer",
     "Wi-Fi Audio Stream",
     "RGB Light Effects",
     "AI Companion",
+    "Settings",
     "Diagnostics",
     "System Info"
 };
@@ -55,8 +57,9 @@ void renderMainMenu() {
     vals[2] = wifiStreamer.isStreaming() ? "[STRM]" : (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED ? "[CONN]" : "[WIFI]");
     vals[3] = ledManager.isEnabled() ? (String("[") + ledManager.getShortModeName() + "]") : "[OFF]";
     vals[4] = String("[") + (aiCompanion.getCompanion() == COMPANION_CAT ? "NEKO" : "MOCHI") + "]";
-    vals[5] = "[11]";
-    vals[6] = "[INFO]";
+    vals[5] = wifiStreamer.isWiFiEnabled() ? "[ON]" : "[OFF]";
+    vals[6] = "[11]";
+    vals[7] = "[INFO]";
 
     display.drawStandardMenu("Q-TUNES", menuLabels, MAIN_MENU_COUNT, menuSelection, menuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -112,10 +115,19 @@ void updateMainMenu() {
                 }
                 break;
             case 5:
+                extern int settingsMenuSelection;
+                extern int settingsMenuScrollOffset;
+                extern bool inWifiStatsView;
+                currentMode = MODE_SETTINGS;
+                settingsMenuSelection = 0;
+                settingsMenuScrollOffset = 0;
+                inWifiStatsView = false;
+                break;
+            case 6:
                 currentMode = MODE_DIAGNOSTICS;
                 diagnostics.begin();
                 break;
-            case 6:
+            case 7:
                 currentMode = MODE_SYSTEM_INFO;
                 break;
         }
@@ -659,6 +671,231 @@ void updateAICompanionMode() {
     }
 }
 
+// ==============================================================================
+// Outside Settings Menu & Wi-Fi Stats Mode
+// ==============================================================================
+int settingsMenuSelection = 0;
+int settingsMenuScrollOffset = 0;
+bool inWifiStatsView = false;
+uint8_t wifiStatsPage = 0;
+
+const int SETTINGS_MENU_COUNT = 7;
+const char* settingsMenuLabels[] = {
+    "Wi-Fi Power",
+    "Wi-Fi Stats",
+    "Wi-Fi SoftAP",
+    "Audio Output",
+    "RGB Backlight",
+    "AI Companion",
+    "Back to Menu"
+};
+
+void renderWifiStats() {
+    display.clear();
+    char titleBuf[32];
+    snprintf(titleBuf, sizeof(titleBuf), "WIFI STATS (%d/2)", (int)(wifiStatsPage + 1));
+    display.drawTopStatusBar(titleBuf, battery.getPercentage());
+    U8G2 &u8g2 = display.getU8g2();
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.setDrawColor(1);
+
+    if (!wifiStreamer.isWiFiEnabled()) {
+        u8g2.drawStr(6, 25, "Wi-Fi radio is OFF");
+        u8g2.drawStr(6, 38, "Press SEL to power ON");
+        u8g2.drawStr(6, 51, "Press CANCEL to return");
+        u8g2.drawHLine(4, 56, 120);
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(4, 62, "[SEL] Power ON   [CANCEL] Back");
+        display.sendBuffer();
+        return;
+    }
+
+    if (wifiStatsPage == 0) {
+        // Page 1: Live Connection & Network
+        char buf[48];
+
+        // Line 1: State + Signal Quality
+        const char* stateStr = wifiStreamer.getWiFiStateName();
+        snprintf(buf, sizeof(buf), "State: %s", stateStr);
+        u8g2.drawStr(4, 20, buf);
+
+        if (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED) {
+            int qual = wifiStreamer.getSignalQualityPercent();
+            snprintf(buf, sizeof(buf), "%d%%", qual);
+            u8g2.drawStr(96, 20, buf);
+            // Draw mini signal meter
+            int bars = (qual > 75) ? 4 : (qual > 50 ? 3 : (qual > 25 ? 2 : 1));
+            for (int b = 0; b < 4; b++) {
+                int barH = 2 + b * 2;
+                if (b < bars) {
+                    u8g2.drawBox(116 + b * 3, 20 - barH, 2, barH);
+                } else {
+                    u8g2.drawHLine(116 + b * 3, 20 - 1, 2);
+                }
+            }
+        }
+
+        // Line 2: SSID
+        String ssid = (wifiStreamer.getWiFiState() == WIFI_STATE_AP_MODE) ? "Q-Tune-Audio" : wifiStreamer.getSSID();
+        if (ssid.length() == 0) ssid = "Not Configured";
+        if (ssid.length() > 15) ssid = ssid.substring(0, 14) + "..";
+        snprintf(buf, sizeof(buf), "SSID:  %s", ssid.c_str());
+        u8g2.drawStr(4, 30, buf);
+
+        // Line 3: IP Address
+        String ip = wifiStreamer.getIPAddress();
+        snprintf(buf, sizeof(buf), "IP:    %s", ip.c_str());
+        u8g2.drawStr(4, 40, buf);
+
+        // Line 4: Signal dBm & Channel
+        if (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED) {
+            snprintf(buf, sizeof(buf), "RSSI:  %d dBm (CH %d)", (int)wifiStreamer.getRSSI(), (int)wifiStreamer.getChannel());
+        } else if (wifiStreamer.getWiFiState() == WIFI_STATE_AP_MODE) {
+            snprintf(buf, sizeof(buf), "Mode:  SoftAP (CH 1)");
+        } else {
+            snprintf(buf, sizeof(buf), "Status: Connecting...");
+        }
+        u8g2.drawStr(4, 50, buf);
+
+        // Bottom Help Row
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawHLine(0, 54, 128);
+        u8g2.drawStr(2, 62, "[DN] Hardware Info   [SEL] Toggle");
+    } else {
+        // Page 2: Hardware & Routing
+        char buf[48];
+
+        // Line 1: MAC Address
+        String mac = wifiStreamer.getMACAddress();
+        snprintf(buf, sizeof(buf), "MAC:  %s", mac.c_str());
+        u8g2.drawStr(4, 20, buf);
+
+        // Line 2: Gateway
+        String gw = wifiStreamer.getGatewayIP();
+        snprintf(buf, sizeof(buf), "GW:   %s", gw.c_str());
+        u8g2.drawStr(4, 30, buf);
+
+        // Line 3: Subnet Mask
+        String mask = wifiStreamer.getSubnetMask();
+        snprintf(buf, sizeof(buf), "MASK: %s", mask.c_str());
+        u8g2.drawStr(4, 40, buf);
+
+        // Line 4: Hostname & Audio Stream Status
+        const char* strm = wifiStreamer.isStreaming() ? "STREAMING" : "IDLE";
+        snprintf(buf, sizeof(buf), "Host: %s [%s]", wifiStreamer.getMDNSHostname().c_str(), strm);
+        u8g2.drawStr(4, 50, buf);
+
+        // Bottom Help Row
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawHLine(0, 54, 128);
+        u8g2.drawStr(2, 62, "[UP] Network Info    [SEL] Toggle");
+    }
+
+    display.sendBuffer();
+}
+
+void renderSettingsMenu() {
+    display.clear();
+    char batBuf[16];
+    snprintf(batBuf, sizeof(batBuf), "%d%%", battery.getPercentage());
+
+    String vals[SETTINGS_MENU_COUNT];
+    vals[0] = wifiStreamer.isWiFiEnabled() ? "[ON]" : "[OFF]";
+    vals[1] = wifiStreamer.isWiFiEnabled() ? (wifiStreamer.getWiFiState() == WIFI_STATE_CONNECTED ? "[CONN]" : "[INFO]") : "[OFF]";
+    vals[2] = (wifiStreamer.getWiFiState() == WIFI_STATE_AP_MODE) ? "[ACTV]" : "[START]";
+    vals[3] = String("[") + audioPlayer.getOutputModeShortName() + "]";
+    vals[4] = ledManager.isEnabled() ? "[ON]" : "[OFF]";
+    vals[5] = String("[") + (aiCompanion.getCompanion() == COMPANION_CAT ? "NEKO" : "MOCHI") + "]";
+    vals[6] = "[EXIT]";
+
+    display.drawStandardMenu("SETTINGS", settingsMenuLabels, SETTINGS_MENU_COUNT, settingsMenuSelection, settingsMenuScrollOffset, vals, batBuf);
+    display.sendBuffer();
+}
+
+void updateSettingsMode() {
+    static unsigned long lastSettingsRender = 0;
+    static int lastSel = -1, lastOff = -1;
+    static bool lastInStats = false;
+    static uint8_t lastPage = 0;
+    ButtonEvent evt = buttonManager.update();
+    unsigned long now = millis();
+
+    if (inWifiStatsView) {
+        // --- Wi-Fi Stats View ---
+        if (evt != BTN_EVENT_NONE || (now - lastSettingsRender >= 300) || lastInStats != inWifiStatsView || lastPage != wifiStatsPage) {
+            lastSettingsRender = now;
+            lastInStats = inWifiStatsView;
+            lastPage = wifiStatsPage;
+            renderWifiStats();
+        }
+
+        if (evt == BTN_EVENT_UP_PRESS) {
+            wifiStatsPage = 0;
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+        } else if (evt == BTN_EVENT_DN_PRESS) {
+            wifiStatsPage = 1;
+            ledManager.triggerButtonPulse(CRGB::Blue, 1, 30);
+        } else if (evt == BTN_EVENT_SEL_PRESS) {
+            wifiStreamer.toggleWiFi();
+            ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+        } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+            inWifiStatsView = false;
+            lastSel = -1;
+            lastOff = -1;
+            ledManager.triggerButtonPulse(CRGB::Orange, 1, 40);
+        }
+        return;
+    }
+
+    // --- Main Settings Menu ---
+    bool scrolling = Display::isMenuScrolling();
+    unsigned long refreshRate = scrolling ? 60 : 250;
+    if (evt != BTN_EVENT_NONE || settingsMenuSelection != lastSel || settingsMenuScrollOffset != lastOff || (now - lastSettingsRender >= refreshRate)) {
+        lastSettingsRender = now;
+        lastSel = settingsMenuSelection;
+        lastOff = settingsMenuScrollOffset;
+        renderSettingsMenu();
+    }
+
+    if (evt == BTN_EVENT_UP_PRESS) {
+        Display::navigateMenu(settingsMenuSelection, settingsMenuScrollOffset, SETTINGS_MENU_COUNT, -1);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+    } else if (evt == BTN_EVENT_DN_PRESS) {
+        Display::navigateMenu(settingsMenuSelection, settingsMenuScrollOffset, SETTINGS_MENU_COUNT, +1);
+        ledManager.triggerButtonPulse(CRGB::Blue, 1, 40);
+    } else if (evt == BTN_EVENT_SEL_PRESS) {
+        ledManager.triggerButtonPulse(CRGB::Green, 1, 60);
+        switch (settingsMenuSelection) {
+            case 0: // Wi-Fi Power
+                wifiStreamer.toggleWiFi();
+                break;
+            case 1: // Wi-Fi Stats
+                inWifiStatsView = true;
+                wifiStatsPage = 0;
+                break;
+            case 2: // Wi-Fi SoftAP
+                wifiStreamer.startAPMode();
+                break;
+            case 3: { // Audio Output
+                AudioOutputMode cur = audioPlayer.getOutputMode();
+                audioPlayer.setOutputMode(cur == OUTPUT_SPEAKER ? OUTPUT_KA11_DAC : OUTPUT_SPEAKER);
+                break;
+            }
+            case 4: // RGB Backlight
+                ledManager.toggleEnabled();
+                break;
+            case 5: // AI Companion
+                aiCompanion.toggleCompanion();
+                break;
+            case 6: // Back
+                currentMode = MODE_MAIN_MENU;
+                break;
+        }
+    } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+        currentMode = MODE_MAIN_MENU;
+    }
+}
+
 void updateSystemInfoMode() {
     static unsigned long lastSysRender = 0;
     ButtonEvent evt = buttonManager.update();
@@ -775,6 +1012,9 @@ void loop() {
             break;
         case MODE_AI_COMPANION:
             updateAICompanionMode();
+            break;
+        case MODE_SETTINGS:
+            updateSettingsMode();
             break;
         case MODE_DIAGNOSTICS:
             if (!diagnostics.runMenu()) {

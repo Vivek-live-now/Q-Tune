@@ -1576,9 +1576,50 @@ void WiFiStreamer::update() {
 }
 
 WiFiStreamState WiFiStreamer::getWiFiState() const { return wifiState; }
+
+const char* WiFiStreamer::getWiFiStateName() const {
+    switch (wifiState) {
+        case WIFI_STATE_OFF: return "OFF";
+        case WIFI_STATE_CONNECTING: return "CONNECTING";
+        case WIFI_STATE_CONNECTED: return "CONNECTED";
+        case WIFI_STATE_AP_MODE: return "AP_MODE";
+        default: return "UNKNOWN";
+    }
+}
+
 AudioStreamState WiFiStreamer::getStreamState() const { return streamState; }
 String WiFiStreamer::getSSID() const { return savedSSID; }
 int8_t WiFiStreamer::getRSSI() const { return (wifiState == WIFI_STATE_CONNECTED) ? WiFi.RSSI() : 0; }
+
+String WiFiStreamer::getGatewayIP() const {
+    if (wifiState == WIFI_STATE_CONNECTED) {
+        return WiFi.gatewayIP().toString();
+    }
+    return "0.0.0.0";
+}
+
+String WiFiStreamer::getSubnetMask() const {
+    if (wifiState == WIFI_STATE_CONNECTED) {
+        return WiFi.subnetMask().toString();
+    }
+    return "0.0.0.0";
+}
+
+String WiFiStreamer::getMACAddress() const {
+    return WiFi.macAddress();
+}
+
+uint8_t WiFiStreamer::getChannel() const {
+    return (wifiState == WIFI_STATE_CONNECTED) ? WiFi.channel() : 1;
+}
+
+int8_t WiFiStreamer::getSignalQualityPercent() const {
+    if (wifiState != WIFI_STATE_CONNECTED) return 0;
+    int rssi = WiFi.RSSI();
+    if (rssi <= -100) return 0;
+    if (rssi >= -50) return 100;
+    return (int8_t)(2 * (rssi + 100));
+}
 String WiFiStreamer::getTrackTitle() const { return currentTrackTitle; }
 String WiFiStreamer::getTrackArtist() const { return currentTrackArtist; }
 uint32_t WiFiStreamer::getSampleRate() const { return currentSampleRate; }

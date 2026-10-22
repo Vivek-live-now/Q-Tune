@@ -547,9 +547,12 @@ def test_app_shell_and_mode_switching():
         assert "MODE_PLAYER" in m_text
         assert "MODE_VISUALIZER" in m_text
         assert "MODE_RGB_EFFECTS" in m_text
+        assert "MODE_SETTINGS" in m_text
         assert "MODE_DIAGNOSTICS" in m_text
         assert "MODE_SYSTEM_INFO" in m_text
         assert "updateMainMenu()" in m_text
+        assert "updateSettingsMode()" in m_text
+        assert "renderWifiStats()" in m_text
         assert "uiPlayer.update()" in m_text
 
     with open_utf8(diag_cpp) as f:
