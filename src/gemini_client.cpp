@@ -370,11 +370,14 @@ bool GeminiClient::executeAction(const String &action) {
     if (action.startsWith("SET_VISUALIZER:")) {
         String vis = action.substring(15);
         vis.toUpperCase();
-        if (vis.indexOf("VINTAGE") != -1 || vis.indexOf("NEEDLE") != -1) spectrumAnalyzer.setPreset(0);
-        else if (vis.indexOf("HORNET") != -1 || vis.indexOf("BAR") != -1) spectrumAnalyzer.setPreset(1);
-        else if (vis.indexOf("TURNTABLE") != -1 || vis.indexOf("VINYL") != -1) spectrumAnalyzer.setPreset(2);
-        else if (vis.indexOf("HYBRID") != -1 || vis.indexOf("SPEC") != -1) spectrumAnalyzer.setPreset(3);
-        else spectrumAnalyzer.cyclePreset();
+        if (vis.indexOf("VINTAGE") != -1 || vis.indexOf("NEEDLE") != -1 || vis.indexOf("ANALOG") != -1) spectrumAnalyzer.setPreset(PRESET_ANALOG_VU);
+        else if (vis.indexOf("HORNET") != -1 || vis.indexOf("BAR") != -1) spectrumAnalyzer.setPreset(PRESET_HORIZ_BAR_VU);
+        else if (vis.indexOf("TURNTABLE") != -1 || vis.indexOf("VINYL") != -1) spectrumAnalyzer.setPreset(PRESET_VINYL_VU);
+        else if (vis.indexOf("HYBRID") != -1 || vis.indexOf("SPEC") != -1) spectrumAnalyzer.setPreset(PRESET_VU_SPECTROMETER);
+        else if (vis.indexOf("WAVE") != -1) spectrumAnalyzer.setPreset(PRESET_WAVEFORM);
+        else if (vis.indexOf("PLASMA") != -1) spectrumAnalyzer.setPreset(PRESET_MILKDROP_PLASMA);
+        else if (vis.indexOf("STAR") != -1) spectrumAnalyzer.setPreset(PRESET_STARFIELD);
+        else spectrumAnalyzer.nextPreset();
         return true;
     }
 
