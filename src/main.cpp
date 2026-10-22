@@ -485,22 +485,24 @@ String aiStatusBubble = "Ready to groove!";
 unsigned long lastAiButtonTime = 0;
 
 static String toastMessage = "";
+static String toastHeard = "";
 static uint32_t toastEndTime = 0;
 static bool toastListening = false;
 static float toastAudioLevel = 0.0f;
 
-void showToast(const String &msg, uint32_t duration_ms = 3000, bool isListening = false) {
+void showToast(const String &msg, uint32_t duration_ms = 3000, bool isListening = false, const String &heard = "") {
     toastMessage = msg;
+    toastHeard = heard;
     toastEndTime = millis() + duration_ms;
     toastListening = isListening;
 }
 
-static void renderSpeechBubbleCard(const String &msg) {
+static void renderSpeechBubbleCard(const String &msg, const String &heard = "") {
     U8G2 &u8g2 = display.getU8g2();
     int boxX = 2;
-    int boxY = 4;
+    int boxY = 2;
     int boxW = 124;
-    int boxH = 58;
+    int boxH = 60;
 
     // Solid background with rounded frame
     u8g2.setDrawColor(0);
@@ -516,11 +518,22 @@ static void renderSpeechBubbleCard(const String &msg) {
     u8g2.drawStr(boxX + 4, boxY + 8, cName);
     u8g2.setDrawColor(1);
 
-    // Multi-line word wrapping with 4x6 font (fits 24 chars per line)
+    int lineY = boxY + 18;
     u8g2.setFont(u8g2_font_4x6_tr);
+
+    // 1. If user spoke something, show "You: <spoken text>"
+    if (heard.length() > 0) {
+        String userStr = "You: \"" + heard + "\"";
+        if (userStr.length() > 24) userStr = userStr.substring(0, 22) + "..\"";
+        u8g2.drawStr(boxX + 4, lineY, userStr.c_str());
+        lineY += 7;
+        u8g2.drawHLine(boxX + 4, lineY - 2, boxW - 8);
+        lineY += 6;
+    }
+
+    // 2. Multi-line word wrapping with 4x6 font (fits 24 chars per line)
     const int maxChars = 24;
-    const int maxLines = 4;
-    int lineY = boxY + 19;
+    const int maxLines = (heard.length() > 0) ? 3 : 4;
     int lineCount = 0;
 
     int p = 0;
@@ -551,13 +564,13 @@ static void renderSpeechBubbleCard(const String &msg) {
             else line += "..";
         }
         u8g2.drawStr(boxX + 4, lineY, line.c_str());
-        lineY += 9;
+        lineY += 8;
         lineCount++;
         p = lineEnd;
     }
 
     // Bottom dismiss hint
-    u8g2.drawHLine(boxX + 2, boxY + boxH - 9, boxW - 4);
+    u8g2.drawHLine(boxX + 2, boxY + boxH - 8, boxW - 4);
     u8g2.drawStr(boxX + 26, boxY + boxH - 2, "[OK/CANCEL] Close");
 }
 
@@ -565,9 +578,9 @@ void renderActiveToast() {
     if (millis() < toastEndTime || toastListening) {
         if (toastMessage.length() == 0) return;
 
-        // Multi-line card for full AI responses (> 20 characters)
-        if (!toastListening && toastMessage.length() > 20) {
-            renderSpeechBubbleCard(toastMessage);
+        // Multi-line card for full AI responses (> 20 characters or with transcribed speech)
+        if (!toastListening && (toastMessage.length() > 20 || toastHeard.length() > 0)) {
+            renderSpeechBubbleCard(toastMessage, toastHeard);
             return;
         }
 
@@ -707,7 +720,8 @@ void startMicListeningSession(const char* promptHint = nullptr) {
             aiCompanion.playChirp();
         }
         aiStatusBubble = outMsg;
-        showToast(outMsg.length() > 0 ? outMsg : "Done!", 8000, false);
+        String heard = String(geminiClient.getLastTranscription());
+        showToast(outMsg.length() > 0 ? outMsg : "Done!", 9000, false, heard);
     } else {
         aiStatusBubble = outMsg.length() > 0 ? outMsg : "AI request failed";
         showToast(aiStatusBubble, 4500, false);

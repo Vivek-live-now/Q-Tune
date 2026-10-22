@@ -129,12 +129,14 @@ public:
 
     // Status
     const char* getLastError() const { return last_error; }
+    const char* getLastTranscription() const { return last_transcription; }
     bool isBusy() const { return is_busy; }
 
 private:
     char api_key[128];
     char model_name[32];
     char last_error[64];
+    char last_transcription[96];
     bool is_busy;
 
     void setError(const char* err);

@@ -81,6 +81,7 @@ GeminiClient::GeminiClient() :
     api_key[OBFUSCATED_KEY_LEN] = '\0';
     strncpy(model_name, "gemini-3.5-flash", sizeof(model_name) - 1);
     memset(last_error, 0, sizeof(last_error));
+    memset(last_transcription, 0, sizeof(last_transcription));
 }
 
 void GeminiClient::setError(const char* err) {
@@ -325,9 +326,10 @@ String GeminiClient::buildPrompt(const char* userQuery) const {
     p += "Available Emotions (.anim): adore, angry, blank, blinding, brave, buzzing, contempt, crying, dancing, devil, distracted, dizzy, down, drowsy, encouragement, energetic, enraged, evil, fast, fierce, furious, giggle, glowing, growing, gundam, handsome, happy, hello, intro, irritated, laughing, left, love, menacing, mistake, playful, police, rain, relaxed, right, rush, scared, serene, shrink, shy, sick, sleepy, smile, smirk, smoke, sneeze, sobbing, sparkle, speed, splash, spraying, squint, surprised, sushi, swinging, teasing, tough, weeping, wink, yawn.\n\n";
     p += "CRITICAL: Respond directly without internal reasoning.\n";
     p += "Respond strictly in this format:\n";
+    p += "HEARD: <exact transcription of what the user spoke>\n";
     p += "EMOTE: [<emotion>]\n";
     p += "ACTION: [<command_or_NONE>]\n";
-    p += "MESSAGE: <concise answer under 90 characters for 128x64 display>\n\n";
+    p += "MESSAGE: <concise answer under 75 characters for 128x64 display>\n\n";
     p += "User: ";
     p += (userQuery && strlen(userQuery) > 0) ? userQuery : "Hello!";
     return p;
@@ -350,7 +352,18 @@ bool GeminiClient::parseResponse(const String &rawResponse, String &outEmote, St
         String upper = line;
         upper.toUpperCase();
 
-        if (upper.startsWith("EMOTE:")) {
+        if (upper.startsWith("HEARD:")) {
+            String val = line.substring(6);
+            val.trim();
+            if (val.startsWith("[") && val.endsWith("]")) {
+                val = val.substring(1, val.length() - 1);
+            }
+            val.trim();
+            if (val.length() > 0 && !val.equalsIgnoreCase("(silence)")) {
+                strncpy(last_transcription, val.c_str(), sizeof(last_transcription) - 1);
+                last_transcription[sizeof(last_transcription) - 1] = '\0';
+            }
+        } else if (upper.startsWith("EMOTE:")) {
             String val = line.substring(6);
             val.trim();
             if (val.startsWith("[") && val.endsWith("]")) {
@@ -372,7 +385,7 @@ bool GeminiClient::parseResponse(const String &rawResponse, String &outEmote, St
             val.trim();
             if (outMessage.length() > 0) outMessage += " ";
             outMessage += val;
-        } else if (outMessage.length() > 0 && !upper.startsWith("EMOTE:") && !upper.startsWith("ACTION:")) {
+        } else if (outMessage.length() > 0 && !upper.startsWith("EMOTE:") && !upper.startsWith("ACTION:") && !upper.startsWith("HEARD:")) {
             if (line.length() > 0) {
                 outMessage += " " + line;
             }
@@ -389,7 +402,7 @@ bool GeminiClient::parseResponse(const String &rawResponse, String &outEmote, St
             line.trim();
             String upper = line;
             upper.toUpperCase();
-            if (!upper.startsWith("EMOTE:") && !upper.startsWith("ACTION:") && line.length() > 0) {
+            if (!upper.startsWith("EMOTE:") && !upper.startsWith("ACTION:") && !upper.startsWith("HEARD:") && line.length() > 0) {
                 if (outMessage.length() > 0) outMessage += " ";
                 outMessage += line;
             }

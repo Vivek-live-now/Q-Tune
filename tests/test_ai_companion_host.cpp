@@ -146,6 +146,11 @@ int main() {
     assert(action == "SET_EQ:BASS_BOOST");
     assert(message.indexOf("Bass boosted!") != -1);
 
+    String sampleWithHeard = "HEARD: How is the weather today?\nEMOTE: curious\nACTION: NONE\nMESSAGE: Sunny and warm!";
+    assert(geminiClient.parseResponse(sampleWithHeard, emote, action, message) == true);
+    assert(strcmp(geminiClient.getLastTranscription(), "How is the weather today?") == 0);
+    assert(message.indexOf("Sunny and warm!") != -1);
+
     // Action Execution
     assert(geminiClient.executeAction("SWITCH_COMPANION:MOCHI") == true);
     assert(aiCompanion.getCompanion() == COMPANION_MOCHI);
