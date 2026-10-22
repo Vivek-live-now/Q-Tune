@@ -1,117 +1,233 @@
 # Q-Tunes
 
-A portable, audiophile-grade standalone music player and Wi-Fi/USB digital audio streamer built on the ESP32-S3 SuperMini board, inheriting proven pinout, power, and board layout standards from the Q-Watch architecture.
+[![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue.svg)](https://www.espressif.com/)
+[![Architecture](https://img.shields.io/badge/SoC-Dual--Core%20Xtensa%20LX7%20240MHz-orange.svg)]()
+[![Verification](https://img.shields.io/badge/Verification%20Suite-33%2F33%20PASSED%20(100%25)-success.svg)](tests/test_suite.py)
+[![Audio Engine](https://img.shields.io/badge/Audio-WAV%20%7C%20FLAC%20%7C%20MP3%20%7C%20M4A%2FAAC-red.svg)]()
+[![USB Host](https://img.shields.io/badge/USB%20DAC-FiiO%20KA11%20UAC%201.0%2F2.0-blueviolet.svg)]()
+[![AI Companion](https://img.shields.io/badge/AI%20Companion-Gemini%203.5%20%7C%20DJ%20Neko%20%26%20Mochi-brightgreen.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
+
+A portable, audiophile-grade standalone music player, high-resolution USB DAC streamer, Wi-Fi DLNA/UPnP network renderer, and intelligent dual-personality AI companion built on the **ESP32-S3 SuperMini** platform. Q-Tunes inherits proven electrical pinout, power, and layout standards from the **Q-Watch** architecture while delivering uncompromised hardware-accelerated digital audio playback.
 
 ---
 
-## Highlights & Features
+## Table of Contents
 
-- **Audiophile Dual-Output Architecture:**
+- [Key Capabilities](#key-capabilities)
+- [System Architecture](#system-architecture)
+  - [Hardware Signal Pipeline](#hardware-signal-pipeline)
+  - [4-Tier Layered AI Architecture](#4-tier-layered-ai-architecture)
+- [Hardware Specifications & Pinout Matrix](#hardware-specifications--pinout-matrix)
+  - [1. Shared SPI Bus (OLED Display + microSD)](#1-shared-spi-bus-oled-display--microsd)
+  - [2. I²S Audio & MEMS Microphone](#2-i2s-audio--mems-microphone)
+  - [3. Native USB Host Subsystem (FiiO KA11)](#3-native-usb-host-subsystem-fiio-ka11)
+  - [4. Navigation Input Matrix](#4-navigation-input-matrix)
+  - [5. Power, Battery ADC & Telemetry](#5-power-battery-adc--telemetry)
+- [Wiring & Electrical Connection Guide](#wiring--electrical-connection-guide)
+- [Operating Modes & User Interface](#operating-modes--user-interface)
+- [Navigation & Control Matrix](#navigation--control-matrix)
+- [Audiophile DSP Engine](#audiophile-dsp-engine)
+- [Multi-Page Player & Synced Lyrics](#multi-page-player--synced-lyrics)
+- [AI Companion Subsystem (DJ Neko & Mochi)](#ai-companion-subsystem-dj-neko--mochi)
+- [Wi-Fi Streaming & DLNA MediaRenderer](#wi-fi-streaming--dlna-mediarenderer)
+- [MicroSD Safety & Anti-Corruption Protocol](#microsd-safety--anti-corruption-protocol)
+- [Project Directory Layout](#project-directory-layout)
+- [Getting Started & Build Instructions](#getting-started--build-instructions)
+- [Hardware Diagnostics & Verification Suite](#hardware-diagnostics--verification-suite)
+- [License & Acknowledgments](#license--acknowledgments)
+
+---
+
+## Key Capabilities
+
+- **Dual-Output Audiophile Architecture:**
   - **Onboard Speaker / Amp:** I²S output to MAX98357A Class-D amplifier with hardware `(L+R)/2` mono downmix.
-  - **FiiO KA11 USB DAC (Cirrus Logic CS43131):** Full-Speed USB Host Audio Class (UAC 1.0/2.0) streaming up to 32-bit/384kHz, hardware volume/mute, safe eject, and hot-unplug auto-fallback.
+  - **FiiO KA11 USB DAC (Cirrus Logic CS43131):** Full-Speed USB Host Audio Class (UAC 1.0/2.0) streaming up to 32-bit/384kHz, hardware volume/mute via USB control transfers, hearing protection clamping (10% initial safe volume), safe eject, and hot-unplug fallback.
 - **Universal Multi-Format Audio Engine:**
-  - **Lossless WAV & FLAC:** Hardware frame-aligned PCM streaming with custom stream callbacks.
+  - **Lossless WAV & FLAC:** Hardware frame-aligned streaming via `dr_wav` and `dr_flac` with zero-allocation I/O callbacks.
   - **MP3:** Zero-stack heap scratch buffer architecture via `minimp3`.
   - **M4A / AAC:** High-efficiency fixed-point AAC decoding via `arduino-libhelix`.
-- **Wi-Fi Audio Streaming & DLNA / UPnP MediaRenderer:**
-  - Full UPnP `AVTransport:1` and `RenderingControl:1` compliance with SSDP discovery (`239.255.255.250`).
+- **Audiophile DSP Suite:**
+  - **5-Band Parametric EQ:** Hardware FPU accelerated Biquad IIR filters (`60Hz`, `250Hz`, `1kHz`, `4kHz`, `12kHz`) with persistent NVS presets.
+  - **Jan Meier Analog Crossfeed:** Realistic headphone stereo imaging to reduce hard-pan listening fatigue.
+  - **Pseudosymmetric Soft Limiter:** Saturation clipping prevents digital overflow during dynamic peaks.
+- **Dual AI Companion (DJ Neko & Mochi):**
+  - **DJ Neko:** Audiophile cat persona with animated headphones, BPM head-bobbing, and frequency-reactive ears/whiskers.
+  - **Classic Mochi:** The energetic Dasai companion pet from Q-Watch.
+  - **65 Authentic `.anim` Faces:** Preloaded into PSRAM from microSD for glitch-free concurrent audio streaming.
+  - **Google Gemini 3.5 API Integration:** Full device awareness (volume, EQ, tracks, battery) with ~4s low-latency cloud responses and zero-churn persistent worker tasks.
+- **Wi-Fi Streaming & DLNA / UPnP MediaRenderer:**
+  - UPnP `AVTransport:1` and `RenderingControl:1` compliance with SSDP discovery.
   - 384 KB PSRAM circular ring buffer with dedicated FreeRTOS Core 0 streaming task.
-  - Integrated Web Player Remote and Wi-Fi manager accessible at `http://q-tunes.local`.
-- **Audiophile Audio DSP Engine:**
-  - **5-Band Parametric Equalizer:** Biquad IIR filters (60Hz low shelf, 250Hz peaking, 1kHz peaking, 4kHz peaking, 12kHz high shelf) with NVS persistent presets (`FLAT`, `BASS BOOST`, `VOCAL`, `CUSTOM`).
-  - **Jan Meier Analog Crossfeed:** Realistic headphone stereo imaging (`SUBTLE`, `NATURAL`) to reduce listening fatigue.
-  - **Pseudosymmetric Soft Limiter:** Saturation clipping prevents harsh digital overflows.
-- **Multi-Page Player View & Real-Time Synchronized Lyrics:**
-  - **Page 1 (Now Playing):** Track metadata, progress bar, volume overlay, and live mini-visualizer or album art.
-  - **Page 2 (Technical Info):** Sample rate, bit depth, channels, bitrate (kbps), format badge, and file size.
-  - **Page 3 (Synchronized Lyrics):** Real-time synced scrolling lyrics parsing `.lrc` files, embedded ID3v2 `SYLT` / `USLT`, and M4A `©lyr` atoms with millisecond precision and negative scan caching.
-- **Embedded Album Art & Monochrome Dithering:**
-  - Tiny JPEG decompressor (`tjpgd`) extracts embedded artwork from ID3v2 `APIC`, FLAC `METADATA_BLOCK_PICTURE`, M4A `covr`, or folder `cover.jpg`.
-  - High-fidelity **Atkinson** and **Floyd-Steinberg** error diffusion dithering down to 1-bit monochrome OLED bitmaps.
-- **Real-Time Visualizer & Audio Metering Suite:**
-  - 8 distinct visualizer modes including vintage **Analog Needle VU Meter** (ANSI C16.5 300ms mechanical ballistics), **HoRNet-style Dual Horizontal Bar VU**, **Vinyl Turntable VU**, and **16-Band Octave Spectrometer**.
-- **Music-Reactive RGB Lighting & Vocal Expression Engine:**
-  - WS2812 NeoPixel (GPIO 48) driven at 50 FPS with 7 reactive modes (including *Vocal Lightning*, *Bass Pulse*, *Energy VU*, *Spectrum Hue*, *Disco Strobe*).
-  - Advanced vocal formant energy tracking, vibrato shimmer detection, and note sustain tracking.
-- **ESP32-S3 Hardware Acceleration:**
-  - **SIMD PIE LX7:** 128-bit vector instructions for volume scaling, downmixing, and buffer clearing.
-  - **Hardware GDMA:** Asynchronous display flushing with ping-pong double buffering.
-  - **Hardware FPU:** Compiled with `-fno-math-errno` and `-ffast-math` using precomputed Hanning and FFT twiddle LUTs.
-- **microSD Anti-Corruption & Safety Architecture:**
-  - Deep-sleep `SD_CS` hardware pin hold latching, brownout auto-shutdown sentry, safe eject menu toggle, and hot-unplug I/O watchdog.
-  - Supports SDSC, SDHC, and SDXC (64GB+, 128GB, 256GB+) with direct SPI exFAT detection.
+  - Mobile/Desktop Web Remote HUD at `http://q-tunes.local`.
+- **Visuals, Lyrics & Reactive Lighting:**
+  - **4-Page Player HUD:** Album art, technical metadata, synchronized LRC lyrics, and library explorer.
+  - **Monochrome Dithering:** Tiny JPEG decompressor (`tjpgd`) with Atkinson and Floyd-Steinberg error diffusion for 1-bit OLEDs.
+  - **8 Visualizer Modes:** Analog needle VU meter (ANSI C16.5 ballistics), dual horizontal bar VU, turntable VU, spectrometer, waveform, and plasma.
+  - **Music-Reactive WS2812 RGB LED (50 FPS):** Vocal Lightning, Bass Pulse, Spectrum Hue, and vocal formant tracking.
+- **Hardware Acceleration (ESP32-S3):**
+  - **SIMD PIE LX7:** 128-bit vector instructions for volume scaling, stereo downmix, and buffer clears.
+  - **GDMA Pipeline:** Asynchronous display flushing with ping-pong double buffering.
+  - **Hardware FPU:** Compiled with `-fno-math-errno` and `-ffast-math`.
 
 ---
 
-## Hardware Architecture & Pin Allocation Matrix
+## System Architecture
 
-The GPIO map preserves the proven Q-Watch pin matrix while reallocating unneeded watch peripherals (IR TX/RX, Buzzer) to audio, microphone, USB host, and microSD interfaces with **zero pin collisions**:
+### Hardware Signal Pipeline
 
-### 1. Shared SPI Bus (OLED Display + microSD Card)
-| Peripheral | Signal | GPIO | Notes |
+```
+                                      ┌────────────────────────────────────────────────────────┐
+                                      │                      Audio Sources                     │
+                                      │  microSD Card (FAT32)  │  Wi-Fi Stream (DLNA / UPnP)   │
+                                      └───────────────────┬────────────────────────────────────┘
+                                                          │
+                                                          ▼
+                                      ┌────────────────────────────────────────────────────────┐
+                                      │                Multi-Format Decoder Engine             │
+                                      │      dr_wav  │  dr_flac  │  minimp3  │  Helix AAC      │
+                                      └───────────────────┬────────────────────────────────────┘
+                                                          │
+                                                          ▼
+                                      ┌────────────────────────────────────────────────────────┐
+                                      │                 Audiophile DSP Pipeline                │
+                                      │  5-Band Parametric EQ ──► Jan Meier Crossfeed ──► Soft │
+                                      └───────────────────┬────────────────────────────────────┘
+                                                          │
+                                                          ▼
+                                      ┌────────────────────────────────────────────────────────┐
+                                      │                 Output Stream Router                   │
+                                      └─────────────┬────────────────────────────┬─────────────┘
+                                                    │                            │
+                                                    ▼                            ▼
+                                      ┌──────────────────────────┐ ┌──────────────────────────┐
+                                      │      MAX98357A I²S       │ │     FiiO KA11 USB DAC    │
+                                      │  (L+R)/2 Mono Downmix    │ │  Cirrus Logic CS43131    │
+                                      │  Built-in 3W Speaker Amp │ │  Full-Speed UAC 1.0/2.0  │
+                                      └──────────────────────────┘ └──────────────────────────┘
+```
+
+### 4-Tier Layered AI Architecture
+
+Q-Tunes implements a clean, decoupled 4-tier layered architecture for AI interactions, inspired by the persistent, zero-churn multitasking of Q-Watch:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 1: Presentation & Persona Layer                                                  │
+│   • UI Player & Status Toasts   • AI Companion: DJ Neko & Mochi State Machines         │
+│   • 65 .anim Face Catalog       • Earcons: playMeow(), playPurr(), playChirp()         │
+│   • Dedicated Diagnostics Menu  • Web Remote REST Endpoints (/api/ai/*)                │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 2: Orchestration & State Machine Layer (GeminiClient)                            │
+│   • Telemetry Serialization: buildSystemStateJson() (track, volume, EQ, format, batt)  │
+│   • Dynamic Prompt Generator: buildPrompt() (persona guidelines, action syntax)        │
+│   • Action Dispatcher: executeAction() (EQ, track select, volume, animations)          │
+│   • Non-Blocking Mailbox Interface: askAsync(), pollAsyncResult(), cancelAsync()       │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 3: Persistent Static Worker Layer (Zero Task Churn)                              │
+│   • Statically Pre-allocated BSS Stack (10,240 Bytes) & StaticTask_t TCB               │
+│   • Single Persistent Worker Daemon (gemini_worker) Pinned to Core 0                   │
+│   • FreeRTOS Direct-to-Task Notifications (xTaskNotifyGive / ulTaskNotifyTake)         │
+│   • 0% Heap Churn: Immune to FreeRTOS heap fragmentation on ESP32-S3                   │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 4: Network & Transport Engine Layer                                              │
+│   • Constrained mbedTLS Buffers: WiFiClientSecure setBufferSizes(2048, 1024) [~9KB]    │
+│   • Public DNS Fallback: Quad8 (8.8.8.8) + Cloudflare (1.1.1.1) alongside DHCP         │
+│   • Latency Optimization: thinkingLevel: MINIMAL cuts API delay to ~4.3s               │
+│   • Auto-Fallback & Quota Preservation: gemini-3.5-flash ──► gemini-3.5-flash-lite     │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Hardware Specifications & Pinout Matrix
+
+Q-Tunes is based on the **ESP32-S3 SuperMini** (Dual-Core LX7 @ 240MHz, 512KB SRAM, 8MB PSRAM, 8MB Flash). The pin assignment preserves the Q-Watch layout while expanding interfaces with **zero pin collisions** and **strictly avoiding ESP32-S3 strapping pins (0, 3, 45, 46)**:
+
+### 1. Shared SPI Bus (OLED Display + microSD)
+| Peripheral | Signal | GPIO | Pin Type | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| OLED / SD | **MOSI (DIN)** | **5** | Header Pin | Shared SPI Master Out Slave In |
+| OLED / SD | **SCK (CLK)** | **7** | Header Pin | Shared SPI Serial Clock |
+| microSD | **MISO (DOUT)**| **6** | Header Pin | Reclaimed from Buzzer |
+| OLED | **CS** | **4** | Header Pin | Display Chip Select (Active LOW) |
+| OLED | **DC** | **2** | Header Pin | Display Data / Command Select |
+| OLED | **RST** | **41** | Header Pin | Display Hardware Reset |
+| microSD | **CS** | **8** | Header Pin | microSD Chip Select (Active LOW, Latch Hold in Deep Sleep) |
+
+### 2. I²S Audio & MEMS Microphone
+| Peripheral | Signal | GPIO | Pin Type | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| Audio Out / Mic | **BCLK (SCK)** | **17** | Underside Pad | Shared Continuous Bit Clock |
+| Audio Out / Mic | **LRCLK (WS)** | **18** | Underside Pad | Shared Word Select / Frame Sync |
+| MAX98357A Amp | **DOUT (DATA)** | **10** | Header Pin | Serial Audio Data Output from ESP32 to Amp |
+| INMP441 Mic | **DIN (DATA)** | **15** | Header Pin | Serial Audio Data Input from Mic to ESP32 |
+
+### 3. Native USB Host Subsystem (FiiO KA11)
+| Signal | GPIO | Bus Protocol | Notes |
 | :--- | :--- | :--- | :--- |
-| OLED / SD | MOSI (DIN) | 5 | Preserved from Q-Watch (Header Pin) |
-| OLED / SD | SCK (CLK) | 7 | Preserved from Q-Watch (Header Pin) |
-| SD Card | MISO (DATA_OUT) | 6 | Reclaimed from Q-Watch Buzzer (Header Pin) |
-| OLED | CS | 4 | Preserved from Q-Watch (Header Pin) |
-| OLED | DC | 2 | Preserved from Q-Watch (Header Pin) |
-| OLED | RST | 41 | Adapted from Q-Watch (Standard digital output) |
-| microSD | CS | 8 | Clean outer header pin (freed by OLED_RST moving to 41) |
-
-### 2. I²S Audio Output (MAX98357A) & INMP441 MEMS Microphone
-| Peripheral | Signal | GPIO | Notes |
-| :--- | :--- | :--- | :--- |
-| Audio Output / Mic | BCLK (Continuous SCK) | 17 | Reclaimed from Q-Watch IR RX (Underside Pad) |
-| Audio Output / Mic | LRCLK / WS (Word Select) | 18 | Reclaimed from Q-Watch IR TX (Underside Pad) |
-| MAX98357A DAC | DOUT (Serial Data Output) | 10 | Clean outer header pin |
-| INMP441 Mic | DIN (Serial Data Input) | 15 | Reallocated from freed I2C port |
-
-#### INMP441 Microphone Pin Connections
-| INMP441 Pin | ESP32-S3 SuperMini Pin | Description & Critical Notes |
-| :--- | :--- | :--- |
-| **VDD** | 3.3V | **3.3V Power Only** (Do NOT connect to 5V; absolute maximum is 3.6V). |
-| **GND** | GND | Ground reference. |
-| **SD** | GPIO 15 | Serial Data Out from mic to ESP32 DIN. |
-| **SCK** | GPIO 17 | Continuous Bit Clock (shared with MAX98357A BCLK). |
-| **WS** | GPIO 18 | Word Select / LRCLK (shared with MAX98357A LRCK). |
-| **L/R** | GND (or 3.3V) | **Mandatory connection**: Tie to GND for Left channel or 3.3V for Right channel. Never leave floating. |
-
-#### MAX98357A SD_MODE & MCLK Configuration
-- **MCLK**: Not required by MAX98357A (uses internal PLL clock recovery).
-- **SD_MODE**: Connected in hardware with a 100kΩ pull-up resistor to VDD. This configures the DAC to compute a **(Left + Right) / 2 mono mix**, making it ideal for driving a single speaker from stereo or mono source files without consuming an extra GPIO pin.
-
-### 3. FiiO KA11 USB Host Subsystem (Native USB-OTG)
-| Signal | GPIO | Description & Bus Protocol |
-| :--- | :--- | :--- |
-| **USB_HOST_DM** | 19 | USB Full-Speed D- (Native differential data minus) |
-| **USB_HOST_DP** | 20 | USB Full-Speed D+ (Native differential data plus) |
+| **USB_HOST_DM** | **19** | USB Full-Speed D- | Native differential D- with safe bus parking |
+| **USB_HOST_DP** | **20** | USB Full-Speed D+ | Native differential D+ with safe bus parking |
 
 > [!IMPORTANT]
-> **Boot Pin Preservation:** GPIO 19 and 20 are NOT configured as USB Host pull-downs at boot time in `USBManager::begin()`, preserving native USB CDC serial programming and debugging. Host termination (~15kΩ pull-downs) is engaged only upon explicit mounting or hotplug detection.
-> **Safe Bus Parking:** Calling `safeEject()` or disconnecting tristates GPIO 19/20 (`INPUT` mode), protecting the Cirrus Logic CS43131 DAC against inductive voltage spikes and pop noises.
+> **Boot Pin Safety:** GPIO 19 and 20 are NOT pulled down at boot time, preserving native USB CDC serial flashing and monitoring. Host pull-downs (~15kΩ) engage only when mounting the DAC. Calling `safeEject()` tristates both pins to protect against inductive spikes.
 
-### 4. Navigation Inputs (4-Button Architecture)
-| Button | GPIO | Logic | Notes |
+### 4. Navigation Input Matrix
+| Button | GPIO | Logic | Behavior |
 | :--- | :--- | :--- | :--- |
-| Button Up | 39 | INPUT_PULLUP (Active LOW) | K1 Directional UP / Auto-repeating volume hold |
-| Button OK / Select | 40 | INPUT_PULLUP (Active LOW) | Directional OK / Play-Pause / Single-shot page cycle hold |
-| Button Down | 42 | INPUT_PULLUP (Active LOW) | K1 Directional DOWN / Auto-repeating volume hold |
-| Button Cancel / Back | 21 | INPUT_PULLUP (Active LOW) | Tactile CANCEL / Global Back / RTC Deep Sleep Wake |
+| **Button UP** | **39** | Active LOW (Pull-up) | Menu Up / Volume Up (Hold auto-repeat) |
+| **Button OK / SEL** | **40** | Active LOW (Pull-up) | Menu Select / Play-Pause / Cycle Page (Hold >650ms) |
+| **Button DOWN** | **42** | Active LOW (Pull-up) | Menu Down / Volume Down (Hold auto-repeat) |
+| **Button CANCEL** | **21** | Active LOW (Pull-up) | Back / Exit / RTC Wakeup from Deep Sleep |
 
-### 5. Power, Diagnostics & Reserved Pins
-| Function | GPIO | Hardware Circuit / Description |
-| :--- | :--- | :--- |
-| Battery Monitor | 1 (ADC1_CH0) | 100kΩ / 100kΩ divider from LiPo VBAT + 100nF filter capacitor |
-| Onboard RGB LED | 48 | Built-in WS2812 NeoPixel RGB LED |
-| Clean Expansion | 16 | Free general-purpose digital I/O |
-| Dedicated UART0 | 43 (TX), 44 (RX) | **Completely freed** for unhindered hardware flashing and high-speed serial logging |
-| Strapping Pins (AVOIDED) | 0, 3, 45, 46 | Strictly zero peripheral allocation to prevent bootloader locking |
+### 5. Power, Battery ADC & Telemetry
+| Peripheral | GPIO | Circuit / Logic | Notes |
+| :--- | :--- | :--- | :--- |
+| **Battery ADC** | **1 (ADC1_CH0)** | 100kΩ / 100kΩ Divider | LiPo VBAT monitor with PWL discharge curve |
+| **Onboard RGB** | **48** | Built-in WS2812 | Non-blocking FastLED @ 50 FPS |
+| **Dedicated UART0** | **43 (TX), 44 (RX)**| Asynchronous Serial | **Completely freed** for hardware logging |
+| **Expansion GPIO** | **16** | General-purpose I/O | Spare digital pin |
 
 ---
 
-## Operating Modes & Application Shell
+## Wiring & Electrical Connection Guide
 
-On startup, Q-Tune launches into the **Unified Home Menu** styled with the Q-Watch OS design language:
+### 1. INMP441 MEMS Microphone
+| INMP441 Pin | ESP32-S3 SuperMini | Electrical Specification & Wiring Notes |
+| :--- | :--- | :--- |
+| **VDD** | **3.3V** | **3.3V ONLY**. Never connect to 5V (absolute maximum is 3.6V). |
+| **GND** | **GND** | Common ground reference. |
+| **SD** | **GPIO 15** | Serial Data output from microphone. |
+| **SCK** | **GPIO 17** | Continuous I²S Bit Clock (shared with MAX98357A BCLK). |
+| **WS** | **GPIO 18** | Word Select / LRCLK (shared with MAX98357A LRCK). |
+| **L/R** | **GND** | **Mandatory:** Tie to GND for Left channel audio. Never leave floating. |
+
+### 2. MAX98357A I²S Mono Amplifier
+| MAX98357A Pin | ESP32-S3 SuperMini | Electrical Specification & Wiring Notes |
+| :--- | :--- | :--- |
+| **VIN** | **5V (or 3.3V)** | Connect to 5V (USB VBUS / LiPo boost) for full 3.2W output power. |
+| **GND** | **GND** | Common ground reference. |
+| **BCLK** | **GPIO 17** | Continuous Bit Clock. |
+| **LRC** | **GPIO 18** | Word Select / Frame Sync. |
+| **DIN** | **GPIO 10** | Serial Audio Data input. |
+| **SD_MODE** | **100kΩ to VDD** | Configures DAC hardware to mix `(L+R)/2` mono into a single speaker. |
+| **GAIN** | **GND** | Configures default 9 dB gain stage. |
+
+---
+
+## Operating Modes & User Interface
+
+Q-Tunes boots into a 4-item scroll window styled in the Q-Watch OS design language:
 
 ```
 +-----------------------------------+
@@ -124,150 +240,219 @@ On startup, Q-Tune launches into the **Unified Home Menu** styled with the Q-Wat
 +-----------------------------------+
 ```
 
-1. **Music Player**:
-   - Categorized library navigation (All Tracks, Artists, Albums, Playlists, Recent Tracks, Folder Browser).
-   - Multi-page Now Playing view (Player HUD ↔ Technical Metadata ↔ Synced LRC Lyrics).
-   - Seamless output badge (`SPKR` vs `KA11`).
-2. **Spectrum Visualizer**:
-   - Full-screen real-time audio visualization with 5-second auto-hiding status bar.
-   - 8 presets: `ANALOG VU`, `HORIZ VU`, `VU+SPEC`, `VINYL VU`, `BARS`, `WAVE`, `PLASMA`, `STAR`.
-3. **Wi-Fi Audio Stream**:
-   - Standalone DLNA / UPnP MediaRenderer receiver with live mini visualizer and IP display.
-   - Remote web interface at `http://q-tunes.local`.
-4. **Equalizer (DSP)**:
-   - 5-band vertical slider HUD (`60Hz`, `250Hz`, `1kHz`, `4kHz`, `12kHz`).
-   - Quick preset switcher (`FLAT`, `BASS BOOST`, `VOCAL`, `ACOUSTIC`, `CLUB`, `CUSTOM`).
-   - Jan Meier headphone crossfeed selector (`OFF`, `SUBTLE`, `NATURAL`).
-5. **AI Companion (DJ Neko & Mochi)**:
-   - **Dual Personality System:** Toggle between **DJ Neko** (cute music-loving cat with studio headphones, twitching ears, and bass-reactive whiskers) and **Classic Mochi** (the iconic Dasai pet from Q-Watch).
-   - **Live Audio Reactivity (60 FPS):** Whiskers and ear twitches react to low/high frequency bands, head bobs to live BPM, and headphone cups feature animated miniature spectrum analyzers.
-   - **65 Authentic `.anim` Faces:** Seamless playback from microSD card `/anim/` preloaded into PSRAM for zero-SPI glitch audio streaming.
-   - **Google Gemini API Intelligence:** Aware of all Q-Tune player controls, volume, EQ presets, visualizers, and SD tracks. Executes actions on command via on-device menu, INMP441 voice, or Web Remote at `http://q-tunes.local/ai`.
-6. **RGB Light Effects**:
-   - 7 music-reactive modes + 4 ambient modes.
-   - Real-time adjustment of brightness, color palette, and audio sensitivity.
-7. **Hardware Diagnostics**:
-   - Interactive 12-point hardware test suite (including Dual Speaker Left/Right/Both test, FiiO KA11 USB DAC test, and Vocal Reactive Check).
-8. **System Info**:
-   - Battery voltage and percentage, CPU frequency governor, SD card filesystem usage, and manual Safe Eject SD toggle.
+1. **Music Player:** Categorized library browsing (All Tracks, Artists, Albums, Playlists, Folder Browser), 4-page Now Playing HUD, and synchronized lyrics.
+2. **Spectrum Visualizer:** Full-screen 60 FPS real-time audio visualization with 5-second auto-hiding top HUD.
+3. **Wi-Fi Audio Stream:** Standalone DLNA / UPnP MediaRenderer receiver with live IP address display and Web Remote HUD.
+4. **Equalizer (DSP):** 5-band vertical slider HUD, instant preset switcher (`FLAT`, `BASS BOOST`, `VOCAL`, `CLUB`), and Jan Meier headphone crossfeed.
+5. **AI Companion (DJ Neko & Mochi):** Live interactive pet with 65 authentic `.anim` expressions, audio reactivity, voice commands, and Gemini 3.5 cloud reasoning.
+6. **RGB Light Effects:** 7 music-reactive modes (including Vocal Lightning and Bass Pulse) with adjustable brightness and sensitivity.
+7. **Hardware Diagnostics:** Interactive 13-point diagnostic suite including AI & Gemini Check, Dual Speaker Channel Isolation, and FiiO KA11 DAC test.
+8. **System Info:** Battery voltage / PWL percentage curve, dynamic CPU scaling, microSD usage, and manual Safe Eject toggle.
 
 ---
 
-## FiiO KA11 USB DAC & Real UAC Host Subsystem
+## Navigation & Control Matrix
 
-Q-Tune implements a fully featured, bare-metal USB Audio Class (UAC 1.0/2.0) Host driver ([`esp-usb/host/class/uac`](https://github.com/espressif/esp-usb/tree/master/host/class/uac)) operating directly over the ESP32-S3 USB-OTG peripheral for the **FiiO KA11 High-Res DAC** (Cirrus Logic CS43131):
-
-- **Real Hardware USB Host Controller:**
-  - `uac_host_install()` configures the internal USB-OTG PHY, launches the host event task, and registers the driver client (`usb_host_client_register`).
-  - `uac_host_device_open()` opens the physical USB device handle from the USB host controller and parses real standard device (`usb_device_desc_t`) and configuration (`usb_config_desc_t`) descriptors.
-  - `uac_host_handle_events()` pumps asynchronous USB events directly from `usb_host_client_handle_events()`.
-- **Dynamic Format Negotiation:** Probes audio streaming interfaces and claims matching alternate settings for 44.1 kHz, 48 kHz, 88.2 kHz, 96 kHz, 176.4 kHz, or 192 kHz at 16-bit or 24-bit stereo PCM.
-- **Isochronous Audio Transfer Subsystem:** Allocates native USB isochronous transfer request blocks (`usb_host_transfer_alloc`) and dispatches audio frames directly into the USB hardware pipe via `usb_host_transfer_submit()`.
-- **Cirrus Logic CS43131 Hardware Volume & Mute:**
-  - Sends real USB Class-Specific `SET_CUR` control transfers (`usb_host_transfer_submit_control`) targeting the Audio Control Feature Unit (`0x21` request type, `UAC_SET_CUR`, `UAC_VOLUME_CONTROL`, `UAC_MUTE_CONTROL`).
-  - Directly alters internal DAC analog gain registers in 1/256 dB steps without digital bit reduction or dynamic range degradation.
-- **Hearing Protection & Ear Safety (10% Initial Volume):**
-  - Because high-performance headphone dongles like the FiiO KA11 can deliver up to 200mW into low-impedance IEMs, connecting the DAC automatically clamps and initializes the output volume to **10%** (`-23.0 dB`) to protect the listener against acoustic shock and hearing damage.
-- **Hot-Unplug Protection & Instant I²S Fallback:** Interrupt-driven disconnect handling instantly releases endpoints and falls back to `OUTPUT_MODE_SPEAKER_I2S` so background playback loops never stall or panic.
-- **Safe Eject & Bus Parking:** Gracefully stops active isochronous streams, releases interfaces, closes USB client handles, and tristates GPIO 19/20 (`INPUT` mode) before physical disconnection to eliminate inductive pops.
-- **Non-Volatile Settings Persistence (NVS):**
-  - Uses ESP32 NVS (`Preferences` namespace `qtune_cfg`) to remember user preferences across power cycles:
-    - Independent **Speaker Volume** (`vol_spk`, default 80%) and **FiiO DAC Volume** (`vol_fiio`, default 10% safe level).
-    - **Active Output Mode** (`out_mode`: Speaker I²S vs FiiO KA11 USB DAC).
-    - **Playback Mode** (`play_mode`: Repeat All, Repeat One, Shuffle, Single).
-    - **5-Band Parametric EQ & Headphone Crossfeed** presets and custom band gains.
-
----
-
-## Wi-Fi Audio Streaming & DLNA MediaRenderer
-
-Q-Tune transforms into a high-fidelity wireless network streamer:
-
-- **DLNA / UPnP MediaRenderer v1:** Implements standard `AVTransport:1` and `RenderingControl:1` SOAP actions (`SetAVTransportURI`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMute`).
-- **Zero-Glitch PSRAM Buffering:** Core 0 runs `QWiFiStreamTask` with a 384 KB circular ring buffer allocated in SPIRAM to absorb Wi-Fi network jitter and packet retransmissions.
-- **Web Player Remote & REST API:**
-  - Access `http://q-tunes.local` (or IP address) from any phone or PC browser.
-  - Interactive web HUD displaying real-time playback state, track info, progress slider, volume controls, and Wi-Fi credential scanner.
-- **Output Flexibility:** Streamed Wi-Fi audio routes transparently through the active output mode (onboard MAX98357A speaker or FiiO KA11 USB DAC) and feeds the live spectrum visualizer.
+| Context | Button | Action |
+| :--- | :--- | :--- |
+| **Main Menu** | UP / DOWN (Short) | Scroll 4-item menu window |
+| **Main Menu** | OK / SEL (Short) | Launch selected application |
+| **Main Menu** | CANCEL (Hold >650ms) | Enter low-power deep sleep (RTC GPIO 21 wake) |
+| **Library Browser**| UP / DOWN (Short) | Browse files, folders, or categories |
+| **Library Browser**| OK / SEL (Short) | Play selected track / open folder |
+| **Library Browser**| CANCEL (Short) | Return to parent directory / Main Menu |
+| **Now Playing** | OK / SEL (Short) | Toggle Play / Pause |
+| **Now Playing** | OK / SEL (Hold >650ms) | Cycle Page (`[1/4] Player` → `[2/4] Info` → `[3/4] Lyrics` → `[4/4] Queue`) |
+| **Now Playing** | UP / DOWN (Short) | Previous / Next track |
+| **Now Playing** | UP / DOWN (Hold >650ms) | Digital volume adjust (with pop-up volume bar) |
+| **Now Playing** | CANCEL (Short) | Return to library browser |
+| **Visualizer** | UP / DOWN (Short) | Cycle 8 visualizer presets |
+| **Visualizer** | OK / SEL (Hold >650ms) | Cycle sensitivity (`LOW` → `NORM` → `HIGH`) |
+| **Visualizer** | Any Button | Reveal top HUD (auto-hides after 5 seconds) |
+| **Equalizer (DSP)**| UP / DOWN (Short) | Adjust active band gain (-12 dB to +12 dB) |
+| **Equalizer (DSP)**| OK / SEL (Short) | Select next frequency band |
+| **Equalizer (DSP)**| OK / SEL (Hold >650ms) | Cycle EQ preset (`FLAT`, `BASS BOOST`, `VOCAL`, `CUSTOM`) |
+| **AI Companion** | OK / SEL (Short) | Activate INMP441 voice query / listen mode |
+| **AI Companion** | UP (Short) | Toggle active companion: **DJ Neko ⇄ Mochi** |
+| **AI Companion** | DOWN (Short) | Cycle visual rendering mode (`HYBRID` → `REACTIVE` → `ANIM`) |
+| **Any Screen** | CANCEL (Hold >650ms) | Global escape back to Main Menu |
 
 ---
 
 ## Audiophile DSP Engine
 
-A signal processing pipeline engineered specifically for portable listening:
+The signal processing engine operates on decoded 16-bit or 24-bit PCM samples before dispatching them to the active output interface:
 
 ```
 [Decoded PCM] ──► [5-Band Parametric EQ] ──► [Jan Meier Crossfeed] ──► [Soft Limiter] ──► [Output Router]
-                                                                                              │
-                                                               ┌──────────────────────────────┴──────────┐
-                                                               ▼                                         ▼
-                                                       [MAX98357A I²S]                           [FiiO KA11 USB]
+                                                                                               │
+                                                               ┌───────────────────────────────┴──────────┐
+                                                               ▼                                          ▼
+                                                       [MAX98357A I²S]                            [FiiO KA11 USB]
 ```
 
 1. **5-Band Parametric EQ:**
-   - Pre-warped Bilinear Transform Biquad IIR filters with hardware FPU acceleration.
-   - Frequency bands: `60 Hz` (Low Shelf), `250 Hz` (Peaking), `1 kHz` (Peaking), `4 kHz` (Peaking), `12 kHz` (High Shelf).
-   - Adjustable gain: -12 dB to +12 dB per band.
+   - Pre-warped Bilinear Transform Biquad IIR filters with hardware FPU vectorization.
+   - Frequency Bands: `60 Hz` (Low Shelf), `250 Hz` (Peaking), `1 kHz` (Peaking), `4 kHz` (Peaking), `12 kHz` (High Shelf).
+   - Gain Range: -12 dB to +12 dB per band with 1 dB resolution.
 2. **Jan Meier Analog Crossfeed:**
-   - Blends subtle low-pass filtered cross-channel signals with frequency-dependent time delays to simulate natural speaker stereo imaging on headphones.
-   - Eliminates extreme hard-panned stereo fatigue on early stereo recordings (e.g., 1960s jazz and rock).
+   - Simulates natural speaker acoustic room blending on headphones by feeding low-pass filtered, time-delayed signals from the opposite channel.
+   - Eliminates listening fatigue on hard-panned stereo recordings (e.g. 1960s stereo mixes).
 3. **Pseudosymmetric Soft Limiter:**
-   - Smooth hyperbolic saturation curve prevents harsh digital clipping when boosting EQ bands near full scale (0 dBFS).
+   - Hyperbolic saturation curve prevents harsh digital clipping when boosting EQ bands near 0 dBFS.
 
 ---
 
-## Multi-Page Player & Synchronized Lyrics
+## Multi-Page Player & Synced Lyrics
 
-The Now Playing screen supports multi-page navigation by pressing and holding **OK / Select (>650ms)**:
+Hold **OK / SEL (>650ms)** on the Now Playing screen to cycle across 4 dedicated views:
 
-- **Page 1: Player HUD & Album Art:** Displays track title, artist, elapsed time, total duration, 8-band mini spectrum analyzer, and optional 1-bit dithered album cover.
-- **Page 2: Technical Metadata:** Detailed audio format readouts including audio decoder engine, sample rate (e.g., `44100 Hz`), bit depth (`16-bit` / `24-bit`), channel layout (`Stereo` / `Mono`), bitrate (`320 kbps`, `1411 kbps`), total file size, and active output device.
-- **Page 3: Synchronized LRC Lyrics:**
-  - Automatically loads `.lrc` files matching the track name, or extracts embedded lyrics from MP3 ID3v2 `SYLT` (Synchronized Lyrics), `USLT` (Unsynchronized Lyrics), and M4A `©lyr` atoms.
-  - Smooth 3-line vertical display with active line highlighting and sub-second millisecond synchronization.
-  - Negative scan caching prevents unnecessary SD card file access on tracks without lyrics.
-
----
-
-## Navigation & Controls Matrix
-
-| Context | Button | Action |
-| :--- | :--- | :--- |
-| **Main Menu** | UP / DOWN (Short) | Move cursor through 4-item viewport |
-| **Main Menu** | OK / SEL (Short) | Launch selected application |
-| **Main Menu** | CANCEL (Long >650ms) | Enter low-power deep sleep / screen off |
-| **Track List** | UP / DOWN (Short) | Browse files / categories |
-| **Track List** | OK / SEL (Short) | Play selected track |
-| **Track List** | CANCEL (Short) | Return to Main Menu |
-| **Now Playing** | OK / SEL (Short) | Toggle Play / Pause |
-| **Now Playing** | OK / SEL (Hold >650ms) | Cycle Page (Page 1: Player → Page 2: Info → Page 3: Lyrics) |
-| **Now Playing** | UP / DOWN (Short) | Previous / Next track |
-| **Now Playing** | UP / DOWN (Hold >650ms) | Digital Volume Up / Down (with on-screen overlay) |
-| **Now Playing** | CANCEL (Short) | Return to Track List |
-| **Visualizer** | Any Button | Reveal Top Status Bar (auto-hides after 5s) |
-| **Visualizer** | UP / DOWN (Short) | Previous / Next visualizer preset |
-| **Visualizer** | OK / SEL (Hold >650ms) | Cycle Visualizer Sensitivity (`LOW` → `NORM` → `HIGH`) |
-| **Equalizer** | UP / DOWN (Short) | Adjust selected band gain (-12 dB to +12 dB) |
-| **Equalizer** | OK / SEL (Short) | Advance to next frequency band |
-| **Equalizer** | OK / SEL (Hold >650ms) | Cycle Preset (`FLAT` → `BASS BOOST` → `VOCAL` → `CUSTOM`) |
-| **Any Screen** | CANCEL (Hold >650ms) | Global escape to Main Menu |
+- **Page 1 [1/4] Player HUD & Artwork:** Track title, artist, elapsed/total time bar, volume overlay, 8-band mini spectrum analyzer, and 1-bit dithered album cover.
+- **Page 2 [2/4] Technical Metadata:** Decoder engine badge (`WAV`, `FLAC`, `MP3`, `M4A`), sample rate (`44.1 kHz`, `48 kHz`, `96 kHz`), bit depth (`16-bit` / `24-bit`), channel layout (`Stereo` / `Mono`), bitrate (`kbps`), file size, and active output (`SPKR` vs `KA11`).
+- **Page 3 [3/4] Synchronized LRC Lyrics:**
+  - Auto-loads `.lrc` files matching track names or parses embedded ID3v2 `SYLT`, `USLT`, and M4A `©lyr` atoms.
+  - Sub-second millisecond synchronization with active line highlighting.
+  - Negative scan caching prevents unnecessary SD card read operations on instrumental tracks.
+- **Page 4 [4/4] Track Queue & Info:** Displays playlist sequence index, track path, and upcoming queue preview.
 
 ---
 
-## microSD Safety & Anti-Corruption Protocol
+## AI Companion Subsystem (DJ Neko & Mochi)
 
-1. **Hardware CS Hold in Deep Sleep:** `SD_CS` (GPIO 8) is held `HIGH` using `gpio_hold_en((gpio_num_t)SD_CS)` during deep sleep, preventing floating SPI lines from causing flash memory controller corruption.
-2. **Critical Low-Battery Auto-Shutdown:** Hardware ADC monitoring terminates audio playback and safely unmounts filesystems before brownout voltage levels (`<= 3.35V`) are reached.
-3. **Manual Safe Eject:** Accessible in **System Info** (`OK / Select` toggles Eject / Mount) to flush file caches before removing the card.
-4. **Hot-Unplug Watchdog:** Consecutive I/O timeouts (`>= 15`) immediately halt audio DMA and close file handles.
-5. **Formatting Guidelines for 64GB+ SDXC Cards:**
-   - Format cards to **FAT32** with 32KB cluster size using **GUIFormat** (Windows), `diskutil` (macOS), or `mkfs.vfat` (Linux).
+### Personas
+- **DJ Neko (Cat):** An audiophile feline companion wearing over-ear studio headphones. Features bass-reactive whiskers, tempo-synced head-bobbing, and twitching ears. Responds with playful charm, purrs, and meows.
+- **Classic Mochi:** The iconic Dasai companion pet from Q-Watch. Loyal, energetic, and full of character.
+
+### Google Gemini API Integration
+- **Context Serialization:** Real-time system state (volume, playback state, track name, EQ preset, battery level) is serialized and provided to Gemini in every prompt.
+- **Action Dispatcher:** Gemini can directly execute device actions:
+  - `PLAY_TRACK:<name>`, `PAUSE`, `RESUME`, `NEXT`, `PREV`, `SET_VOLUME:<0-100>`
+  - `SET_EQ:<preset>`, `SET_CROSSFEED:<mode>`, `SWITCH_OUTPUT:<SPEAKER|KA11>`
+  - `SWITCH_COMPANION:<CAT|MOCHI>`, `PLAY_SOUND:<MEOW|PURR|CHIRP>`, `PLAY_ANIM:<name>`
+- **Low-Latency Engine:** Uses `"thinkingConfig": {"thinkingLevel": "MINIMAL"}` to bypass prolonged cloud reasoning delays, delivering concise answers in ~4.3 seconds.
+- **Zero-Churn Persistent Worker:** Avoids runtime task allocation failures by utilizing a persistent, statically allocated FreeRTOS task on Core 0 signaled via direct-to-task notifications.
+
+### Configuration
+Create a text file on the microSD card named `/gemini.txt` (or configure via Web Remote at `http://q-tunes.local/ai`):
+```ini
+api_key = AIzaSyYourGeminiApiKeyHere
+model = gemini-3.5-flash
+companion = CAT
+```
 
 ---
 
-## Automated Verification & Test Suite
+## Wi-Fi Streaming & DLNA MediaRenderer
 
-The project includes an automated verification test suite verifying all 30 subsystem layers, including native C++ compilation and execution of audio DSP, UAC USB Host, GDMA, and AAC decoders:
+- **DLNA / UPnP MediaRenderer v1:** Fully compliant with UPnP UDA 1.0, `AVTransport:1`, and `RenderingControl:1`. Compatible with BubbleUPnP, mconnect, AirMusic, and Windows Media Player.
+- **384 KB PSRAM Buffer:** Dedicated FreeRTOS Core 0 streaming task buffers network audio to eliminate dropouts.
+- **Web Player Remote:** Connect to `http://q-tunes.local` on your smartphone or PC browser:
+  - Real-time playback status, track metadata, and progress scrubber.
+  - Volume control and output selector.
+  - Interactive AI Companion chat and device control interface.
+  - Wi-Fi network scanner and credential manager.
+
+---
+
+## MicroSD Safety & Anti-Corruption Protocol
+
+1. **Deep Sleep CS Hold:** `SD_CS` (GPIO 8) is held `HIGH` using `gpio_hold_en((gpio_num_t)SD_CS)` during deep sleep, preventing floating lines from corrupting flash memory controllers.
+2. **Brownout Auto-Shutdown:** Hardware ADC monitoring terminates audio playback and unmounts the filesystem before supply voltage drops below `3.35V`.
+3. **Manual Safe Eject:** Accessible under **System Info** (`OK / Select` toggles Eject / Mount) to safely flush file caches.
+4. **Hot-Unplug Watchdog:** Detects consecutive read timeouts (`>= 15`) and immediately stops audio DMA.
+5. **Formatting Recommendations:**
+   - Format cards to **FAT32** with 32KB clusters using **GUIFormat** (Windows), `diskutil` (macOS), or `mkfs.vfat` (Linux).
+   - Supports SDSC, SDHC, and SDXC (64GB, 128GB, 256GB+).
+
+---
+
+## Project Directory Layout
+
+```
+Q-Tune/
+├── include/                 # Header declarations
+│   ├── ai_companion.h       # DJ Neko & Mochi state machines & 65-face catalog
+│   ├── anim_engine.h        # QANM binary animation decoder & PSRAM loader
+│   ├── audio_decoder.h      # WAV, FLAC, MP3, and AAC unified decoder classes
+│   ├── audio_dsp.h          # 5-Band parametric EQ, crossfeed & soft limiter
+│   ├── audio_player.h       # Central audio pipeline & FreeRTOS player task
+│   ├── battery.h            # LiPo ADC monitor & PWL discharge curve
+│   ├── button_manager.h     # 4-button debounced input engine & hold timing
+│   ├── diagnostics.h        # 13-point interactive hardware test suite
+│   ├── display.h            # U8g2 OLED graphics engine & menu viewport
+│   ├── gemini_client.h      # Layered AI client, persistent worker & parser
+│   ├── hw_config.h          # Hardware pinout definitions & GPIO matrix
+│   ├── led_manager.h        # FastLED music-reactive lighting engine
+│   ├── metadata_parser.h    # ID3v2/v1, Vorbis, M4A ilst tag extractor
+│   ├── player_config.h      # NVS persistent configuration storage
+│   ├── sd_manager.h         # MicroSD card anti-corruption & safe eject
+│   ├── simd_accel.h         # ESP32-S3 PIE LX7 128-bit SIMD acceleration
+│   ├── spectrum_analyzer.h  # FFT engine & 8 visualizer presets
+│   ├── ui_player.h          # 4-Page Now Playing view & synced LRC lyrics
+│   ├── usb_manager.h        # FiiO KA11 UAC 1.0/2.0 USB Host driver
+│   └── wifi_streamer.h      # DLNA MediaRenderer, SSDP & Web Remote
+├── src/                     # C++ Implementation files
+│   ├── main.cpp             # System setup, home menu & application shell
+│   └── ...                  # Matching implementation sources
+├── sdcard/                  # Recommended microSD root contents
+│   ├── anim/                # 65 consolidated .anim companion faces
+│   ├── music/               # Music library (.wav, .flac, .mp3, .m4a, .lrc)
+│   └── gemini.txt           # Gemini API key and configuration
+├── tests/                   # Verification suite & native unit tests
+│   ├── test_suite.py        # Automated 33-point verification test runner
+│   ├── test_ai_companion_host.cpp # Native C++ host verification binary
+│   └── fixtures/            # Test audio files and metadata tags
+└── platformio.ini           # PlatformIO configuration & build flags
+```
+
+---
+
+## Getting Started & Build Instructions
+
+### Hardware Requirements (BOM)
+1. **ESP32-S3 SuperMini** (Dual-Core LX7, 8MB PSRAM, 8MB Flash).
+2. **0.96" or 1.3" 128x64 SPI OLED** (SH1106 or SSD1306).
+3. **MicroSD Card SPI Module** (with 3.3V LDO or direct 3.3V).
+4. **MAX98357A I²S DAC / Amplifier Module** + 4Ω to 8Ω speaker.
+5. **INMP441 MEMS I²S Microphone Module**.
+6. **FiiO KA11 USB Type-C DAC** (or equivalent UAC 1.0/2.0 DAC dongle).
+7. **4x Tactile Push Buttons** (UP, OK, DOWN, CANCEL).
+8. **3.7V LiPo Battery** (500mAh - 2000mAh) + 100kΩ/100kΩ voltage divider.
+
+### MicroSD Card Preparation
+1. Format your microSD card to **FAT32** with 32KB clusters.
+2. Copy the [`sdcard/anim/`](sdcard/anim/) folder from this repository directly to the root of the microSD card.
+3. Create a `/music/` folder on the card and copy your audio files (`.flac`, `.mp3`, `.wav`, `.m4a`, `.lrc`) into it.
+4. (Optional) Create `/gemini.txt` at the root with your Gemini API key:
+   ```ini
+   api_key = AIzaSyYourApiKeyHere
+   model = gemini-3.5-flash
+   companion = CAT
+   ```
+
+### Firmware Compilation & Flashing
+Install [PlatformIO Core](https://platformio.org/) or the VS Code PlatformIO extension:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-username/Q-Tune.git
+cd Q-Tune
+
+# 2. Build the firmware
+pio run
+
+# 3. Connect ESP32-S3 via USB and upload firmware
+pio run --target upload
+
+# 4. Open serial monitor (115200 baud)
+pio device monitor -b 115200
+```
+
+---
+
+## Hardware Diagnostics & Verification Suite
+
+Q-Tunes includes an automated verification test suite verifying all 33 subsystem layers, including native C++ compilation of audio DSP, UAC USB Host, GDMA, and Gemini AI:
 
 ```bash
 python3 tests/test_suite.py
@@ -309,25 +494,16 @@ python3 tests/test_suite.py
 --- 30. Audiophile Audio DSP Engine Test (5-Band Parametric EQ, Crossfeed & Soft Limiter) --- [PASS]
 --- 31. Dual Speaker Diagnostics & Channel Isolation Suite --- [PASS]
 --- 32. AI Companion (DJ Neko & Mochi), Gemini API & AnimEngine Suite --- [PASS]
+--- 33. Multi-Format Metadata Tag Engine (MP3/FLAC/M4A/WAV) & 4-Page Player Test --- [PASS]
 
-All 32 Q-Tune static/source verification checks PASSED (100%)!
+All 33 Q-Tune static/source verification checks PASSED (100%)!
 ```
 
 ---
 
-## Getting Started & Building
+## License & Acknowledgments
 
-1. **Prerequisites:** Install [PlatformIO Core](https://platformio.org/) or the VS Code PlatformIO extension.
-2. **Build and Flash:**
-   ```bash
-   # Build firmware
-   pio run
-
-   # Flash to ESP32-S3 SuperMini
-   pio run --target upload
-   ```
-3. **microSD Preparation:**
-   - Format card as FAT32.
-   - Create a `/music/` directory at the root.
-   - Copy `.wav`, `.flac`, `.mp3`, `.m4a`, or `.aac` files (and corresponding `.lrc` files if desired) into `/music/`.
-4. **Power On:** Insert card and boot Q-Tune. Connect headphones to the FiiO KA11 USB DAC or listen through the onboard MAX98357A speaker.
+- **License:** Released under the [MIT License](LICENSE).
+- **Core Decoders:** `dr_wav` & `dr_flac` by David Reid, `minimp3` by Lieven van der Heide, and `arduino-libhelix` by RealNetworks.
+- **Graphics & Audio:** `U8g2` by olikraus, `FastLED` by Daniel Garcia, and `tjpgd` by ChaN.
+- **Hardware Heritage:** Dedicated to the **Q-Watch** community for open-source pinout and embedded OS design patterns.
