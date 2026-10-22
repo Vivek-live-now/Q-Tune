@@ -66,7 +66,7 @@ GeminiClient::GeminiClient() :
     is_busy(false)
 {
     memset(api_key, 0, sizeof(api_key));
-    strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
+    strncpy(model_name, "gemini-3.5-flash", sizeof(model_name) - 1);
     memset(last_error, 0, sizeof(last_error));
 }
 
@@ -89,10 +89,10 @@ bool GeminiClient::begin() {
             api_key[sizeof(api_key) - 1] = '\0';
             trimCStr(api_key);
         }
-        String mdl = prefs.getString("model", "gemini-3.5-flash-lite");
-        // Auto-upgrade legacy deprecated models
-        if (mdl.indexOf("1.5") != -1 || mdl.indexOf("2.0") != -1 || mdl.indexOf("2.5") != -1) {
-            mdl = "gemini-3.5-flash-lite";
+        String mdl = prefs.getString("model", "gemini-3.5-flash");
+        // Auto-upgrade legacy deprecated models or models that do not support thinkingBudget:0
+        if (mdl.indexOf("1.5") != -1 || mdl.indexOf("2.0") != -1 || mdl.indexOf("2.5") != -1 || mdl.indexOf("lite") != -1) {
+            mdl = "gemini-3.5-flash";
             prefs.putString("model", mdl);
         }
         if (mdl.length() > 0) {
@@ -132,8 +132,8 @@ void GeminiClient::setModelName(const char* model) {
     strncpy(model_name, model, sizeof(model_name) - 1);
     model_name[sizeof(model_name) - 1] = '\0';
     trimCStr(model_name);
-    if (strstr(model_name, "1.5") || strstr(model_name, "2.0") || strstr(model_name, "2.5")) {
-        strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
+    if (strstr(model_name, "1.5") || strstr(model_name, "2.0") || strstr(model_name, "2.5") || strstr(model_name, "lite")) {
+        strncpy(model_name, "gemini-3.5-flash", sizeof(model_name) - 1);
         model_name[sizeof(model_name) - 1] = '\0';
     }
 
@@ -248,8 +248,9 @@ bool GeminiClient::loadSDConfig() {
     }
     if (foundModel.length() > 0) {
         if (foundModel == "gemini-1.5-flash" || foundModel == "gemini-2.0-flash" ||
-            foundModel == "gemini-2.5-flash" || foundModel == "gemini-2.5-flash-lite") {
-            foundModel = "gemini-3.5-flash-lite";
+            foundModel == "gemini-2.5-flash" || foundModel == "gemini-2.5-flash-lite" ||
+            foundModel == "gemini-3.5-flash-lite") {
+            foundModel = "gemini-3.5-flash";
         }
         setModelName(foundModel.c_str());
     }
@@ -309,6 +310,7 @@ String GeminiClient::buildPrompt(const char* userQuery) const {
     p += "SWITCH_OUTPUT:<SPEAKER|KA11>, SWITCH_COMPANION:<CAT|MOCHI>, SET_VISUALIZER:<preset>, ";
     p += "SET_LED:<OFF|VOCAL|BASS|DISCO|SPECTRUM|RAINBOW>, PLAY_SOUND:<MEOW|PURR|CHIRP>, PLAY_ANIM:<anim_name>, NONE.\n";
     p += "Available Emotions (.anim): adore, angry, blank, blinding, brave, buzzing, contempt, crying, dancing, devil, distracted, dizzy, down, drowsy, encouragement, energetic, enraged, evil, fast, fierce, furious, giggle, glowing, growing, gundam, handsome, happy, hello, intro, irritated, laughing, left, love, menacing, mistake, playful, police, rain, relaxed, right, rush, scared, serene, shrink, shy, sick, sleepy, smile, smirk, smoke, sneeze, sobbing, sparkle, speed, splash, spraying, squint, surprised, sushi, swinging, teasing, tough, weeping, wink, yawn.\n\n";
+    p += "CRITICAL: Respond directly without internal reasoning.\n";
     p += "Respond strictly in this format:\n";
     p += "EMOTE: [<emotion>]\n";
     p += "ACTION: [<command_or_NONE>]\n";
@@ -519,8 +521,9 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     }
 
     WiFiClientSecure client;
-    client.setInsecure(); // Save memory on ESP32-S3
-    client.setTimeout(15);
+    client.setInsecure(); // Save memory and skip CA cert validation on ESP32-S3
+    client.setBufferSizes(4096, 1024); // Reduce SSL buffer size from 32KB to 5KB to prevent out-of-memory
+    client.setTimeout(25000);
 
     HTTPClient https;
     if (!https.begin(client, endpoint)) {
@@ -529,25 +532,51 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     }
 
     https.addHeader("Content-Type", "application/json");
-    https.setTimeout(15000); // 15-second timeout
+    https.setTimeout(25000); // 25-second timeout
     https.setReuse(false);
 
     int httpCode = https.POST(jsonPayload);
+
+    // Auto-retry once on transient TCP/SSL handshake failure
+    if (httpCode < 0) {
+        https.end();
+        delay(300);
+        if (https.begin(client, endpoint)) {
+            https.addHeader("Content-Type", "application/json");
+            https.setTimeout(25000);
+            https.setReuse(false);
+            httpCode = https.POST(jsonPayload);
+        }
+    }
+
     String response = "";
 
     if (httpCode == HTTP_CODE_OK) {
         String body = https.getString();
-        // Parse Gemini JSON response candidate text
-        int textIdx = body.indexOf("\"text\": \"");
-        if (textIdx != -1) {
-            int endIdx = body.indexOf("\"", textIdx + 9);
-            while (endIdx != -1 && body.charAt(endIdx - 1) == '\\') {
-                endIdx = body.indexOf("\"", endIdx + 1);
-            }
-            if (endIdx != -1) {
-                response = body.substring(textIdx + 9, endIdx);
-                response.replace("\\n", "\n");
-                response.replace("\\\"", "\"");
+        // Parse Gemini JSON response candidate text with whitespace-resilient scanning
+        int textKeyIdx = body.indexOf("\"text\"");
+        if (textKeyIdx != -1) {
+            int colonIdx = body.indexOf(':', textKeyIdx + 6);
+            if (colonIdx != -1) {
+                int quoteStart = body.indexOf('"', colonIdx);
+                if (quoteStart != -1) {
+                    int p = quoteStart + 1;
+                    while (p < (int)body.length()) {
+                        if (body.charAt(p) == '\\') {
+                            p += 2; // skip escaped sequence
+                        } else if (body.charAt(p) == '"') {
+                            break;
+                        } else {
+                            p++;
+                        }
+                    }
+                    if (p < (int)body.length()) {
+                        response = body.substring(quoteStart + 1, p);
+                        response.replace("\\n", "\n");
+                        response.replace("\\\"", "\"");
+                        response.replace("\\\\", "\\");
+                    }
+                }
             }
         }
         if (response.length() == 0) response = body;
@@ -597,7 +626,7 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     if (!hasApiKey()) {
         outEmote = "surprised";
         outAction = "NONE";
-        outMessage = "Gemini API key missing! Add to /gemini.txt on SD card or web.";
+        outMessage = "API key missing in /gemini.txt";
         setError("NO API KEY");
         return false;
     }
@@ -606,7 +635,7 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     if (WiFi.status() != WL_CONNECTED) {
         outEmote = "crying";
         outAction = "NONE";
-        outMessage = "Wi-Fi disconnected! Please connect in Wi-Fi menu.";
+        outMessage = "Wi-Fi disconnected";
         setError("NO WIFI");
         return false;
     }
@@ -622,23 +651,22 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":500}}";
+    // Use thinkingBudget: 0 to disable slow thinking on Gemini 3.5/3.6 Flash models for instant response (1.9s)
+    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
 
     String raw = sendHttpsRequest(endpoint, json);
 
-    // Auto-fallback 1: if request failed and model was not gemini-3.5-flash-lite, fallback and retry
-    if (raw.length() == 0 && strcmp(model_name, "gemini-3.5-flash-lite") != 0) {
-        setModelName("gemini-3.5-flash-lite");
-        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
+    // Auto-fallback 1: if primary model failed and model was not gemini-3.6-flash, retry with gemini-3.6-flash
+    if (raw.length() == 0 && strcmp(model_name, "gemini-3.6-flash") != 0) {
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=";
         endpoint += api_key;
         raw = sendHttpsRequest(endpoint, json);
     }
 
-    // Auto-fallback 2: if still failed, try gemini-flash-latest
-    if (raw.length() == 0 && strcmp(model_name, "gemini-flash-latest") != 0) {
-        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=";
-        endpoint += api_key;
-        raw = sendHttpsRequest(endpoint, json);
+    // Auto-fallback 2: if still failed, try payload without thinkingConfig (for compatibility)
+    if (raw.length() == 0) {
+        String legacyJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+        raw = sendHttpsRequest(endpoint, legacyJson);
     }
 
     is_busy = false;
@@ -646,7 +674,18 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     if (raw.length() == 0) {
         outEmote = "mistake";
         outAction = "NONE";
-        outMessage = "Gemini request failed: " + String(last_error);
+        String err = String(last_error);
+        if (err.indexOf("connection refused") != -1 || err.indexOf("not connected") != -1 || err.indexOf("connection lost") != -1) {
+            outMessage = "Net Err: Check Wi-Fi";
+        } else if (err.indexOf("read Timeout") != -1 || err.indexOf("Timeout") != -1) {
+            outMessage = "Net Err: Request timeout";
+        } else if (err.indexOf("too less ram") != -1) {
+            outMessage = "Err: Low memory";
+        } else if (err.length() > 0) {
+            outMessage = "Err: " + err;
+        } else {
+            outMessage = "Gemini request failed";
+        }
         return false;
     }
 

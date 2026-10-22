@@ -666,7 +666,11 @@ void updateAICompanionMode() {
             }
 
             u8g2.setFont(u8g2_font_4x6_tr);
-            u8g2.drawStr(2, 62, aiStatusBubble.substring(0, 28).c_str());
+            String dispBubble = aiStatusBubble;
+            dispBubble.replace('\n', ' ');
+            dispBubble.replace('\r', ' ');
+            dispBubble.trim();
+            u8g2.drawStr(2, 62, dispBubble.substring(0, 28).c_str());
         }
 
         display.sendBuffer();
