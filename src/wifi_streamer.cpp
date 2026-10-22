@@ -403,6 +403,10 @@ bool WiFiStreamer::start() {
         if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
             wifiState = WIFI_STATE_CONNECTED;
             disconnectReason = "";
+            IPAddress dns0 = WiFi.dnsIP(0);
+            if (dns0 == INADDR_NONE || dns0 == IPAddress(0, 0, 0, 0)) {
+                WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
+            }
             ssdpUdp.stop();
             ssdpUdp.beginMulticast(IPAddress(239, 255, 255, 250), 1900);
             sendSSDPAnnounce();
@@ -428,6 +432,7 @@ bool WiFiStreamer::start() {
     if (savedSSID.length() > 0) {
         wifiState = WIFI_STATE_CONNECTING;
         disconnectReason = "";
+        WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
         WiFi.begin(savedSSID.c_str(), savedPass.c_str());
 
         // Responsive non-blocking check: wait up to 3s for fast router association
@@ -521,6 +526,7 @@ void WiFiStreamer::reconnect() {
         WiFi.disconnect(false);
         WiFi.mode(WIFI_AP_STA);
         WiFi.softAP("Q-Tune-Audio", "12345678");
+        WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
         WiFi.begin(savedSSID.c_str(), savedPass.c_str());
     } else {
         startAPMode();
@@ -1568,6 +1574,7 @@ void WiFiStreamer::update() {
                 static uint32_t lastReconnectAttempt = 0;
                 if (wifiState == WIFI_STATE_CONNECTING && (now - lastReconnectAttempt > 10000)) {
                     lastReconnectAttempt = now;
+                    WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
                     WiFi.begin(savedSSID.c_str(), savedPass.c_str());
                 }
             } else {

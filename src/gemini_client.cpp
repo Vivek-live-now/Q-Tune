@@ -149,8 +149,9 @@ void GeminiClient::setModelName(const char* model) {
     strncpy(model_name, model, sizeof(model_name) - 1);
     model_name[sizeof(model_name) - 1] = '\0';
     trimCStr(model_name);
-    if (strstr(model_name, "1.5") || strstr(model_name, "2.0") || strstr(model_name, "2.5") || strstr(model_name, "lite")) {
-        strncpy(model_name, "gemini-3.5-flash", sizeof(model_name) - 1);
+    // Auto-upgrade legacy deprecated models
+    if (strstr(model_name, "1.5") || strstr(model_name, "2.0") || strstr(model_name, "2.5")) {
+        strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
         model_name[sizeof(model_name) - 1] = '\0';
     }
 
@@ -578,7 +579,7 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
 
     WiFiClientSecure client;
     client.setInsecure(); // Save memory and skip CA cert validation on ESP32-S3
-    client.setTimeout(9000);
+    client.setTimeout(18000); // 18-second timeout for cloud reasoning responses
 
     HTTPClient https;
     if (!https.begin(client, endpoint)) {
@@ -587,22 +588,29 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
     }
 
     https.addHeader("Content-Type", "application/json");
-    https.setTimeout(9000); // 9-second timeout to prevent UI hang
+    https.setTimeout(18000);
     https.setReuse(false);
 
     int httpCode = https.POST(jsonPayload);
 
-    // Auto-retry once on transient TCP/SSL handshake failure
+    // Auto-retry once on transient TCP/SSL handshake failure using a clean TLS client
     if (httpCode < 0) {
         https.end();
-        client.stop(); // Stop previous broken client to clean underlying TLS socket
-        vTaskDelay(pdMS_TO_TICKS(150));
-        if (https.begin(client, endpoint)) {
+        client.stop();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        WiFiClientSecure retryClient;
+        retryClient.setInsecure();
+        retryClient.setTimeout(18000);
+        if (https.begin(retryClient, endpoint)) {
             https.addHeader("Content-Type", "application/json");
-            https.setTimeout(9000);
+            https.setTimeout(18000);
             https.setReuse(false);
             httpCode = https.POST(jsonPayload);
         }
+        https.end();
+        retryClient.stop();
+    } else {
+        https.end();
     }
 
     String response = "";
@@ -654,23 +662,36 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
                     }
                     if (endIdx != -1) {
                         String errMsg = body.substring(quoteStart + 1, endIdx);
-                        setError(errMsg.substring(0, 50).c_str());
+                        if (errMsg.indexOf("quota") != -1 || errMsg.indexOf("Quota") != -1 || httpCode == 429) {
+                            setError("QUOTA EXCEEDED (429)");
+                        } else {
+                            setError(errMsg.substring(0, 50).c_str());
+                        }
                     } else {
+                        if (httpCode == 429) setError("QUOTA EXCEEDED (429)");
+                        else {
+                            String err = "HTTP " + String(httpCode);
+                            setError(err.c_str());
+                        }
+                    }
+                } else {
+                    if (httpCode == 429) setError("QUOTA EXCEEDED (429)");
+                    else {
                         String err = "HTTP " + String(httpCode);
                         setError(err.c_str());
                     }
+                }
+            } else {
+                if (httpCode == 429) {
+                    setError("QUOTA EXCEEDED (429)");
                 } else {
                     String err = "HTTP " + String(httpCode);
                     setError(err.c_str());
                 }
-            } else {
-                String err = "HTTP " + String(httpCode);
-                setError(err.c_str());
             }
         }
     }
 
-    https.end();
     return response;
 }
 #endif
@@ -707,21 +728,22 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    // Use thinkingBudget: 0 for models that support it, or standard payload for lite / 1.5
+    // Use thinkingConfig with thinkingLevel: MINIMAL for fast ~4s responses across Gemini 3.x models
     String json;
-    if (strstr(model_name, "lite") != NULL || strstr(model_name, "1.5") != NULL) {
+    if (strstr(model_name, "1.5") != NULL) {
         json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
     } else {
-        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingLevel\":\"MINIMAL\"}}}";
     }
 
     String raw = sendHttpsRequest(endpoint, json);
+    String primaryErr = String(last_error);
 
-    // Auto-fallback: if primary model failed or hit 429 quota, retry with gemini-3.5-flash-lite (1.4s, separate quota)
-    if (raw.length() == 0) {
+    // Auto-fallback: if primary model failed or hit 429 quota, retry with gemini-3.5-flash-lite (fast ~4s, separate quota)
+    if (raw.length() == 0 && strcmp(model_name, "gemini-3.5-flash-lite") != 0) {
         endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
         endpoint += api_key;
-        String liteJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+        String liteJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingLevel\":\"MINIMAL\"}}}";
         raw = sendHttpsRequest(endpoint, liteJson);
         if (raw.length() > 0) {
             strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
@@ -734,12 +756,16 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
         outEmote = "mistake";
         outAction = "NONE";
         String err = String(last_error);
-        if (err.indexOf("connection refused") != -1 || err.indexOf("not connected") != -1 || err.indexOf("connection lost") != -1) {
-            outMessage = "Net Err: Check Wi-Fi";
+        if (primaryErr.indexOf("QUOTA") != -1 || primaryErr.indexOf("429") != -1 || primaryErr.indexOf("quota") != -1) {
+            err = primaryErr;
+        }
+
+        if (err.indexOf("QUOTA") != -1 || err.indexOf("429") != -1 || err.indexOf("quota") != -1 || err.indexOf("Quota") != -1) {
+            outMessage = "Quota exceeded. Try in a bit";
         } else if (err.indexOf("read Timeout") != -1 || err.indexOf("Timeout") != -1) {
             outMessage = "Net Err: Request timeout";
-        } else if (err.indexOf("429") != -1 || err.indexOf("quota") != -1 || err.indexOf("Quota") != -1) {
-            outMessage = "Quota exceeded. Try in a bit";
+        } else if (err.indexOf("connection refused") != -1 || err.indexOf("not connected") != -1 || err.indexOf("connection lost") != -1) {
+            outMessage = "Net Err: Check Wi-Fi";
         } else if (err.indexOf("too less ram") != -1) {
             outMessage = "Err: Low memory";
         } else if (err.length() > 0) {
@@ -890,20 +916,22 @@ void GeminiClient::runAsyncWorker() {
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
+    // Use thinkingConfig with thinkingLevel: MINIMAL for fast ~4s responses across Gemini 3.x models
     String json;
-    if (strstr(model_name, "lite") != NULL || strstr(model_name, "1.5") != NULL) {
+    if (strstr(model_name, "1.5") != NULL) {
         json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
     } else {
-        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingLevel\":\"MINIMAL\"}}}";
     }
 
     String raw = sendHttpsRequest(endpoint, json);
+    String primaryErr = String(last_error);
 
-    // Auto-fallback: retry with gemini-3.5-flash-lite (fast 1.4s, separate quota)
-    if (raw.length() == 0 && !is_async_cancelled) {
+    // Auto-fallback: retry with gemini-3.5-flash-lite (fast ~4s, separate quota)
+    if (raw.length() == 0 && !is_async_cancelled && strcmp(model_name, "gemini-3.5-flash-lite") != 0) {
         endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
         endpoint += api_key;
-        String liteJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
+        String liteJson = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingLevel\":\"MINIMAL\"}}}";
         raw = sendHttpsRequest(endpoint, liteJson);
         if (raw.length() > 0) {
             strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
@@ -921,12 +949,16 @@ void GeminiClient::runAsyncWorker() {
         async_out_emote = "mistake";
         async_out_act = "NONE";
         String err = String(last_error);
-        if (err.indexOf("connection refused") != -1 || err.indexOf("not connected") != -1 || err.indexOf("connection lost") != -1) {
-            async_out_msg = "Net Err: Check Wi-Fi";
+        if (primaryErr.indexOf("QUOTA") != -1 || primaryErr.indexOf("429") != -1 || primaryErr.indexOf("quota") != -1) {
+            err = primaryErr;
+        }
+
+        if (err.indexOf("QUOTA") != -1 || err.indexOf("429") != -1 || err.indexOf("quota") != -1 || err.indexOf("Quota") != -1) {
+            async_out_msg = "Quota exceeded. Try in a bit";
         } else if (err.indexOf("read Timeout") != -1 || err.indexOf("Timeout") != -1) {
             async_out_msg = "Net Err: Request timeout";
-        } else if (err.indexOf("429") != -1 || err.indexOf("quota") != -1 || err.indexOf("Quota") != -1) {
-            async_out_msg = "Quota exceeded. Try in a bit";
+        } else if (err.indexOf("connection refused") != -1 || err.indexOf("not connected") != -1 || err.indexOf("connection lost") != -1) {
+            async_out_msg = "Net Err: Check Wi-Fi";
         } else if (err.indexOf("too less ram") != -1) {
             async_out_msg = "Err: Low memory";
         } else if (err.length() > 0) {
