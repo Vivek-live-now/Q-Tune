@@ -91,7 +91,7 @@ int main() {
     geminiClient.begin();
     geminiClient.setApiKey("AIzaSyTestDummyKeyForVerification987");
     assert(geminiClient.hasApiKey() == true);
-    assert(strcmp(geminiClient.getModelName(), "gemini-1.5-flash") == 0);
+    assert(strcmp(geminiClient.getModelName(), "gemini-3.5-flash-lite") == 0);
 
     // Prompt building
     String prompt = geminiClient.buildPrompt("Play some jazz!");

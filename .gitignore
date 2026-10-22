@@ -9,3 +9,5 @@ tests/test_lyrics_native
 tests/*_bin
 tests/*.o
 tests/*.bin
+gemini.txt
+sdcard/gemini.txt

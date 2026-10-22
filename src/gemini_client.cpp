@@ -29,7 +29,7 @@ GeminiClient::GeminiClient() :
     is_busy(false)
 {
     memset(api_key, 0, sizeof(api_key));
-    strncpy(model_name, "gemini-1.5-flash", sizeof(model_name) - 1);
+    strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
     memset(last_error, 0, sizeof(last_error));
 }
 
@@ -51,7 +51,12 @@ bool GeminiClient::begin() {
             strncpy(api_key, key.c_str(), sizeof(api_key) - 1);
             api_key[sizeof(api_key) - 1] = '\0';
         }
-        String mdl = prefs.getString("model", "gemini-1.5-flash");
+        String mdl = prefs.getString("model", "gemini-3.5-flash-lite");
+        // Auto-upgrade legacy deprecated models
+        if (mdl == "gemini-1.5-flash" || mdl == "gemini-2.0-flash" || mdl == "gemini-2.5-flash" || mdl == "gemini-2.5-flash-lite") {
+            mdl = "gemini-3.5-flash-lite";
+            prefs.putString("model", mdl);
+        }
         if (mdl.length() > 0) {
             strncpy(model_name, mdl.c_str(), sizeof(model_name) - 1);
             model_name[sizeof(model_name) - 1] = '\0';
@@ -184,7 +189,7 @@ bool GeminiClient::loadSDConfig() {
                     val.trim();
                 }
             }
-            if (val.startsWith("AIza") || (val.length() >= 15 && foundKey.length() == 0)) {
+            if (val.startsWith("AIza") || val.startsWith("AQ.") || (val.length() >= 15 && foundKey.length() == 0)) {
                 foundKey = val;
             }
         }
@@ -197,6 +202,10 @@ bool GeminiClient::loadSDConfig() {
         setApiKey(foundKey.c_str());
     }
     if (foundModel.length() > 0) {
+        if (foundModel == "gemini-1.5-flash" || foundModel == "gemini-2.0-flash" ||
+            foundModel == "gemini-2.5-flash" || foundModel == "gemini-2.5-flash-lite") {
+            foundModel = "gemini-3.5-flash-lite";
+        }
         setModelName(foundModel.c_str());
     }
     return true;
@@ -482,12 +491,22 @@ String GeminiClient::sendHttpsRequest(const String &endpoint, const String &json
         setError("OK");
     } else {
         String body = https.getString();
-        int msgIdx = body.indexOf("\"message\": \"");
+        int msgIdx = body.indexOf("\"message\":");
         if (msgIdx != -1) {
-            int endIdx = body.indexOf("\"", msgIdx + 12);
-            if (endIdx != -1) {
-                String errMsg = body.substring(msgIdx + 12, endIdx);
-                setError(errMsg.substring(0, 50).c_str());
+            int colonIdx = body.indexOf(':', msgIdx);
+            int quoteStart = body.indexOf('"', colonIdx);
+            if (quoteStart != -1) {
+                int endIdx = body.indexOf('"', quoteStart + 1);
+                while (endIdx != -1 && body.charAt(endIdx - 1) == '\\') {
+                    endIdx = body.indexOf('"', endIdx + 1);
+                }
+                if (endIdx != -1) {
+                    String errMsg = body.substring(quoteStart + 1, endIdx);
+                    setError(errMsg.substring(0, 50).c_str());
+                } else {
+                    String err = "HTTP " + String(httpCode);
+                    setError(err.c_str());
+                }
             } else {
                 String err = "HTTP " + String(httpCode);
                 setError(err.c_str());
@@ -538,9 +557,18 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":150}}";
+    String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":500}}";
 
     String raw = sendHttpsRequest(endpoint, json);
+
+    // Auto-fallback: if request failed and model was not gemini-3.5-flash-lite, fallback and retry
+    if (raw.length() == 0 && strcmp(model_name, "gemini-3.5-flash-lite") != 0) {
+        setModelName("gemini-3.5-flash-lite");
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=";
+        endpoint += api_key;
+        raw = sendHttpsRequest(endpoint, json);
+    }
+
     is_busy = false;
 
     if (raw.length() == 0) {

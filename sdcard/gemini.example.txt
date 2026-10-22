@@ -1,0 +1,5 @@
+# Q-Tune Gemini AI Configuration
+# Rename this file to gemini.txt on the root of your SD card.
+# Paste your Gemini API key below or set api_key=YOUR_KEY
+api_key=YOUR_GEMINI_API_KEY_HERE
+model=gemini-3.5-flash-lite
