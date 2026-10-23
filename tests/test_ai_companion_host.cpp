@@ -117,7 +117,82 @@ int main() {
     aiCompanion.update(0.033f);
     assert(aiCompanion.getBeatPulse() >= 0.0f);
 
-    std::cout << "  [PASS] AICompanion dual personality (DJ Neko ⇄ Mochi), speed controls, reactivity, and visual modes verified.\n";
+    // Voice Engine Autonomy Controls (SFX, On-Device Retro TTS, Cloud Streaming, Mute)
+    aiCompanion.setVoiceMode(VOICE_MODE_SFX);
+    assert(aiCompanion.getVoiceMode() == VOICE_MODE_SFX);
+    assert(strcmp(aiCompanion.getVoiceModeShortName(), "SFX") == 0);
+    assert(strcmp(aiCompanion.getVoiceModeName(), "SFX (CHIPTUNE)") == 0);
+
+    aiCompanion.cycleVoiceMode();
+    assert(aiCompanion.getVoiceMode() == VOICE_MODE_ON_DEVICE_TTS);
+    assert(strcmp(aiCompanion.getVoiceModeShortName(), "DEVICE") == 0);
+    assert(strcmp(aiCompanion.getVoiceModeName(), "ON-DEVICE RETRO") == 0);
+
+    aiCompanion.cycleVoiceMode();
+    assert(aiCompanion.getVoiceMode() == VOICE_MODE_STREAMING_TTS);
+    assert(strcmp(aiCompanion.getVoiceModeShortName(), "STREAM") == 0);
+    assert(strcmp(aiCompanion.getVoiceModeName(), "CLOUD STREAMING") == 0);
+
+    aiCompanion.cycleVoiceMode();
+    assert(aiCompanion.getVoiceMode() == VOICE_MODE_MUTE);
+    assert(strcmp(aiCompanion.getVoiceModeShortName(), "MUTE") == 0);
+    assert(strcmp(aiCompanion.getVoiceModeName(), "MUTE (TEXT ONLY)") == 0);
+
+    aiCompanion.cycleVoiceMode();
+    assert(aiCompanion.getVoiceMode() == VOICE_MODE_SFX);
+    aiCompanion.speak("Test speech engine");
+
+    // Trigger Word ("Hey Neko" / "Hey Mochi" Acoustic Cadence Matcher)
+    assert(aiCompanion.isTriggerWordEnabled() == false);
+    assert(strcmp(aiCompanion.getTriggerWordStatus(), "OFF") == 0);
+    aiCompanion.setTriggerWordEnabled(true);
+    assert(aiCompanion.isTriggerWordEnabled() == true);
+    assert(strcmp(aiCompanion.getTriggerWordStatus(), "ON") == 0);
+    aiCompanion.toggleTriggerWord();
+    assert(aiCompanion.isTriggerWordEnabled() == false);
+    aiCompanion.toggleTriggerWord();
+    assert(aiCompanion.isTriggerWordEnabled() == true);
+
+    // 1. Silence test
+    aiCompanion.resetTriggerDetector();
+    aiCompanion.setTriggerSimTime(1000);
+    assert(aiCompanion.processTriggerAudio(0.0f, 0.0f, 0.0f) == false);
+
+    // 2. Transients / single spike rejection
+    aiCompanion.resetTriggerDetector();
+    aiCompanion.setTriggerSimTime(2000);
+    aiCompanion.processTriggerAudio(30.0f, 0.5f, 220.0f); // 35ms spike
+    assert(aiCompanion.processTriggerAudio(0.0f, 0.0f, 0.0f) == false); // dropped
+
+    // 3. Continuous tone rejection (no syllable dip)
+    aiCompanion.resetTriggerDetector();
+    aiCompanion.setTriggerSimTime(3000);
+    for (int f = 0; f < 20; f++) {
+        assert(aiCompanion.processTriggerAudio(30.0f, 0.5f, 220.0f) == false);
+    }
+
+    // 4. Valid "Hey Neko" cadence detection
+    aiCompanion.resetTriggerDetector();
+    aiCompanion.setTriggerSimTime(4000);
+    // Syllable 1 ("Hey" - ~175ms)
+    for (int f = 0; f < 5; f++) {
+        assert(aiCompanion.processTriggerAudio(25.0f, 0.40f, 220.0f) == false);
+    }
+    // Gap (~105ms)
+    for (int f = 0; f < 3; f++) {
+        assert(aiCompanion.processTriggerAudio(2.0f, 0.05f, 0.0f) == false);
+    }
+    // Syllable 2 ("Neko" - ~210ms)
+    bool matched = false;
+    for (int f = 0; f < 6; f++) {
+        if (aiCompanion.processTriggerAudio(28.0f, 0.45f, 240.0f)) {
+            matched = true;
+            break;
+        }
+    }
+    assert(matched == true);
+
+    std::cout << "  [PASS] AICompanion dual personality (DJ Neko ⇄ Mochi), speed controls, voice modes, trigger word cadence, reactivity, and visual modes verified.\n";
 
     // -------------------------------------------------------------------------
     // 3. GeminiClient Parsing & Action Execution Tests
@@ -127,6 +202,19 @@ int main() {
     geminiClient.setApiKey("AIzaSyTestDummyKeyForVerification987");
     assert(geminiClient.hasApiKey() == true);
     assert(strcmp(geminiClient.getModelName(), "gemini-3.5-flash") == 0);
+    assert(strcmp(geminiClient.getModelShortName(), "3.5-FL") == 0);
+    geminiClient.cycleModel();
+    assert(strcmp(geminiClient.getModelName(), "gemini-3.5-flash-lite") == 0);
+    assert(strcmp(geminiClient.getModelShortName(), "3.5-LT") == 0);
+    geminiClient.cycleModel();
+    assert(strcmp(geminiClient.getModelName(), "gemini-2.5-flash") == 0);
+    assert(strcmp(geminiClient.getModelShortName(), "2.5-FL") == 0);
+    geminiClient.cycleModel();
+    assert(strcmp(geminiClient.getModelName(), "gemini-2.5-flash-lite") == 0);
+    assert(strcmp(geminiClient.getModelShortName(), "2.5-LT") == 0);
+    geminiClient.cycleModel();
+    assert(strcmp(geminiClient.getModelName(), "gemini-3.5-flash") == 0);
+    assert(strcmp(geminiClient.getModelShortName(), "3.5-FL") == 0);
 
     // Prompt building
     String prompt = geminiClient.buildPrompt("Play some jazz!");

@@ -521,31 +521,66 @@ static void renderSpeechBubbleCard(const String &msg, const String &heard = "") 
     int lineY = boxY + 18;
     u8g2.setFont(u8g2_font_4x6_tr);
 
-    // 1. If user spoke something, show "You: <spoken text>"
+    // 1. If user spoke something, show "You: <spoken text>" (with up to 2 lines word-wrapping)
+    int heardLines = 0;
     if (heard.length() > 0) {
-        String userStr = "You: \"" + heard + "\"";
-        if (userStr.length() > 24) userStr = userStr.substring(0, 22) + "..\"";
-        u8g2.drawStr(boxX + 4, lineY, userStr.c_str());
-        lineY += 7;
+        String cleanHeard = heard;
+        cleanHeard.trim();
+        if (cleanHeard.startsWith("\"") && cleanHeard.endsWith("\"") && cleanHeard.length() >= 2) {
+            cleanHeard = cleanHeard.substring(1, cleanHeard.length() - 1);
+            cleanHeard.trim();
+        }
+
+        String userStr = "You: \"" + cleanHeard;
+        if (!userStr.endsWith("\"")) userStr += "\"";
+
+        const int maxHeardChars = 27;
+        if (userStr.length() <= maxHeardChars) {
+            u8g2.drawStr(boxX + 4, lineY, userStr.c_str());
+            lineY += 7;
+            heardLines = 1;
+        } else {
+            int splitIdx = maxHeardChars;
+            int lastSpace = userStr.lastIndexOf(' ', maxHeardChars);
+            if (lastSpace > 5) splitIdx = lastSpace;
+            String line1 = userStr.substring(0, splitIdx);
+            String line2 = "  " + userStr.substring(splitIdx);
+            line2.trim();
+            line2 = "  " + line2;
+            if (line2.length() > maxHeardChars) {
+                line2 = line2.substring(0, maxHeardChars - 3) + "..\"";
+            }
+            u8g2.drawStr(boxX + 4, lineY, line1.c_str());
+            lineY += 7;
+            u8g2.drawStr(boxX + 4, lineY, line2.c_str());
+            lineY += 7;
+            heardLines = 2;
+        }
         u8g2.drawHLine(boxX + 4, lineY - 2, boxW - 8);
-        lineY += 6;
+        lineY += 5;
     }
 
-    // 2. Multi-line word wrapping with 4x6 font (fits 24 chars per line)
-    const int maxChars = 24;
-    const int maxLines = (heard.length() > 0) ? 3 : 4;
+    // 2. Multi-line word wrapping with 4x6 font (fits 27 chars per line)
+    String displayMsg = msg;
+    if (displayMsg.startsWith("Thinking")) {
+        static const char* tDots[] = { "Thinking", "Thinking.", "Thinking..", "Thinking..." };
+        displayMsg = tDots[(millis() / 350) % 4];
+    }
+
+    const int maxChars = 27;
+    const int maxLines = (heardLines >= 2) ? 2 : ((heardLines == 1) ? 3 : 4);
     int lineCount = 0;
 
     int p = 0;
-    int len = msg.length();
+    int len = displayMsg.length();
     while (p < len && lineCount < maxLines) {
-        while (p < len && (msg[p] == ' ' || msg[p] == '\n' || msg[p] == '\r')) p++;
+        while (p < len && (displayMsg[p] == ' ' || displayMsg[p] == '\n' || displayMsg[p] == '\r')) p++;
         if (p >= len) break;
 
         int lineEnd = p;
         int nextSpace = p;
         while (nextSpace < len && (nextSpace - p) <= maxChars) {
-            if (msg[nextSpace] == ' ' || msg[nextSpace] == '\n' || msg[nextSpace] == '\r') {
+            if (displayMsg[nextSpace] == ' ' || displayMsg[nextSpace] == '\n' || displayMsg[nextSpace] == '\r') {
                 lineEnd = nextSpace;
             }
             nextSpace++;
@@ -557,7 +592,7 @@ static void renderSpeechBubbleCard(const String &msg, const String &heard = "") 
             if (lineEnd > len) lineEnd = len;
         }
 
-        String line = msg.substring(p, lineEnd);
+        String line = displayMsg.substring(p, lineEnd);
         line.trim();
         if (lineCount == maxLines - 1 && lineEnd < len) {
             if (line.length() > maxChars - 2) line = line.substring(0, maxChars - 2) + "..";
@@ -683,7 +718,7 @@ void startMicListeningSession(const char* promptHint = nullptr) {
         aiSessionState = AI_SESSION_THINKING;
         aiSessionStartTime = millis();
         toastListening = false;
-        showToast("Thinking...", 15000, false);
+        showToast("Thinking...", 15000, false, aiPromptHint);
         aiCompanion.setMood(MOOD_THINKING, 15000);
         geminiClient.askAsync(aiPromptHint.c_str());
         return;
@@ -736,16 +771,20 @@ void updateAICompanionMode() {
             spectrumAnalyzer.stop();
 #endif
             String query;
+            String userHeard;
             if (aiPromptHint.length() > 0) {
                 query = aiPromptHint;
+                userHeard = aiPromptHint;
             } else if (aiSessionMaxRms > 0.02f) {
-                query = "User spoke into microphone: Answer their question, weather request, music control, or give friendly companion advice.";
+                userHeard = "Voice Input (" + String((int)(aiSessionMaxRms * 100)) + "% Mic)";
+                query = "User spoke into microphone (sound detected at " + String((int)(aiSessionMaxRms * 100)) + "% volume). Transcribe what was asked on the HEARD line and respond.";
             } else {
-                query = "User activated microphone: Answer question, weather request, or music tip, and execute actions if requested.";
+                userHeard = "Mic (Silent / No voice)";
+                query = "User activated microphone but no sound was heard. Give a cheerful companion greeting and tip.";
             }
 
             toastListening = false;
-            showToast("Thinking...", 15000, false);
+            showToast("Thinking...", 15000, false, userHeard);
             aiCompanion.setMood(MOOD_THINKING, 15000);
             aiSessionState = AI_SESSION_THINKING;
             aiSessionStartTime = now;
@@ -769,19 +808,19 @@ void updateAICompanionMode() {
             toastListening = false;
 
             if (success) {
-                if (aiCompanion.getCompanion() == COMPANION_CAT) {
-                    aiCompanion.playMeow();
-                } else {
-                    aiCompanion.playChirp();
-                }
                 aiStatusBubble = outMsg;
-                showToast(outMsg.length() > 0 ? outMsg : "Done!", 9000, false, outHeard);
+                String displayHeard = (outHeard.length() > 0 && !outHeard.equalsIgnoreCase("(silence)")) ? outHeard : toastHeard;
+                showToast(outMsg.length() > 0 ? outMsg : "Done!", 9000, false, displayHeard);
 
                 geminiClient.executeAction(outAct);
                 aiCompanion.playAnim(outEmote.c_str(), 4500);
+
+                // Voice Output based on active user-chosen autonomy mode
+                aiCompanion.speak(outMsg.c_str());
             } else {
                 aiStatusBubble = outMsg.length() > 0 ? outMsg : "AI request failed";
-                showToast(aiStatusBubble, 4500, false);
+                String displayHeard = (outHeard.length() > 0) ? outHeard : toastHeard;
+                showToast(aiStatusBubble, 4500, false, displayHeard);
                 aiCompanion.playAnim("mistake", 3000);
             }
 
@@ -789,6 +828,33 @@ void updateAICompanionMode() {
                 if (!outAct.equalsIgnoreCase("PAUSE") && !outAct.equalsIgnoreCase("STOP")) {
                     audioPlayer.resume();
                 }
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // 2. Hands-Free Trigger Word Detection ("Hey Neko" / "Hey Mochi")
+    // --------------------------------------------------------------------------
+    if (aiSessionState == AI_SESSION_IDLE && aiCompanion.isTriggerWordEnabled()) {
+        static unsigned long lastTriggerSample = 0;
+        if (now - lastTriggerSample >= 35) {
+            lastTriggerSample = now;
+#ifdef ARDUINO
+            spectrumAnalyzer.sampleMicrophone();
+            float curRms = spectrumAnalyzer.getRMSLevel();
+            float curConf = spectrumAnalyzer.getVoiceConfidence();
+            float curPitch = spectrumAnalyzer.getVoicePitch();
+#else
+            float curRms = 0.0f;
+            float curConf = 0.0f;
+            float curPitch = 0.0f;
+#endif
+            if (aiCompanion.processTriggerAudio(curRms, curConf, curPitch)) {
+                // Hands-free trigger word matched!
+                ledManager.triggerButtonPulse(CRGB::Cyan, 3, 40);
+                showToast((aiCompanion.getCompanion() == COMPANION_CAT) ? "Hey Neko!" : "Hey Mochi!", 1500, false);
+                startMicListeningSession();
+                return;
             }
         }
     }
@@ -829,6 +895,10 @@ void updateAICompanionMode() {
                 ledManager.triggerButtonPulse(CRGB::Purple, 2, 80);
                 return;
             } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+#ifdef ARDUINO
+                spectrumAnalyzer.stop();
+#endif
+                aiCompanion.resetTriggerDetector();
                 currentMode = MODE_MAIN_MENU;
                 return;
             }
@@ -904,6 +974,10 @@ void updateAICompanionMode() {
                 }
             }
         } else if (evt == BTN_EVENT_CANCEL_PRESS || evt == BTN_EVENT_CANCEL_HOLD) {
+#ifdef ARDUINO
+            spectrumAnalyzer.stop();
+#endif
+            aiCompanion.resetTriggerDetector();
             currentMode = MODE_MAIN_MENU;
         }
     }
@@ -915,9 +989,19 @@ void updateAICompanionMode() {
         if (isInactive) {
             // Full-screen mode (128x64 centered, zero clutter) after 3s button inactivity
             aiCompanion.render(0, 0, 128, 64);
+            if (aiCompanion.isTriggerWordEnabled()) {
+                U8G2 &u8g2 = display.getU8g2();
+                u8g2.setFont(u8g2_font_4x6_tr);
+                u8g2.setDrawColor(1);
+                u8g2.drawStr(98, 7, "[WAKE]");
+            }
         } else {
             // Interactive UI mode with menu and status
-            display.drawTopStatusBar(aiCompanion.getCompanionName(), battery.getPercentage());
+            String title = aiCompanion.getCompanionName();
+            if (aiCompanion.isTriggerWordEnabled()) {
+                title += " [W]";
+            }
+            display.drawTopStatusBar(title.c_str(), battery.getPercentage());
             aiCompanion.render(0, 10, 60, 54);
 
             U8G2 &u8g2 = display.getU8g2();
@@ -954,7 +1038,7 @@ void updateAICompanionMode() {
 // ==============================================================================
 // Outside Settings Menu & Wi-Fi Stats Mode
 // ==============================================================================
-const int SETTINGS_MENU_COUNT = 8;
+const int SETTINGS_MENU_COUNT = 11;
 const char* settingsMenuLabels[] = {
     "Wi-Fi Power",
     "Wi-Fi Stats",
@@ -963,6 +1047,9 @@ const char* settingsMenuLabels[] = {
     "CPU Speed",
     "RGB Backlight",
     "AI Companion",
+    "AI Model",
+    "AI Voice",
+    "AI Trigger",
     "Back to Menu"
 };
 
@@ -1083,7 +1170,10 @@ void renderSettingsMenu() {
     vals[4] = String("[") + powerManager.getProfileShortName(powerManager.getProfile()) + "]";
     vals[5] = ledManager.isEnabled() ? "[ON]" : "[OFF]";
     vals[6] = String("[") + (aiCompanion.getCompanion() == COMPANION_CAT ? "NEKO" : "MOCHI") + "]";
-    vals[7] = "[EXIT]";
+    vals[7] = String("[") + geminiClient.getModelShortName() + "]";
+    vals[8] = String("[") + aiCompanion.getVoiceModeShortName() + "]";
+    vals[9] = String("[") + (aiCompanion.isTriggerWordEnabled() ? "ON" : "OFF") + "]";
+    vals[10] = "[EXIT]";
 
     display.drawStandardMenu("SETTINGS", settingsMenuLabels, SETTINGS_MENU_COUNT, settingsMenuSelection, settingsMenuScrollOffset, vals, batBuf);
     display.sendBuffer();
@@ -1167,7 +1257,19 @@ void updateSettingsMode() {
             case 6: // AI Companion
                 aiCompanion.toggleCompanion();
                 break;
-            case 7: // Back
+            case 7: // AI Model
+                geminiClient.cycleModel();
+                showToast("Model: " + String(geminiClient.getModelName()), 2000);
+                break;
+            case 8: // AI Voice
+                aiCompanion.cycleVoiceMode();
+                showToast("Voice: " + String(aiCompanion.getVoiceModeName()), 2000);
+                break;
+            case 9: // AI Trigger
+                aiCompanion.toggleTriggerWord();
+                showToast(aiCompanion.isTriggerWordEnabled() ? "Trigger: ON (Hey Neko)" : "Trigger: OFF (Press SEL)", 2000);
+                break;
+            case 10: // Back
                 currentMode = MODE_MAIN_MENU;
                 break;
         }

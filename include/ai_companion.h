@@ -22,6 +22,14 @@
 // ==============================================================================
 // Companion Types & Visual Modes
 // ==============================================================================
+enum CompanionVoiceMode : uint8_t {
+    VOICE_MODE_SFX = 0,          // Chiptune SFX (Meows / Chirps)
+    VOICE_MODE_ON_DEVICE_TTS = 1,// On-Device Retro Speech Synthesizer (100% Offline)
+    VOICE_MODE_STREAMING_TTS = 2,// Natural Cloud Streaming Voice (Wi-Fi)
+    VOICE_MODE_MUTE = 3,         // Silent (Text only)
+    VOICE_MODE_COUNT = 4
+};
+
 enum CompanionType : uint8_t {
     COMPANION_CAT = 0,    // DJ Neko (Cute Music-Lover Cat with Studio Headphones)
     COMPANION_MOCHI = 1,  // Classic Mochi (Dasai Iconic Pet)
@@ -116,6 +124,25 @@ public:
     void toggleSound() { sound_enabled = !sound_enabled; }
     bool isSoundEnabled() const { return sound_enabled; }
 
+    // Voice Engine Mode Selection & Speech Synthesis (Autonomous Options)
+    CompanionVoiceMode getVoiceMode() const { return voice_mode; }
+    void setVoiceMode(CompanionVoiceMode mode);
+    void cycleVoiceMode();
+    const char* getVoiceModeName() const;
+    const char* getVoiceModeShortName() const;
+    void speak(const char* text);
+
+    // Trigger Word (Wake Word: "Hey Neko" / "Hey Mochi")
+    bool isTriggerWordEnabled() const { return trigger_word_enabled; }
+    void setTriggerWordEnabled(bool enabled);
+    void toggleTriggerWord() { setTriggerWordEnabled(!trigger_word_enabled); }
+    const char* getTriggerWordStatus() const { return trigger_word_enabled ? "ON" : "OFF"; }
+    bool processTriggerAudio(float rms, float confidence, float pitch);
+    void resetTriggerDetector();
+#ifndef ARDUINO
+    void setTriggerSimTime(uint32_t t) { trig_sim_time_ms = t; }
+#endif
+
     // Rendering
     void render(int16_t x = 0, int16_t y = 0, int16_t w = 128, int16_t h = 64);
     void renderLiveCat(int16_t cx, int16_t cy);
@@ -139,8 +166,26 @@ private:
     CompanionMood current_mood;
 
     bool sound_enabled;
+    CompanionVoiceMode voice_mode;
+    bool trigger_word_enabled;
     bool neko_overlay_on_anim;
     uint8_t speed_index;
+
+    enum TriggerCadenceState : uint8_t {
+        TRIG_STATE_IDLE = 0,
+        TRIG_STATE_SYLLABLE_1,
+        TRIG_STATE_GAP,
+        TRIG_STATE_SYLLABLE_2
+    };
+    TriggerCadenceState trig_state;
+    uint32_t trig_state_start_ms;
+    uint32_t trig_s1_start_ms;
+#ifndef ARDUINO
+    uint32_t trig_sim_time_ms;
+#endif
+
+    void speakEmbedded(const char* text);
+    bool streamCloudVoice(const char* text);
 
     // Animation / Emotion timer
     uint32_t emote_end_time;

@@ -113,7 +113,9 @@ public:
 
     // Model selection
     const char* getModelName() const { return model_name; }
+    const char* getModelShortName() const;
     void setModelName(const char* model);
+    void cycleModel();
 
     // Context & State Serialization
     String buildSystemStateJson() const;

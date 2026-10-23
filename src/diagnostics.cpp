@@ -603,8 +603,14 @@ void Diagnostics::testAIGeminiCheck() {
     String pingResultMsg = "";
 
     while (true) {
-        // 1. Live microphone sampling
-        spectrumAnalyzer.sampleMicrophone();
+        // 1. Live microphone sampling — only when not waiting on Gemini HTTPS request.
+        // While PING_TESTING the Gemini worker task (Core 0) holds the TLS/WiFiClientSecure
+        // stack. Keeping the I2S mic DMA running concurrently causes a stack-overflow /
+        // memory crash in the worker task (only 10 KB stack). We stop the mic before
+        // launching the async request and restart it once a result is available.
+        if (pingState != PING_TESTING) {
+            spectrumAnalyzer.sampleMicrophone();
+        }
         float micRms = spectrumAnalyzer.getRMSLevel();
 
         // 2. Poll async Gemini result if test in progress
@@ -613,6 +619,10 @@ void Diagnostics::testAIGeminiCheck() {
             String outMsg, outEmote, outAct, outHeard;
             if (geminiClient.pollAsyncResult(ok, outMsg, outEmote, outAct, outHeard)) {
                 pingDurationMs = millis() - pingStartTime;
+                // Restart the mic I2S (TX→RX) before playing any audio tone so that
+                // playMeow()/playChirp() → audioPlayer.playTestTone() does not try to
+                // drive the I2S peripheral that is still in MIC RX mode.
+                spectrumAnalyzer.start();
                 if (ok) {
                     pingState = PING_SUCCESS;
                     pingResultMsg = outMsg.length() > 0 ? outMsg : "OK: Responded";
@@ -718,6 +728,13 @@ void Diagnostics::testAIGeminiCheck() {
                     pingResultMsg = "Connect Wi-Fi";
                     ledManager.triggerButtonPulse(CRGB::Red, 1, 50);
                 } else {
+                    // Stop the mic I2S driver before starting the Gemini HTTPS request.
+                    // The mic keeps the I2S peripheral in RX/DMA mode; leaving it running
+                    // while the Gemini worker (Core 0, 10 KB stack) performs a TLS
+                    // WiFiClientSecure request causes a stack overflow / memory crash.
+                    // spectrumAnalyzer.stop() uninstalls the I2S mic driver and calls
+                    // audioPlayer.begin() to restore the I2S TX configuration.
+                    spectrumAnalyzer.stop();
                     pingState = PING_TESTING;
                     pingStartTime = millis();
                     ledManager.triggerButtonPulse(CRGB::Cyan, 1, 50);

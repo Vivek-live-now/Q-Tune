@@ -127,9 +127,9 @@ bool GeminiClient::begin() {
 }
 
 #ifdef ARDUINO
-// Layer 3 Persistent Static Worker: 2560 words (10,240 bytes) allocated statically in BSS.
-// Eliminates dynamic FreeRTOS task churn and heap fragmentation failures on ESP32-S3.
-#define GEMINI_WORKER_STACK_WORDS 2560
+// Layer 3 Persistent Static Worker: 5120 words (20,480 bytes) allocated statically in BSS.
+// Provides safe stack headroom for mbedTLS TLS 1.3/1.2 handshakes and eliminate FreeRTOS stack overflow crashes.
+#define GEMINI_WORKER_STACK_WORDS 5120
 static StackType_t s_geminiWorkerStack[GEMINI_WORKER_STACK_WORDS];
 static StaticTask_t s_geminiWorkerTCB;
 
@@ -181,13 +181,44 @@ void GeminiClient::setApiKey(const char* key) {
 #endif
 }
 
+static const char* AVAILABLE_GEMINI_MODELS[] = {
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite"
+};
+static const size_t AVAILABLE_GEMINI_MODEL_COUNT = sizeof(AVAILABLE_GEMINI_MODELS) / sizeof(AVAILABLE_GEMINI_MODELS[0]);
+
+const char* GeminiClient::getModelShortName() const {
+    if (strstr(model_name, "3.5-flash-lite")) return "3.5-LT";
+    if (strstr(model_name, "3.5-flash")) return "3.5-FL";
+    if (strstr(model_name, "2.5-flash-lite")) return "2.5-LT";
+    if (strstr(model_name, "2.5-flash")) return "2.5-FL";
+    if (strstr(model_name, "2.5-pro")) return "2.5-PR";
+    if (strstr(model_name, "lite")) return "LITE";
+    if (strstr(model_name, "pro")) return "PRO";
+    return "FLASH";
+}
+
+void GeminiClient::cycleModel() {
+    int curIdx = 0;
+    for (size_t i = 0; i < AVAILABLE_GEMINI_MODEL_COUNT; i++) {
+        if (strcmp(model_name, AVAILABLE_GEMINI_MODELS[i]) == 0) {
+            curIdx = (int)i;
+            break;
+        }
+    }
+    int nextIdx = (curIdx + 1) % AVAILABLE_GEMINI_MODEL_COUNT;
+    setModelName(AVAILABLE_GEMINI_MODELS[nextIdx]);
+}
+
 void GeminiClient::setModelName(const char* model) {
     if (!model) return;
     strncpy(model_name, model, sizeof(model_name) - 1);
     model_name[sizeof(model_name) - 1] = '\0';
     trimCStr(model_name);
     // Auto-upgrade legacy deprecated models
-    if (strstr(model_name, "1.5") || strstr(model_name, "2.0") || strstr(model_name, "2.5")) {
+    if (strstr(model_name, "1.5") || strstr(model_name, "2.0")) {
         strncpy(model_name, "gemini-3.5-flash-lite", sizeof(model_name) - 1);
         model_name[sizeof(model_name) - 1] = '\0';
     }
@@ -301,9 +332,8 @@ bool GeminiClient::loadSDConfig() {
     if (foundKey.length() > 5) {
         setApiKey(foundKey.c_str());
     }
-    if (foundModel.length() > 0) {
-        setModelName(foundModel.c_str());
-    }
+    // Model selection is configured and persisted via Settings menu;
+    // SD card /gemini.txt does not override the user's chosen model.
     return true;
 #else
     return false;
@@ -395,7 +425,7 @@ bool GeminiClient::parseResponse(const String &rawResponse, String &outEmote, St
                 val = val.substring(1, val.length() - 1);
             }
             val.trim();
-            if (val.length() > 0 && !val.equalsIgnoreCase("(silence)")) {
+            if (val.length() > 0 && !val.equalsIgnoreCase("(silence)") && !val.equalsIgnoreCase("none")) {
                 strncpy(last_transcription, val.c_str(), sizeof(last_transcription) - 1);
                 last_transcription[sizeof(last_transcription) - 1] = '\0';
             }
@@ -758,6 +788,10 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
 
     is_busy = true;
     aiCompanion.setMood(MOOD_THINKING, 8000);
+    if (query && strlen(query) > 0) {
+        strncpy(last_transcription, query, sizeof(last_transcription) - 1);
+        last_transcription[sizeof(last_transcription) - 1] = '\0';
+    }
 
     String prompt = buildPrompt(query);
     String sanitized = escapeJson(prompt);
@@ -767,12 +801,14 @@ bool GeminiClient::ask(const char* query, String &outMessage, String &outEmote, 
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    // Use thinkingConfig with thinkingLevel: MINIMAL for fast ~4s responses across Gemini 3.x models
+    // Free Tier optimization: minimize/disable reasoning tokens for ultra-fast responses and quota savings
     String json;
-    if (strstr(model_name, "1.5") != NULL) {
-        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
-    } else {
+    if (strstr(model_name, "3.") != NULL) {
         json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingLevel\":\"MINIMAL\"}}}";
+    } else if (strstr(model_name, "2.5") != NULL) {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+    } else {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
     }
 
     String raw = sendHttpsRequest(endpoint, json);
@@ -876,9 +912,13 @@ bool GeminiClient::askAsync(const char* query) {
     if (query && strlen(query) > 0) {
         strncpy(async_query_buf, query, sizeof(async_query_buf) - 1);
         async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+        strncpy(last_transcription, query, sizeof(last_transcription) - 1);
+        last_transcription[sizeof(last_transcription) - 1] = '\0';
     } else {
         strncpy(async_query_buf, "Hello!", sizeof(async_query_buf) - 1);
         async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+        strncpy(last_transcription, "Hello!", sizeof(last_transcription) - 1);
+        last_transcription[sizeof(last_transcription) - 1] = '\0';
     }
 
     is_async_running = true;
@@ -908,9 +948,13 @@ bool GeminiClient::askAsync(const char* query) {
     if (query && strlen(query) > 0) {
         strncpy(async_query_buf, query, sizeof(async_query_buf) - 1);
         async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+        strncpy(last_transcription, query, sizeof(last_transcription) - 1);
+        last_transcription[sizeof(last_transcription) - 1] = '\0';
     } else {
         strncpy(async_query_buf, "Hello!", sizeof(async_query_buf) - 1);
         async_query_buf[sizeof(async_query_buf) - 1] = '\0';
+        strncpy(last_transcription, "Hello!", sizeof(last_transcription) - 1);
+        last_transcription[sizeof(last_transcription) - 1] = '\0';
     }
     is_async_running = false;
     is_async_success = ask(async_query_buf, async_out_msg, async_out_emote, async_out_act);
@@ -949,12 +993,14 @@ void GeminiClient::runAsyncWorker() {
     endpoint += ":generateContent?key=";
     endpoint += api_key;
 
-    // Use thinkingConfig with thinkingLevel: MINIMAL for fast ~4s responses across Gemini 3.x models
+    // Free Tier optimization: minimize/disable reasoning tokens for ultra-fast responses and quota savings
     String json;
-    if (strstr(model_name, "1.5") != NULL) {
-        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
-    } else {
+    if (strstr(model_name, "3.") != NULL) {
         json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingLevel\":\"MINIMAL\"}}}";
+    } else if (strstr(model_name, "2.5") != NULL) {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300,\"thinkingConfig\":{\"thinkingBudget\":0}}}";
+    } else {
+        json = "{\"contents\":[{\"parts\":[{\"text\":\"" + sanitized + "\"}]}],\"generationConfig\":{\"temperature\":0.7,\"maxOutputTokens\":300}}";
     }
 
     String raw = sendHttpsRequest(endpoint, json);

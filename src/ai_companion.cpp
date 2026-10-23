@@ -4,11 +4,15 @@
 #ifdef ARDUINO
 #include <Arduino.h>
 #include <Preferences.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include "hw_config.h"
 #include "display.h"
 #include "anim_engine.h"
 #include "spectrum_analyzer.h"
 #include "audio_player.h"
+#include "minimp3.h"
 #else
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +47,14 @@ AICompanion::AICompanion() :
     visual_mode(VISUAL_HYBRID),
     current_mood(MOOD_IDLE),
     sound_enabled(true),
+    voice_mode(VOICE_MODE_SFX),
+    trigger_word_enabled(false),
+    trig_state(TRIG_STATE_IDLE),
+    trig_state_start_ms(0),
+    trig_s1_start_ms(0),
+#ifndef ARDUINO
+    trig_sim_time_ms(0),
+#endif
     neko_overlay_on_anim(true),
     speed_index(2),
     emote_end_time(0),
@@ -83,6 +95,9 @@ void AICompanion::loadSettings() {
         current_type = (CompanionType)prefs.getUChar("type", (uint8_t)COMPANION_CAT);
         visual_mode = (CompanionVisualMode)prefs.getUChar("vmode", (uint8_t)VISUAL_HYBRID);
         sound_enabled = prefs.getBool("snd", true);
+        voice_mode = (CompanionVoiceMode)prefs.getUChar("vmode_snd", (uint8_t)VOICE_MODE_SFX);
+        if (voice_mode >= VOICE_MODE_COUNT) voice_mode = VOICE_MODE_SFX;
+        trigger_word_enabled = prefs.getBool("trig", false);
         neko_overlay_on_anim = prefs.getBool("overlay", true);
         speed_index = prefs.getUChar("spd", 2);
         if (speed_index >= SPEED_PRESET_COUNT) speed_index = 2;
@@ -99,6 +114,8 @@ void AICompanion::saveSettings() {
         prefs.putUChar("type", (uint8_t)current_type);
         prefs.putUChar("vmode", (uint8_t)visual_mode);
         prefs.putBool("snd", sound_enabled);
+        prefs.putUChar("vmode_snd", (uint8_t)voice_mode);
+        prefs.putBool("trig", trigger_word_enabled);
         prefs.putBool("overlay", neko_overlay_on_anim);
         prefs.putUChar("spd", speed_index);
         prefs.end();
@@ -332,6 +349,368 @@ void AICompanion::playChirp() {
     audioPlayer.playTestTone(1567, 80); // G6
 #endif
 }
+
+void AICompanion::cycleVoiceMode() {
+    uint8_t next = ((uint8_t)voice_mode + 1) % (uint8_t)VOICE_MODE_COUNT;
+    setVoiceMode((CompanionVoiceMode)next);
+}
+
+void AICompanion::setVoiceMode(CompanionVoiceMode mode) {
+    if (mode < VOICE_MODE_COUNT) {
+        voice_mode = mode;
+        saveSettings();
+        if (voice_mode == VOICE_MODE_SFX) {
+            if (current_type == COMPANION_CAT) playMeow();
+            else playChirp();
+        }
+    }
+}
+
+const char* AICompanion::getVoiceModeName() const {
+    switch (voice_mode) {
+        case VOICE_MODE_SFX: return "SFX (CHIPTUNE)";
+        case VOICE_MODE_ON_DEVICE_TTS: return "ON-DEVICE RETRO";
+        case VOICE_MODE_STREAMING_TTS: return "CLOUD STREAMING";
+        case VOICE_MODE_MUTE: return "MUTE (TEXT ONLY)";
+        default: return "SFX";
+    }
+}
+
+const char* AICompanion::getVoiceModeShortName() const {
+    switch (voice_mode) {
+        case VOICE_MODE_SFX: return "SFX";
+        case VOICE_MODE_ON_DEVICE_TTS: return "DEVICE";
+        case VOICE_MODE_STREAMING_TTS: return "STREAM";
+        case VOICE_MODE_MUTE: return "MUTE";
+        default: return "SFX";
+    }
+}
+
+void AICompanion::setTriggerWordEnabled(bool enabled) {
+    trigger_word_enabled = enabled;
+    resetTriggerDetector();
+    saveSettings();
+}
+
+void AICompanion::resetTriggerDetector() {
+    trig_state = TRIG_STATE_IDLE;
+    trig_state_start_ms = 0;
+    trig_s1_start_ms = 0;
+}
+
+bool AICompanion::processTriggerAudio(float rms, float confidence, float pitch) {
+    if (!trigger_word_enabled) return false;
+
+    // Detect vocal speech frames:
+    // Human voice pitch typically in 65 Hz - 450 Hz with correlation confidence >= 0.20
+    bool isVoice = (confidence >= 0.20f && rms >= 10.0f && pitch >= 65.0f && pitch <= 450.0f);
+
+    uint32_t now = 0;
+#ifdef ARDUINO
+    now = millis();
+#else
+    trig_sim_time_ms += 35;
+    now = trig_sim_time_ms;
+#endif
+
+    switch (trig_state) {
+        case TRIG_STATE_IDLE:
+            if (isVoice) {
+                trig_state = TRIG_STATE_SYLLABLE_1;
+                trig_state_start_ms = now;
+                trig_s1_start_ms = now;
+            }
+            break;
+
+        case TRIG_STATE_SYLLABLE_1: {
+            uint32_t dur = now - trig_state_start_ms;
+            if (!isVoice) {
+                // Speech dropped! Did syllable 1 last long enough for "Hey"? (~90ms - 450ms)
+                if (dur >= 90 && dur <= 450) {
+                    trig_state = TRIG_STATE_GAP;
+                    trig_state_start_ms = now;
+                } else {
+                    trig_state = TRIG_STATE_IDLE;
+                }
+            } else if (dur > 500) {
+                // Continuous talking or loud noise without cadence gap
+                trig_state = TRIG_STATE_IDLE;
+            }
+            break;
+        }
+
+        case TRIG_STATE_GAP: {
+            uint32_t gapDur = now - trig_state_start_ms;
+            if (isVoice) {
+                // Syllable 2 started after valid inter-syllable gap (~40ms - 280ms)
+                if (gapDur >= 40 && gapDur <= 280) {
+                    trig_state = TRIG_STATE_SYLLABLE_2;
+                    trig_state_start_ms = now;
+                } else {
+                    trig_state = TRIG_STATE_IDLE;
+                }
+            } else if (gapDur > 300) {
+                // Waited too long for second syllable
+                trig_state = TRIG_STATE_IDLE;
+            }
+            break;
+        }
+
+        case TRIG_STATE_SYLLABLE_2: {
+            uint32_t s2Dur = now - trig_state_start_ms;
+            uint32_t totalDur = now - trig_s1_start_ms;
+            if ((!isVoice && s2Dur >= 90 && totalDur >= 350 && totalDur <= 1250) ||
+                (isVoice && s2Dur >= 160 && totalDur >= 380 && totalDur <= 1250)) {
+                trig_state = TRIG_STATE_IDLE;
+                return true;
+            } else if (!isVoice) {
+                trig_state = TRIG_STATE_IDLE;
+            } else if (s2Dur > 600 || totalDur > 1400) {
+                trig_state = TRIG_STATE_IDLE;
+            }
+            break;
+        }
+    }
+
+    return false;
+}
+
+void AICompanion::speak(const char* text) {
+    if (!sound_enabled || voice_mode == VOICE_MODE_MUTE || !text || strlen(text) == 0) return;
+#ifdef ARDUINO
+    if (audioPlayer.isPlaying()) return; // Don't interrupt music playback
+
+    if (voice_mode == VOICE_MODE_SFX) {
+        if (current_type == COMPANION_CAT) playMeow();
+        else playChirp();
+        return;
+    }
+
+    if (voice_mode == VOICE_MODE_STREAMING_TTS) {
+        if (WiFi.status() == WL_CONNECTED) {
+            if (streamCloudVoice(text)) {
+                return;
+            }
+        }
+        // Fallback to on-device embedded voice if offline or stream failed
+    }
+
+    speakEmbedded(text);
+#else
+    (void)text;
+#endif
+}
+
+#ifdef ARDUINO
+void AICompanion::speakEmbedded(const char* text) {
+    if (!text || strlen(text) == 0) return;
+    if (audioPlayer.isPlaying()) return;
+
+    // Pitch: DJ Neko has a cute, higher chiptune frequency (~290 Hz), Mochi has energetic robot pitch (~200 Hz)
+    float basePitch = (current_type == COMPANION_CAT) ? 290.0f : 200.0f;
+    const uint32_t sampleRate = 22050;
+    audioPlayer.prepareForStream(sampleRate);
+
+    struct Formant { float f1; float f2; };
+    auto getFormant = [](char c) -> Formant {
+        switch (tolower((unsigned char)c)) {
+            case 'a': return { 800.0f, 1200.0f }; // "ah"
+            case 'e': return { 500.0f, 1800.0f }; // "eh"
+            case 'i': return { 320.0f, 2200.0f }; // "ee"
+            case 'o': return { 500.0f, 1000.0f }; // "oh"
+            case 'u': return { 350.0f,  800.0f }; // "oo"
+            case 'y': return { 320.0f, 2000.0f };
+            case 'r': return { 450.0f, 1300.0f };
+            case 'l': return { 400.0f, 1100.0f };
+            case 'm':
+            case 'n': return { 280.0f, 1400.0f };
+            default:  return { 480.0f, 1500.0f };
+        }
+    };
+
+    size_t len = strlen(text);
+    if (len > 90) len = 90; // Limit length for crisp speech bursts
+
+    int16_t chunkBuffer[256 * 2];
+    size_t bufFrames = 0;
+
+    float glottalPhase = 0.0f;
+    float f1Phase = 0.0f;
+    float f2Phase = 0.0f;
+    uint32_t noiseState = 123456789;
+
+    for (size_t idx = 0; idx < len; idx++) {
+        char ch = text[idx];
+        if (ch == ' ' || ch == ',' || ch == '.' || ch == '!' || ch == '?' || ch == '-' || ch == ':') {
+            size_t pauseSamples = (ch == '.' || ch == '!' || ch == '?') ? 900 : 450;
+            for (size_t s = 0; s < pauseSamples; s++) {
+                chunkBuffer[bufFrames * 2] = 0;
+                chunkBuffer[bufFrames * 2 + 1] = 0;
+                bufFrames++;
+                if (bufFrames >= 256) {
+                    audioPlayer.playStreamChunk(chunkBuffer, bufFrames);
+                    bufFrames = 0;
+                }
+            }
+            continue;
+        }
+
+        Formant fmt = getFormant(ch);
+        char lower = tolower((unsigned char)ch);
+        bool isNoise = (lower == 's' || lower == 'f' || lower == 't' || lower == 'k' || lower == 'p' || lower == 'c' || lower == 'x' || lower == 'z');
+        bool isVoiced = !isNoise;
+
+        bool isVowel = (lower == 'a' || lower == 'e' || lower == 'i' || lower == 'o' || lower == 'u' || lower == 'y');
+        size_t phonemeSamples = isVowel ? 950 : 600;
+
+        float f1Inc = (2.0f * (float)M_PI * fmt.f1) / (float)sampleRate;
+        float f2Inc = (2.0f * (float)M_PI * fmt.f2) / (float)sampleRate;
+        float pitchInc = (2.0f * (float)M_PI * basePitch) / (float)sampleRate;
+
+        for (size_t s = 0; s < phonemeSamples; s++) {
+            float sample = 0.0f;
+            if (isVoiced) {
+                glottalPhase += pitchInc;
+                if (glottalPhase >= 2.0f * (float)M_PI) glottalPhase -= 2.0f * (float)M_PI;
+                float glottal = (sinf(glottalPhase) + 0.5f * sinf(glottalPhase * 2.0f));
+
+                f1Phase += f1Inc;
+                if (f1Phase >= 2.0f * (float)M_PI) f1Phase -= 2.0f * (float)M_PI;
+                f2Phase += f2Inc;
+                if (f2Phase >= 2.0f * (float)M_PI) f2Phase -= 2.0f * (float)M_PI;
+
+                sample = glottal * (0.6f * sinf(f1Phase) + 0.4f * sinf(f2Phase)) * 7500.0f;
+            } else {
+                noiseState = noiseState * 1664525u + 1013904223u;
+                int16_t white = (int16_t)(noiseState >> 16);
+                sample = ((float)white / 32768.0f) * 5500.0f;
+            }
+
+            float env = 1.0f;
+            if (s < 80) env = (float)s / 80.0f;
+            else if (s > phonemeSamples - 80) env = (float)(phonemeSamples - s) / 80.0f;
+
+            int16_t outVal = (int16_t)(sample * env);
+            chunkBuffer[bufFrames * 2] = outVal;
+            chunkBuffer[bufFrames * 2 + 1] = outVal;
+            bufFrames++;
+
+            if (bufFrames >= 256) {
+                audioPlayer.playStreamChunk(chunkBuffer, bufFrames);
+                bufFrames = 0;
+            }
+        }
+    }
+
+    if (bufFrames > 0) {
+        audioPlayer.playStreamChunk(chunkBuffer, bufFrames);
+        bufFrames = 0;
+    }
+}
+
+bool AICompanion::streamCloudVoice(const char* text) {
+    if (!text || strlen(text) == 0) return false;
+    if (WiFi.status() != WL_CONNECTED) return false;
+
+    String encoded = "";
+    size_t tLen = strlen(text);
+    if (tLen > 100) tLen = 100;
+    for (size_t i = 0; i < tLen; i++) {
+        char c = text[i];
+        if (isalnum((unsigned char)c)) {
+            encoded += c;
+        } else if (c == ' ') {
+            encoded += "+";
+        } else {
+            char hexBuf[4];
+            snprintf(hexBuf, sizeof(hexBuf), "%%%02X", (unsigned char)c);
+            encoded += hexBuf;
+        }
+    }
+
+    String url = "https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=" + encoded;
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(6000);
+
+    HTTPClient http;
+    if (!http.begin(client, url)) return false;
+
+    http.addHeader("User-Agent", "Mozilla/5.0");
+    http.setTimeout(6000);
+
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        http.end();
+        client.stop();
+        return false;
+    }
+
+    WiFiClient *stream = http.getStreamPtr();
+    if (!stream) {
+        http.end();
+        client.stop();
+        return false;
+    }
+
+    mp3dec_t mp3;
+    mp3dec_init(&mp3);
+    mp3dec_frame_info_t info;
+
+    uint8_t mp3Buffer[1024];
+    int16_t pcmBuffer[MINIMP3_MAX_SAMPLES_PER_FRAME];
+    size_t bytesInBuffer = 0;
+
+    audioPlayer.prepareForStream(24000);
+
+    unsigned long tStart = millis();
+    while (http.connected() && (stream->available() > 0 || bytesInBuffer > 0) && (millis() - tStart < 8000)) {
+        if (stream->available() > 0 && bytesInBuffer < sizeof(mp3Buffer) - 256) {
+            size_t bytesToRead = sizeof(mp3Buffer) - bytesInBuffer;
+            size_t n = stream->readBytes(&mp3Buffer[bytesInBuffer], bytesToRead);
+            bytesInBuffer += n;
+        }
+
+        if (bytesInBuffer < 16) break;
+
+        int samples = mp3dec_decode_frame(&mp3, mp3Buffer, (int)bytesInBuffer, pcmBuffer, &info);
+        if (info.frame_bytes > 0) {
+            bytesInBuffer -= info.frame_bytes;
+            if (bytesInBuffer > 0) {
+                memmove(mp3Buffer, &mp3Buffer[info.frame_bytes], bytesInBuffer);
+            }
+
+            if (samples > 0) {
+                if (info.channels == 1) {
+                    int16_t stereoBuf[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
+                    for (int s = 0; s < samples; s++) {
+                        stereoBuf[s * 2] = pcmBuffer[s];
+                        stereoBuf[s * 2 + 1] = pcmBuffer[s];
+                    }
+                    audioPlayer.playStreamChunk(stereoBuf, samples);
+                } else {
+                    audioPlayer.playStreamChunk(pcmBuffer, samples);
+                }
+            }
+        } else {
+            if (bytesInBuffer > 1) {
+                bytesInBuffer--;
+                memmove(mp3Buffer, &mp3Buffer[1], bytesInBuffer);
+            } else {
+                bytesInBuffer = 0;
+            }
+        }
+    }
+
+    http.end();
+    client.stop();
+    return true;
+}
+#else
+void AICompanion::speakEmbedded(const char* text) { (void)text; }
+bool AICompanion::streamCloudVoice(const char* text) { (void)text; return false; }
+#endif
 
 void AICompanion::updateReactivity(float dt) {
     anim_timer += dt;
